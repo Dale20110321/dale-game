@@ -109,22 +109,32 @@ function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a
 const LEVEL_NAMES=["平原热身","丘陵骑行","峡谷穿越","坡道试炼","山脊竞速","溪谷漂移","悬崖攀爬","高峰攀登","岩脊飞跃","雪线冲刺","云顶爬升","雷暴山道","峡谷深处","孤峰之路","断崖长廊","极峰挑战","星海赛道","天堑大桥","云端之巅","终极征服"];
 const LEVELS=Array.from({length:20},(_,i)=>{
   const n=i+1;
-  const amp=Math.round(24+i*2.5);          // 地形起伏难度递增
+  const amp=Math.round(60+i*24);           // 坡高 60→516
+  const slopeBase=10+i*3.3;                // 基础坡度角 10°→72.7°
   const len=4000+i*400;                    // 路程递增 4000→11600
   const coinN=16+Math.floor(i*1.5);        // 金币递增 16→44
-  const ramps=[];
-  return {name:LEVEL_NAMES[i],amp,wk:1+i*0.05,len,gapN:0,ramps,coinN,maxS:600+i*20,seed:11+i*7};
+  const nP=2+Math.floor(i/2);              // 山峰数量递增 2→11（每峰=上坡+回坡）
+  const steps=[];
+  for(let r=0;r<nP;r++){
+    const deg=Math.min(60,slopeBase+4*r);  // 关内坡度递增（上限60°可真爬，垂直墙会弹飞）
+    const h=Math.round(amp*(0.55+0.45*r/nP));
+    const w=Math.max(14,Math.round(h/Math.tan(deg*Math.PI/180)));
+    const cx=Math.round(len*(0.16+0.7*r/nP));
+    steps.push({cx,A:h,w});            // 上坡
+    steps.push({cx:cx+Math.max(w*2,40),A:-h,w}); // 回坡（净偏移=0，基线恒定）
+  }
+  return {name:LEVEL_NAMES[i],amp,wk:1+i*0.05,len,gapN:i<3?0:Math.min(4,1+Math.floor((i-3)/3)),ramps:[],steps,coinN,maxS:600+i*20,seed:11+i*7};
 });
 let lvIdx=0,finishX=0,gaps=[],coins=[],decoTree=[],decoRock=[];
 const SEED=new Map();
 
 function hillY(x){const L=LEVELS[lvIdx];
-  // 难度渐进：前12%路程绝对平地起步，随后平滑过渡到大坡/大坑
+  // 前12%平地起步，随后平滑过渡到台地陡坡（tanh 天然无尖角）
   const progress=clamp((x-L.len*0.12)/(L.len*0.6),0,1);
   const ease=progress*progress*(3-2*progress);
-  const ampFactor=ease;
-  // 只用低频正弦（波长2000px+）：平缓大坡与深谷，无小丘
-  return 300+(Math.sin(x*0.0028+L.seed)*L.amp*1.2+Math.sin(x*0.0011+L.seed*2)*L.amp*1.8+Math.sin(x*0.0007+L.seed*3)*L.amp*2.6)*ampFactor;}
+  let y=300;
+  for(const s of L.steps)y+=s.A*Math.tanh((x-s.cx)/s.w);
+  return 300+(y-300)*ease;}
 function featH(x){return 0;}
 function isGap(x){for(const g of gaps)if(x>g.start&&x<g.end)return g;return null;}
 function groundY(x){if(isGap(x))return Infinity;return hillY(x)-featH(x);}
@@ -135,9 +145,10 @@ function buildLevel(idx){
   lvIdx=idx;const L=LEVELS[idx];const rng=mulberry32(1000+idx*97);
   finishX=L.len;gaps=[];coins=[];
   let placed=0,g=0;
-  while(placed<L.gapN&&g++<300){const gx=L.len*0.35+rng()*(L.len*0.55);
-    const onR=L.ramps.some(o=>gx>o.x-o.w&&gx<o.x+o.w);
-    if(!onR){const gw=48+rng()*34;gaps.push({start:gx,end:gx+gw});placed++;}}
+  while(placed<L.gapN&&g++<300){const gx=L.len*0.3+rng()*(L.len*0.6);
+    // 裂缝避开陡坡台地，放平缓段（靠下坡冲劲或过顶飞跃越过）
+    const nearStep=L.steps.some(s=>Math.abs(gx-s.cx)<s.w*1.5);
+    if(!nearStep){const gw=Math.min(150,50+idx*5+rng()*20);gaps.push({start:gx,end:gx+gw});placed++;}}
   gaps.sort((a,b)=>a.start-b.start);
   for(let i=0;i<L.coinN;i++){const cx=L.len*0.15+i*(L.len*0.75)/(L.coinN-1);
     coins.push({x:cx,y:groundY(cx)-35,taken:false,ph:rng()*6.28});}
@@ -149,21 +160,22 @@ function buildLevel(idx){
 
 // ---------------- 物理 ----------------
 const G=1000,SUB=6,DT=1/60,WHEEL_R=12,WHEELBASE=38,SEAT_H=26;
-let DRIVE=400,BRAKE=120,JUMP_V=340,LAMP_STUN=0.9,MAXV=130;
+let DRIVE=650,BRAKE=120,JUMP_V=340,LAMP_STUN=0.9,MAXV=130;
 let slopeCoeff=0.35,rollCoeff=0.62,crashMargin=2;
-let susAbsorb=0.25,susClimb=5,susRot=0.70;
+let susAbsorb=0.25,susClimb=6,susRot=0.70;
 let gold=0,upgrades={engine:0,tire:0,frame:0,susp:0};
-const UP_COST=[0,8,18,30];
+const MAX_LV=100;
+function upCost(lv){return 30+lv*5;} // 100级价格：Lv1=35 → Lv100=530
 function applyUpgrades(){
-  // 引擎：爬坡力+极速；轮胎：额外牵引力+极速；车架：耐摔；减震器：落地缓冲+稳车
-  DRIVE=400+60*upgrades.engine+45*upgrades.tire;
-  MAXV=130+18*upgrades.engine+8*upgrades.tire;
-  crashMargin=2+2.5*upgrades.frame;
-  LAMP_STUN=Math.max(0.3,0.9-0.2*upgrades.frame);
+  // 100级：引擎爬坡+极速；轮胎牵引+极速；车架耐摔；减震落地缓冲
+  DRIVE=650+25*upgrades.engine+20*upgrades.tire;
+  MAXV=Math.min(350,130+2.5*upgrades.engine+1.5*upgrades.tire);
+  crashMargin=Math.min(12,2+0.1*upgrades.frame);
+  LAMP_STUN=Math.max(0.3,0.9-0.006*upgrades.frame);
   const sus=upgrades.susp||0;
-  susAbsorb=Math.max(0.10,0.25-0.05*sus);  // 落地垂直冲击保留：0.25→0.10（更软）
-  susClimb=Math.max(2,5-sus);              // 平滑贴地速率：5→2（升级更柔）
-  susRot=Math.max(0.40,0.70-0.10*sus);     // 旋转阻尼：0.70→0.40（升级更稳）
+  susAbsorb=Math.max(0.05,0.25-0.002*sus);
+  susClimb=Math.max(1,6-0.05*sus);
+  susRot=Math.max(0.30,0.70-0.004*sus);
 }
 const bike={rear:{x:0,y:0,px:0,py:0},front:{x:0,y:0,px:0,py:0},head:{x:0,y:0,px:0,py:0},
   grounded:0,speed:0,stunned:0,impact:0,wheelRear:0,wheelFront:0,locked:true,spawnX:40,
@@ -259,16 +271,20 @@ function stepPhysics(){
     bike.grounded=0;bike.impact=0;
     if(bike.airT<=0)for(const [p,srf,flag] of [[bike.rear,RS,"rearGr"],[bike.front,FS,"frontGr"]]){
       bike[flag]=(p.y>srf-12);
-      if(bike[flag]){
+      if(p.y>srf-60){ // 轮子在坡面上方60px内即开始吸附（爬陡坡不悬空飞行）
         // 重力沿坡：下坡自然加速、上坡减速（真实物理）
         const ginfo=groundInfo(p.x);
-        if(ginfo.y!==Infinity)p.x+=(G*ginfo.m/Math.hypot(1,ginfo.m))*0.7*sq;
+        if(ginfo.y!==Infinity){
+          p.x+=(G*ginfo.m/Math.hypot(1,ginfo.m))*0.55*sq;
+          // 极陡(45°+)轻微阻尼：防高速冲坡弹飞，不影响正常爬坡
+          if(ginfo.m<-1.0)p.px+=(p.x-p.px)*0.01;
+        }
         const depth=p.y-srf;
         if(depth>8){
-          // 压入坡面较深（陡坡/尖峰）：平滑爬升，防猛抬弹飞
+          // 压入坡面较深（陡坡/尖峰）：平滑爬升，吸收上行动量，贴坡不弹飞
           p.y=Math.max(srf,p.y-susClimb);
           const vy=p.y-p.py;
-          if(vy>0)p.py=p.y-vy*susAbsorb;
+          if(vy<0){p.py=p.y;}else if(vy>0){p.py=p.y-vy*susAbsorb;}
         }else if(depth<-8){
           // 越过坡顶/下坡悬空：平滑下放（吸收向下动量），防突然拉回
           p.y=Math.min(srf,p.y+susClimb);
@@ -314,7 +330,7 @@ function stepPhysics(){
     const txx=-dyh/disth,tyy=dxh/disth;
     const hvx=bike.head.x-bike.head.px,hvy=bike.head.y-bike.head.py;
     const vt=hvx*txx+hvy*tyy;
-    const vr=vt*susRot;
+    const vr=vt*(bike.grounded>0?susRot:0.40);
     bike.head.px=bike.head.x-(hvx-(vt-vr)*txx);
     bike.head.py=bike.head.y-(hvy-(vt-vr)*tyy);
     // 头管着地摔车
@@ -331,8 +347,19 @@ function stepPhysics(){
     bike.front.px+=(bike.front.x-bike.front.px)*dec;
     bike.head.px+=(bike.head.x-bike.head.px)*dec;
   }
-  // 速度上限（防数值爆炸）
+  // 垂直速度上限（防陡坡抛射式起飞/无限下落）
+  const cvy=(bike.front.y-bike.front.py)/DT;
+  if(Math.abs(cvy)>500){
+    const lim=500*Math.sign(cvy);
+    bike.front.py=bike.front.y-lim*DT;bike.rear.py=bike.rear.y-lim*DT;bike.head.py=bike.head.y-lim*DT;
+  }
+  // 速度上限（防数值爆炸）：上坡提前软减速，冲坡动量平滑吸收
   let vh=(bike.front.x-bike.front.px)/DT;
+  const gmG=groundInfo(bike.front.x);
+  if(gmG.y!==Infinity&&gmG.m<0){
+    const vT=Math.max(60,MAXV/(1+(-gmG.m)*1.3));
+    if(vh>vT)vh=vT+(vh-vT)*0.10;
+  }
   if(vh>MAXV){vh=MAXV;}else if(vh<-MAXV){vh=-MAXV;}
   if(vh!==(bike.front.x-bike.front.px)/DT){
     bike.front.px=bike.front.x-vh*DT;bike.rear.px=bike.rear.x-vh*DT;bike.head.px=bike.head.x-vh*DT;
@@ -347,12 +374,12 @@ function nextLevel(){
   if(lvIdx<LEVELS.length-1){lvIdx++;buildLevel(lvIdx);resetBike(40);crashed=false;clearing=false;camX=0;HUD.coins.textContent="◎ "+gold;maxWheelieDist=0;showToast("关卡 "+(lvIdx+1)+" · "+LEVELS[lvIdx].name,800);}
   else{state="ended";showToast("🎉 全部通关！");setTimeout(()=>{overlay.classList.remove("hidden");overlay.children[1].textContent="恭喜！你骑着这辆 100% 物理驱动的自行车征服了所有关卡！";},900);}}
 function crash(){crashed=true;crashTimer=1.1;bike.stunned=LAMP_STUN;playCrashSound();emitParticles(bike.head.x,bike.head.y,20,{color:"#ff6b35",spd:2,life:25,size:3,grav:0.06});}
-function respawn(){resetBike(40);crashed=false;camX=0;showToast("! 头着地：重新出发",420);}
+function respawn(){resetBike(lastSafeX);bike.locked=false;crashed=false;camX=lastSafeX-W*0.35;showToast("! 头着地：回到安全点",420);}
 function pitRewind(){resetBike(lastSafeX);bike.locked=false;crashed=false;camX=lastSafeX-W*0.35;showToast("落入鸿沟，回到安全点重新跳",600);}
 
 function updateCoins(){
   const mx=(bike.rear.x+bike.front.x)/2,my=(bike.rear.y+bike.front.y)/2;
-  for(const c of coins){if(!c.taken&&Math.hypot(c.x-mx,c.y-my)<45){c.taken=true;gold++;save();playCoinSound();emitParticles(c.x,c.y,12,{color:"#ffd700",spd:2.5,life:30,size:3,grav:0.03});HUD.coins.textContent="◎ "+gold;}}
+  for(const c of coins){if(!c.taken&&Math.hypot(c.x-mx,c.y-my)<45){c.taken=true;gold+=30;save();playCoinSound();emitParticles(c.x,c.y,12,{color:"#ffd700",spd:2.5,life:30,size:3,grav:0.03});HUD.coins.textContent="◎ "+gold;}}
 }
 function emitRideDust(){
   if(bike.grounded>0&&!crashed&&Math.abs(bike.speed)>30){
@@ -546,14 +573,14 @@ function renderShop(){
     const lv=upgrades[k];
     document.getElementById("lv-"+k).textContent="Lv "+lv;
     const btn=document.querySelector('[data-buy="'+k+'"]');
-    if(lv>=3){btn.textContent="已满级";btn.disabled=true;btn.style.opacity=.5;}
-    else{const c=UP_COST[lv+1];btn.textContent="升级 "+c+" 🪙";btn.disabled=gold<c;}
+    if(lv>=MAX_LV){btn.textContent="已满级";btn.disabled=true;btn.style.opacity=.5;}
+    else{const c=upCost(lv+1);btn.textContent="升级 "+c+" 🪙";btn.disabled=gold<c;}
   }
 }
 function buyUpgrade(k){
   const lv=upgrades[k];
-  if(lv>=3)return;
-  const c=UP_COST[lv+1];
+  if(lv>=MAX_LV)return;
+  const c=upCost(lv+1);
   if(gold<c){document.getElementById("shopNote").textContent="金币不足，去关卡里收集吧！";return;}
   gold-=c;upgrades[k]=lv+1;applyUpgrades();save();renderShop();
   document.getElementById("shopNote").textContent="升级成功！";
@@ -562,7 +589,9 @@ function buyUpgrade(k){
 function loadSave(){
   try{gold=parseInt(localStorage.getItem("bike_gold")||"0",10)||0;
     const u=JSON.parse(localStorage.getItem("bike_up")||"{}");
-    upgrades.engine=Math.min(3,u.engine||0);upgrades.tire=Math.min(3,u.tire||0);upgrades.frame=Math.min(3,u.frame||0);upgrades.susp=Math.min(3,u.susp||0);
+    upgrades.engine=Math.min(MAX_LV,u.engine||0);upgrades.tire=Math.min(MAX_LV,u.tire||0);upgrades.frame=Math.min(MAX_LV,u.frame||0);upgrades.susp=Math.min(MAX_LV,u.susp||0);
+    // 旧存档迁移：金币单位×10（版本1→2）
+    if(localStorage.getItem("bike_v")!=="2"){gold*=10;localStorage.setItem("bike_v","2");save();}
   }catch(e){}
   applyUpgrades();
 }
@@ -598,6 +627,7 @@ function showToast(txt,ms){toast.textContent=txt;toast.style.opacity=1;toast.sty
 
 function startGame(m){
   lastMode=m||lastMode;mode=lastMode;
+  overlay.children[1].textContent="两种模式任你选：闯关模式挑战更长赛道；自由模式无限畅骑，沿途收集金币升级车辆！";
   if(mode==="free"){freeInit();}else{buildLevel(0);}
   resetBike(40);crashed=false;camX=0;particles=[];
   maxWheelieDist=0;airTime=0;wheelieDist=0;landed=false;
@@ -630,7 +660,7 @@ function loop(t){
       updateCoins();
       if(mode==="free"){freeFill();}
       else if(!clearing&&(bike.rear.x+bike.front.x)/2>finishX){
-        clearing=true;gold+=5;save();showToast("🏁 通关！🪙+5");setTimeout(()=>nextLevel(),800);
+        clearing=true;gold+=150;save();showToast("🏁 通关！🪙+150");setTimeout(()=>nextLevel(),800);
       }
     }
   }
