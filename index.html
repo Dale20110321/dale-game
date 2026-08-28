@@ -1,0 +1,1065 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>自行车闯关 · 物理引擎版</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{width:100%;height:100%;overflow:hidden;background:#0d1b2a;font-family:"Segoe UI",system-ui,sans-serif;}
+  #wrap{position:relative;width:100vw;height:100vh;}
+  canvas{display:block;width:100vw;height:100vh;}
+  #hud{position:absolute;top:14px;left:14px;color:#fff;text-shadow:0 2px 4px rgba(0,0,0,.6);pointer-events:none;user-select:none;}
+  #hud .lvl{font-size:22px;font-weight:700;}
+  #hud .spd{font-size:16px;margin-top:2px;opacity:.95;}
+  #hud .coins{font-size:16px;margin-top:2px;color:#ffd166;}
+  #hud .prog{font-size:12px;margin-top:6px;opacity:.85;}
+  #hud .bar{width:200px;height:8px;background:rgba(255,255,255,.2);border-radius:4px;margin-top:3px;overflow:hidden;}
+  #hud .bar i{display:block;height:100%;width:0%;background:linear-gradient(90deg,#06d6a0,#ffd166);}
+  #overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(8,20,32,.74);color:#fff;text-align:center;backdrop-filter:blur(2px);}
+  #overlay.hidden{display:none;}
+  #overlay h1{font-size:44px;letter-spacing:2px;margin-bottom:10px;}
+  #overlay .sub{font-size:15px;opacity:.9;margin-bottom:16px;max-width:560px;line-height:1.7;}
+  #overlay .keys{font-size:13px;opacity:.8;margin-bottom:4px;}
+  #overlay .lvlDesc{font-size:14px;color:#ffd166;margin-top:16px;font-weight:600;}
+  .btn{margin-top:16px;padding:12px 36px;font-size:18px;font-weight:700;color:#fff;background:linear-gradient(135deg,#06d6a0,#118ab2);border:none;border-radius:30px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.4);}
+  .btn:hover{filter:brightness(1.12);}
+  .btn.ghost{background:rgba(255,255,255,.12);}
+  #shop{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(8,20,32,.88);color:#fff;text-align:center;z-index:30;}
+  #shop.hidden{display:none;}
+  #shop h2{font-size:30px;letter-spacing:1px;margin-bottom:4px;}
+  #shop .upGold{font-size:22px;color:#ffd166;margin:6px 0 12px;}
+  .upItm{display:flex;align-items:center;gap:14px;background:rgba(255,255,255,.08);border-radius:12px;padding:10px 18px;margin:6px 0;width:360px;max-width:92vw;}
+  .upT{font-size:17px;font-weight:700;width:66px;text-align:left;}
+  .upD{font-size:12px;opacity:.7;flex:1;text-align:left;}
+  .upL{width:54px;color:#4cff88;font-weight:700;}
+  #shop .btn.sm{padding:8px 16px;font-size:13px;margin:0;}
+  #shop .upNote{font-size:13px;color:#ffd166;min-height:18px;margin:8px 0;}
+  #toast{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%);font-size:42px;font-weight:800;color:#fff;text-shadow:0 4px 10px rgba(0,0,0,.55);pointer-events:none;opacity:0;transition:opacity .4s;}
+  #touch{position:absolute;inset:0;pointer-events:none;z-index:25;}
+  #touch.hidden{display:none;}
+  .tbtn{pointer-events:auto;position:absolute;bottom:42px;width:74px;height:74px;border-radius:50%;background:rgba(255,255,255,.16);color:#fff;font-size:28px;border:2px solid rgba(255,255,255,.35);user-select:none;-webkit-user-select:none;touch-action:none;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif;}
+  .tleft{left:18px;}
+  .tright{right:18px;}
+  .tdive{left:50%;transform:translateX(-50%);bottom:12px;width:62px;height:62px;font-size:22px;}
+  .tfull{position:absolute;top:12px;right:12px;z-index:26;bottom:auto;width:46px;height:46px;font-size:18px;}
+  .ttoggle{position:absolute;top:64px;right:12px;z-index:26;bottom:auto;width:44px;height:44px;font-size:17px;background:rgba(255,255,255,.12);}
+  .ttoggle.on{background:rgba(80,255,150,.28);border-color:rgba(120,255,170,.65);}
+  .tbtn:active{background:rgba(255,255,255,.42);}
+  .menuBtns{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:14px;}
+  .menuBtns .btn{margin-top:0;}
+  #modePanel{max-width:640px;max-height:54vh;overflow-y:auto;margin-top:14px;padding:12px;background:rgba(0,0,0,.28);border-radius:14px;text-align:left;}
+  #modePanel.hidden{display:none;}
+  .modeTitle{font-size:17px;font-weight:700;margin-bottom:10px;color:#4cff88;text-align:center;}
+  .lvGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+  .lvCell{padding:9px 4px;background:rgba(255,255,255,.1);border-radius:10px;cursor:pointer;font-size:12px;border:1px solid transparent;text-align:center;}
+  .lvCell:hover{background:rgba(255,255,255,.2);}
+  .lvCell.locked{opacity:.35;cursor:not-allowed;}
+  .lvCell.done{background:rgba(80,220,140,.16);}
+  .lvCell .stars{color:#ffd166;font-size:11px;letter-spacing:1px;}
+  .vehCard{display:flex;align-items:center;gap:12px;background:rgba(255,255,255,.08);border-radius:12px;padding:10px 14px;margin:6px 0;cursor:pointer;text-align:left;width:100%;border:2px solid transparent;}
+  .vehCard.selected{border-color:#4cff88;}
+  .vehCard .vname{font-size:16px;font-weight:700;}
+  .vehCard .vdesc{font-size:12px;opacity:.75;}
+  .vehCard .vstat{font-size:11px;color:#4cff88;margin-top:2px;}
+  .panelNote{text-align:center;font-size:13px;color:#ffd166;margin-top:10px;min-height:16px;}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+  <div id="touch" class="hidden">
+    <button class="tbtn tleft" data-k="left" aria-label="刹车">◀</button>
+    <button class="tbtn tright" data-k="right" aria-label="加速">▶</button>
+    <button class="tbtn tdive" data-k="dive" aria-label="俯冲">▼</button>
+  </div>
+  <button id="fullBtn" class="tbtn tfull" aria-label="全屏">⛶</button>
+  <button id="touchBtn" class="tbtn ttoggle" aria-label="方向键开关">🎮</button>
+  <div id="hud">
+    <div class="lvl" id="lvl">关卡 1</div>
+    <div class="spd" id="speed">0 km/h</div>
+    <div class="coins" id="coins">◎ 0</div>
+    <div class="prog">进度</div>
+    <div class="bar"><i id="prog"></i></div>
+  </div>
+  <div id="toast"></div>
+  <div id="overlay">
+    <h1>🚲 越野自行车</h1>
+    <div class="sub">物理引擎越野：闯关 · 比赛 · 升级 · 多车辆</div>
+    <div class="keys">→/D 加速 &nbsp;←/A 刹车 &nbsp;↑/W/空格 跳跃 &nbsp;↓/S 俯冲 &nbsp;⛶ 全屏</div>
+    <div class="menuBtns">
+      <button class="btn" id="btnLevels">🏁 闯关模式</button>
+      <button class="btn" id="btnRace">🏆 比赛模式</button>
+      <button class="btn" id="btnFree">♾️ 无限模式</button>
+      <button class="btn ghost" id="btnGarage">🏍️ 车库</button>
+      <button class="btn ghost" id="btnShop">🔧 升级车间</button>
+    </div>
+    <div id="modePanel" class="hidden"></div>
+    <div class="lvlDesc" id="lvlDesc"></div>
+  </div>
+  <div id="shop" class="hidden">
+    <h2 id="shopTitle">🛠 升级车间</h2>
+    <div class="upGold">🪙 金币 <span id="shopGold">0</span></div>
+    <div class="upItm"><div class="upT">⚙️ 引擎</div><div class="upD">爬坡力 / 极速</div><div class="upL" id="lv-engine">Lv0</div><button class="btn sm" data-buy="engine">升级</button></div>
+    <div class="upItm"><div class="upT">🛞 轮胎</div><div class="upD">抓地 / 防滑</div><div class="upL" id="lv-tire">Lv0</div><button class="btn sm" data-buy="tire">升级</button></div>
+    <div class="upItm"><div class="upT">🛡️ 车架</div><div class="upD">耐摔</div><div class="upL" id="lv-frame">Lv0</div><button class="btn sm" data-buy="frame">升级</button></div>
+    <div class="upItm"><div class="upT">🛠️ 减震</div><div class="upD">落地缓冲 / 更稳</div><div class="upL" id="lv-susp">Lv0</div><button class="btn sm" data-buy="susp">升级</button></div>
+    <div class="upNote" id="shopNote"></div>
+    <button class="btn" id="closeShop">返回</button>
+  </div>
+</div>
+<script>
+"use strict";
+const cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+const HUD={lvl:document.getElementById("lvl"),speed:document.getElementById("speed"),
+  coins:document.getElementById("coins"),prog:document.getElementById("prog"),
+  lvlDesc:document.getElementById("lvlDesc")};
+const overlay=document.getElementById("overlay"),toast=document.getElementById("toast");
+
+let W=0,H=0,DPR=1;
+function resize(){DPR=Math.min(window.devicePixelRatio||1,2);W=innerWidth;H=innerHeight;
+  cv.width=W*DPR;cv.height=H*DPR;cv.style.width=W+"px";cv.style.height=H+"px";ctx.setTransform(DPR,0,0,DPR,0,0);}
+addEventListener("resize",resize);resize();
+
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const lerp=(a,b,t)=>a+(b-a)*t;
+if(!CanvasRenderingContext2D.prototype.roundRect)CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){r=Math.min(r||0,w/2,h/2);this.moveTo(x+r,y);this.arcTo(x+w,y,x+w,y+h,r);this.arcTo(x+w,y+h,x,y+h,r);this.arcTo(x,y+h,x,y,r);this.arcTo(x,y,x+w,y,r);this.closePath();};
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
+
+// ---------------- 关卡 ----------------
+// 20关：难度、路程、金币逐关递增（越到后面越难、越长、金币越多）
+const LEVEL_NAMES=["平原热身","丘陵骑行","峡谷穿越","坡道试炼","山脊竞速","溪谷漂移","悬崖攀爬","高峰攀登","岩脊飞跃","雪线冲刺","云顶爬升","雷暴山道","峡谷深处","孤峰之路","断崖长廊","极峰挑战","星海赛道","天堑大桥","云端之巅","终极征服"];
+const LEVELS=Array.from({length:20},(_,i)=>{
+  const n=i+1;
+  const amp=Math.round(60+i*24);           // 坡高 60→516
+  const slopeBase=10+i*3.3;                // 基础坡度角 10°→72.7°
+  const len=4000+i*400;                    // 路程递增 4000→11600
+  const coinN=16+Math.floor(i*1.5);        // 金币递增 16→44
+  const nW=2+Math.floor(i/4);               // 波浪数 2→6（平滑起伏路线）
+  const waves=[];
+  for(let r=0;r<nW;r++){
+    const a=Math.round(22+i*2+r*2);          // 振幅 24~52（随关卡递增）
+    const wl=Math.round(700+i*60+r*120);     // 波长 700~1500（波长大=缓坡）
+    waves.push({f:2*Math.PI/wl,amp:a,ph:r*2.4+i*0.7});
+  }
+  const nStep=1+Math.floor(i/5);             // 下坡断层数 1~4（波浪+下坡混合）
+  const steps=[];
+  for(let r=0;r<nStep;r++){
+    const drop=Math.min(45,16+i*1.5+r*4);    // 落差 16~45px（小台阶，车不翻转）
+    steps.push({cx:Math.round(len*(0.15+0.7*r/nStep)),drop});
+  }
+  return {name:LEVEL_NAMES[i],amp,wk:1+i*0.05,len,gapN:0,ramps:[],waves,steps,coinN,maxS:600+i*20,seed:11+i*7};
+});
+let lvIdx=0,finishX=0,gaps=[],coins=[],decoTree=[],decoRock=[];
+const SEED=new Map();
+
+function hillY(x){if(mode==="free")return freeHill(x);const L=LEVELS[lvIdx];
+  // 波浪形路线 + 下坡断层（波浪起伏 + 小台阶下坡）
+  let y=300;
+  for(const w of L.waves){
+    y+=w.amp*Math.sin(x*w.f+w.ph);
+  }
+  for(const s of L.steps){
+    if(x>s.cx){
+      const t=clamp((x-s.cx)/40,0,1);
+      y+=s.drop*(t*t*(3-2*t));
+    }
+  }
+  return y;}
+function featH(x){return 0;}
+function isGap(x){for(const g of gaps)if(x>g.start&&x<g.end)return g;return null;}
+function groundY(x){if(isGap(x))return Infinity;return hillY(x)-featH(x);}
+function groundInfo(x){const e=2;if(isGap(x))return{y:Infinity,m:0};
+  const y0=groundY(x),yL=groundY(x-e),yR=groundY(x+e);
+  // 裂缝边缘：任一侧落入裂缝则坡度归零（防 m=Infinity→NaN 爆炸）
+  if(y0===Infinity||yL===Infinity||yR===Infinity)return{y:y0,m:0};
+  const m=(yR-yL)/(2*e);return{y:y0,m};}
+
+function buildLevel(idx){
+  lvIdx=idx;const L=LEVELS[idx];const rng=mulberry32(1000+idx*97);
+  finishX=L.len;gaps=[];coins=[];
+  let placed=0,g=0;
+  while(placed<L.gapN&&g++<300){const gx=L.len*0.12+rng()*(L.len*0.78);
+    // 裂缝放在断层/坡道之间的平段，宽缝更醒目
+    const slopeHere=Math.abs(groundInfo(gx).m);
+    if(slopeHere<0.12){const gw=Math.min(100,60+idx*3+rng()*15);gaps.push({start:gx,end:gx+gw});placed++;}}
+  gaps.sort((a,b)=>a.start-b.start);
+  for(let i=0;i<L.coinN;i++){const cx=L.len*0.15+i*(L.len*0.75)/(L.coinN-1);
+    coins.push({x:cx,y:groundY(cx)-35,taken:false,ph:rng()*6.28});}
+  // 无装饰树/石（避免"柱子"遮挡赛道）
+  decoTree=[];decoRock=[];
+}
+
+// ---------------- 物理 ----------------
+const G=1000,SUB=6,DT=1/60,WHEEL_R=12,WHEELBASE=38,SEAT_H=26;
+let DRIVE=130,BRAKE=24,JUMP_V=340,LAMP_STUN=0.9,MAXV=130;
+let slopeCoeff=0.35,rollCoeff=0.62,crashMargin=2;
+let susAbsorb=0.25,susClimb=6,susRot=0.70;
+let gold=0,upgrades={}; // 每辆车独立升级：{vehId:{engine,tire,frame,susp}}
+function getUp(){
+  const id=VEHICLES[currentVehicle].id;
+  if(!upgrades[id])upgrades[id]={engine:0,tire:0,frame:0,susp:0};
+  return upgrades[id];
+}
+const MAX_LV=100;
+function upCost(lv){return 30+lv*5;} // 100级价格：Lv1=35 → Lv100=530
+// ---------------- 车辆（HCR2风格） ----------------
+const VEHICLES=[
+  {id:"trail",name:"🚲 山地车",desc:"均衡全能，新手之选",price:0,drv:1.0,spd:1.0,grp:1.0,wgt:1.0,color:"#314ccd"},
+  {id:"sport",name:"🏍️ 竞速车",desc:"极速快，抓地弱",price:3000,drv:1.35,spd:1.4,grp:0.72,wgt:0.8,color:"#e63946"},
+  {id:"mud",name:"🚜 越野车",desc:"抓地强，耐撞，速度慢",price:9000,drv:1.12,spd:0.7,grp:1.45,wgt:1.5,color:"#8a5a2b"},
+];
+let currentVehicle=0,ownedVehicles=[0];
+let unlocked=0,stars=[],selLevel=0;
+let raceAI=null;
+function applyUpgrades(){
+  const v=VEHICLES[currentVehicle];
+  const u=getUp();
+  // 100级：引擎爬坡+极速；轮胎牵引+极速；车架耐摔；减震落地缓冲（×车辆系数）
+  DRIVE=(130+5*u.engine+4*u.tire)*v.drv;
+  MAXV=Math.min(350,130+2.5*u.engine+1.5*u.tire)*v.spd;
+  crashMargin=Math.min(14,2+0.1*u.frame+v.wgt*2);
+  LAMP_STUN=Math.max(0.3,0.9-0.006*u.frame);
+  const sus=u.susp||0;
+  susAbsorb=Math.max(0.05,0.25-0.002*sus);
+  susClimb=Math.max(1,6-0.05*sus);
+  susRot=Math.max(0.30,0.70-0.004*sus);
+}
+const bike={rear:{x:0,y:0,px:0,py:0},front:{x:0,y:0,px:0,py:0},head:{x:0,y:0,px:0,py:0},
+  grounded:0,speed:0,stunned:0,impact:0,wheelRear:0,wheelFront:0,locked:true,spawnX:40,
+  frontGr:false,rearGr:false,squash:0,squashVel:0,airT:0,lastAng:0,jumpRise:0};
+
+function resetBike(x){const L=WHEELBASE;
+  bike.spawnX=x;bike.locked=true;
+  const yR=groundY(x)-WHEEL_R,yF=groundY(x+L)-WHEEL_R;
+  const ang=Math.atan2(yF-yR,L);
+  bike.rear={x:x,y:yR,px:x,py:yR};
+  bike.front={x:x+L,y:yF,px:x+L,py:yF};
+  const hx=x+L/2-Math.sin(ang)*SEAT_H,hy=(yR+yF)/2-Math.cos(ang)*SEAT_H;
+  bike.head={x:hx,y:hy,px:hx,py:hy};
+  bike.grounded=0;bike.speed=0;bike.stunned=0;bike.impact=0;bike.wheelRear=0;bike.wheelFront=0;
+  bike.frontGr=false;bike.rearGr=false;bike.squash=0;bike.squashVel=0;bike.airT=0;bike.lastAng=Math.atan2(bike.front.y-bike.rear.y,bike.front.x-bike.rear.x);bike.jumpRise=0;}
+
+const key={left:false,right:false,jump:false,dive:false,jumpQueued:false};
+function bind(e,d){let c=null;
+  const k=(e.key||"").toLowerCase();
+  if(e.code==="ArrowRight"||e.key==="ArrowRight"||k==="d")c="right";
+  else if(e.code==="ArrowLeft"||e.key==="ArrowLeft"||k==="a")c="left";
+  else if(e.code==="ArrowUp"||e.key==="ArrowUp"||k==="w"||e.code==="Space"||k===" ")c="jump";
+  else if(e.code==="ArrowDown"||e.key==="ArrowDown"||k==="s")c="dive";
+  if(c){if(d){if(c==="jump"&&!key.jump)key.jumpQueued=true;key[c]=true;}else key[c]=false;}}
+addEventListener("keydown",e=>{initAudio();if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].includes(e.code))e.preventDefault();bind(e,true);});
+addEventListener("keydown",e=>{if(e.code==="Minus"||e.code==="Equal"){e.preventDefault();const z=clamp(zoom+(e.code==="Equal"?0.15:-0.15),0.6,2.5);if(z!==zoom){zoom=z;showToast("缩放 "+Math.round(zoom*100)+"%",600);}}});
+addEventListener("keydown",e=>{if(e.code==="KeyR"&&(state==="play"||state==="ended")){e.preventDefault();startGame();showToast("🔄 重新开始",500);}});
+addEventListener("keydown",e=>{if(e.code==="KeyT"&&state==="play"&&mode!=="free"){e.preventDefault();nextLevel();}});
+addEventListener("keydown",e=>{if(e.code==="KeyU"){e.preventDefault();if(shopOpen)closeShop();else openShop();}});
+addEventListener("keyup",e=>bind(e,false));
+addEventListener("blur",()=>{key.left=key.right=key.jump=key.dive=false;});
+
+let crashed=false,crashTimer=0,playing=false,clearing=false,lastSafeX=40;
+
+function stepPhysics(){
+  const L=WHEELBASE,HH=SEAT_H,Lr=Math.hypot(L*0.5,HH);
+  const aDrive=key.right&&!crashed?DRIVE:0, aBrake=key.left&&!crashed?BRAKE:0;
+  const leaning=key.dive&&!crashed?1:0;
+  if(key.jumpQueued&&!crashed){bike.jumpRise=7;key.jumpQueued=false;} // 跳跃抬升7帧
+  const prevGrounded=bike.grounded;
+
+  for(let s=0;s<SUB;s++){
+    const sub=DT/SUB,sq=sub*sub;
+    const P=[bike.rear,bike.front,bike.head];
+    for(const p of P){const vx=p.x-p.px,vy=p.y-p.py;p.px=p.x;p.py=p.y;p.x+=vx;p.y+=vy;}
+    for(const p of P){p.y+=G*sq;}
+    // 驱动力：三质点一致 → 无翘头力矩，起步平稳
+    if(aDrive||aBrake){const a=(aDrive-aBrake);
+      bike.rear.x+=a*sq;bike.front.x+=a*sq;bike.head.x+=a*sq;}
+    // 俯冲/重心前移
+    if(leaning){bike.head.x+=5200*sq;bike.head.y+=1800*sq;}
+    // 贴地判定（12px 吸附带）；空中状态不禁吸附
+    const FS=groundInfo(bike.front.x).y-WHEEL_R, RS=groundInfo(bike.rear.x).y-WHEEL_R;
+    if(bike.airT>0){
+      bike.frontGr=false;bike.rearGr=false;bike.airT--;
+      // 跳跃抬升期间air锁定保持；飞离足够远转普通检测；或跌入地面6px以上立即结束
+      if(bike.jumpRise<=0&&((bike.front.y<FS-14||bike.rear.y<RS-14)||(bike.front.y>FS+6||bike.rear.y>RS+6)))bike.airT=0;
+    }else{
+      bike.frontGr=(bike.front.y>FS-12);bike.rearGr=(bike.rear.y>RS-12);
+    }
+    // 刚性约束：贴地轮 y 锚定（防约束抬轮），离地轮全自由度
+    for(let it=0;it<6;it++){
+      // rear-front
+      let dx=bike.front.x-bike.rear.x,dy=bike.front.y-bike.rear.y;
+      let d=Math.hypot(dx,dy)||1e-4,diff=(d-L)/d;
+      if(bike.rearGr&&bike.frontGr){
+        if(Math.abs(dy)<25){
+          // 平缓坡/平地：只校水平（防抬轮）
+          const err=diff*dx*0.5;
+          bike.rear.x+=err;bike.front.x-=err;
+        }else{
+          // 跨断层/陡坡（两轮高度差大）：沿连线校正，车架贴坡（防前轮被拉后退）
+          bike.rear.x+=dx*diff*0.5;bike.rear.y+=dy*diff*0.5;
+          bike.front.x-=dx*diff*0.5;bike.front.y-=dy*diff*0.5;
+        }
+      }else if(bike.rearGr){
+        bike.front.x-=dx*diff;bike.front.y-=dy*diff;
+      }else if(bike.frontGr){
+        bike.rear.x+=dx*diff;bike.rear.y+=dy*diff;
+      }else{
+        bike.rear.x+=dx*diff*0.5;bike.rear.y+=dy*diff*0.5;
+        bike.front.x-=dx*diff*0.5;bike.front.y-=dy*diff*0.5;
+      }
+      // head-rear
+      dx=bike.head.x-bike.rear.x;dy=bike.head.y-bike.rear.y;d=Math.hypot(dx,dy)||1e-4;diff=(d-Lr)/d;
+      if(bike.rearGr){
+        bike.head.x-=dx*diff;bike.head.y-=dy*diff;
+      }else{
+        bike.rear.x+=dx*diff*0.5;bike.rear.y+=dy*diff*0.5;
+        bike.head.x-=dx*diff*0.5;bike.head.y-=dy*diff*0.5;
+      }
+      // head-front
+      dx=bike.head.x-bike.front.x;dy=bike.head.y-bike.front.y;d=Math.hypot(dx,dy)||1e-4;diff=(d-Lr)/d;
+      if(bike.frontGr){
+        bike.head.x-=dx*diff;bike.head.y-=dy*diff;
+      }else{
+        bike.front.x+=dx*diff*0.5;bike.front.y+=dy*diff*0.5;
+        bike.head.x-=dx*diff*0.5;bike.head.y-=dy*diff*0.5;
+      }
+    }
+    // 约束后压回贴地轮 + 沿坡滚动（空中不吸附）
+    bike.grounded=0;bike.impact=0;
+    // 跨断层（两轮垂直差>35px）：解除贴地让车飞越（防前轮被拉翻后退/翻转）
+    const cliffJump=Math.abs(bike.front.y-bike.rear.y)>35;
+    if(bike.airT<=0&&cliffJump){bike.rearGr=false;bike.frontGr=false;}
+    if(bike.airT<=0&&!cliffJump)for(const [p,srf,flag] of [[bike.rear,RS,"rearGr"],[bike.front,FS,"frontGr"]]){
+      bike[flag]=(p.y>srf-12);
+      if(p.y>srf-60){ // 轮子在坡面上方60px内即开始吸附（爬陡坡不悬空飞行）
+        // 重力沿坡：下坡自然加速、上坡减速（真实物理）
+        const ginfo=groundInfo(p.x);
+        if(ginfo.y!==Infinity){
+          p.x+=(G*ginfo.m/Math.hypot(1,ginfo.m))*0.11*sq;
+          // 极陡(45°+)轻微阻尼：防高速冲坡弹飞，不影响正常爬坡
+          if(ginfo.m<-1.0)p.px+=(p.x-p.px)*0.01;
+        }
+        const depth=p.y-srf;
+        if(depth>8){
+          // 压入坡面较深（陡坡/尖峰）：平滑爬升，吸收上行动量，贴坡不弹飞
+          p.y=Math.max(srf,p.y-susClimb);
+          const vy=p.y-p.py;
+          if(vy<0){p.py=p.y;}else if(vy>0){p.py=p.y-vy*susAbsorb;}
+        }else if(depth<-8){
+          // 悬空：平滑下放吸附（稳定贴地不失控；飞跃由跳跃键实现）
+          p.y=Math.min(srf,p.y+susClimb);
+          const vy=p.y-p.py;
+          if(vy>0)p.py=p.y-vy*susAbsorb;
+        }else{
+          // 正常贴地/落地：直接压回 + 吸收冲击（防弹跳）
+          const vy=p.y-p.py;
+          if(vy>0)p.py=p.y-vy*susAbsorb;
+          p.y=srf;
+        }
+        bike.grounded++;
+      }
+    }
+    // 落地防栽头：两轮贴地时把骑手重心温和摆回车架中垂线上方
+    if(bike.grounded>=2&&!crashed){
+      const a2=Math.atan2(bike.front.y-bike.rear.y,L);
+      const my2=(bike.rear.y+bike.front.y)/2, mx2=(bike.rear.x+bike.front.x)/2;
+      bike.head.x+=(mx2-SEAT_H*Math.sin(a2)-bike.head.x)*0.35;
+      bike.head.y+=(my2-SEAT_H*Math.cos(a2)-bike.head.y)*0.35;
+    }
+    // 车架旋转限制：每子步角度变化超限则绕后轮回拨（刚体旋转，物理一致，防旋转突变）
+    const angN=Math.atan2(bike.front.y-bike.rear.y,bike.front.x-bike.rear.x);
+    let dA=angN-bike.lastAng;
+    while(dA>Math.PI)dA-=2*Math.PI;
+    while(dA<-Math.PI)dA+=2*Math.PI;
+    const MAXDA=0.08;
+    if(Math.abs(dA)>MAXDA){
+      const back=angN-Math.sign(dA)*(Math.abs(dA)-MAXDA)*0.85;
+      const rot=back-angN,c=Math.cos(rot),s=Math.sin(rot);
+      for(const p of [bike.front,bike.head]){
+        const dx=p.x-bike.rear.x,dy=p.y-bike.rear.y;
+        p.x=bike.rear.x+dx*c-dy*s;p.y=bike.rear.y+dx*s+dy*c;
+      }
+      bike.lastAng=back;
+    }else{
+      bike.lastAng=angN;
+    }
+    // 旋转阻尼：衰减骑手绕车架中点的切向速度 → 翘头/前倾/碰撞旋转平缓
+    const mxh=(bike.rear.x+bike.front.x)/2,myh=(bike.rear.y+bike.front.y)/2;
+    const dxh=bike.head.x-mxh,dyh=bike.head.y-myh;
+    const disth=Math.hypot(dxh,dyh)||1e-4;
+    const txx=-dyh/disth,tyy=dxh/disth;
+    const hvx=bike.head.x-bike.head.px,hvy=bike.head.y-bike.head.py;
+    const vt=hvx*txx+hvy*tyy;
+    let vr=vt*(bike.grounded>0?susRot:0.26);
+    // 空中回正（head 平衡）：只要离地就生效，不限跳跃/下落（防翻转累积）
+    if(bike.grounded===0&&!crashed){
+      const angN=Math.atan2(bike.front.y-bike.rear.y,bike.front.x-bike.rear.x);
+      const targetVt=-Math.sign(angN)*Math.min(0.10,Math.abs(angN)*0.6);
+      vr=vt+(targetVt-vt)*0.7;
+    }
+    // 强制车架前向：front 跑到 rear 左边(翻转180°)时，绕中点旋转180°纠正方向
+    if(bike.front.x<bike.rear.x){
+      const mx2=(bike.rear.x+bike.front.x)/2,my2=(bike.rear.y+bike.front.y)/2;
+      for(const p of [bike.rear,bike.front,bike.head]){
+        const dxx=p.x-mx2,dyy=p.y-my2;
+        const nx=mx2-dxx, ny=my2-dyy;
+        p.px+=nx-p.x; p.py+=ny-p.y;
+        p.x=nx;p.y=ny;
+      }
+    }
+    // 回平防倒立（始终生效）：空中偏离6°温和回平；贴地车架>66°(翻转/倒立)强力回平
+    if(!crashed){
+      const angF=Math.atan2(bike.front.y-bike.rear.y,bike.front.x-bike.rear.x);
+      const airborne=bike.grounded===0;
+      if(airborne?Math.abs(angF)>0.10:Math.abs(angF)>1.15){
+        const power=airborne?0.15:0.22;
+        const rot=-angF*power;
+        const c=Math.cos(rot),s=Math.sin(rot);
+        const mx2=(bike.rear.x+bike.front.x)/2,my2=(bike.rear.y+bike.front.y)/2;
+        for(const p of [bike.rear,bike.front,bike.head]){
+          const dx=p.x-mx2,dy=p.y-my2;
+          const nx=mx2+dx*c-dy*s, ny=my2+dx*s+dy*c;
+          p.px+=nx-p.x; p.py+=ny-p.y;
+          p.x=nx;p.y=ny;
+        }
+      }
+    }
+    bike.head.px=bike.head.x-(hvx-(vt-vr)*txx);
+    bike.head.py=bike.head.y-(hvy-(vt-vr)*tyy);
+    // 摔车判定：车倒立（两轮在头下方）且头触地 → 摔车（正常骑行不误判）
+    const hgi=groundInfo(bike.head.x);
+    if(hgi.y!==Infinity&&!crashed&&bike.head.y>hgi.y-30){
+      const inverted=bike.rear.y<bike.head.y-8&&bike.front.y<bike.head.y-8;
+      if(inverted)crash();
+    }
+  }
+  // 跳跃：首帧给向上速度脉冲（自然抛物线），air锁定覆盖全程，落地自动吸附
+  if(bike.jumpRise>0){
+    if(bike.jumpRise===7){
+      const jv=JUMP_V*(DT/SUB);
+      bike.rear.py+=jv;bike.front.py+=jv;bike.head.py+=jv;
+    }
+    bike.airT=160;bike.rearGr=false;bike.frontGr=false;
+    bike.jumpRise--;
+    if(bike.jumpRise===6)playJumpSound();
+  }
+  // 落地减震：弹簧压缩→回弹→阻尼振荡（生动）
+  if(prevGrounded===0&&bike.grounded>0&&!crashed){
+    bike.squashVel=-1.4;bike.squash=-0.3;
+    const gi=groundInfo((bike.rear.x+bike.front.x)/2);
+    if(gi.y!==Infinity)emitParticles((bike.rear.x+bike.front.x)/2,gi.y-2,8,{color:"#c4a882",spd:1.6,life:20,size:3,grav:0.03});
+  }
+  // 弹簧动力学：压缩→恢复力回弹→过冲→阻尼收敛
+  bike.squash+=bike.squashVel;
+  bike.squashVel-=bike.squash*0.15;
+  bike.squashVel*=0.84;
+  if(Math.abs(bike.squash)<0.05&&Math.abs(bike.squashVel)<0.05){bike.squash=0;bike.squashVel=0;}
+  // 引擎刹车：松油门且贴地时自然减速（平路/上坡）；下坡不刹车，交给重力加速
+  if(!aDrive&&!aBrake&&bike.grounded>0&&groundInfo(bike.front.x).m<=0.03){
+    const dec=0.024;
+    bike.rear.px+=(bike.rear.x-bike.rear.px)*dec;
+    bike.front.px+=(bike.front.x-bike.front.px)*dec;
+    bike.head.px+=(bike.head.x-bike.head.px)*dec;
+  }
+  // 垂直速度上限（防陡坡抛射式起飞/无限下落，放宽减少截断顿挫）
+  const cvy=(bike.front.y-bike.front.py)/DT;
+  if(Math.abs(cvy)>650){
+    const lim=650*Math.sign(cvy);
+    bike.front.py=bike.front.y-lim*DT;bike.rear.py=bike.rear.y-lim*DT;bike.head.py=bike.head.y-lim*DT;
+  }
+  // 速度上限（防数值爆炸）：上坡提前软减速，冲坡动量平滑吸收
+  let vh=(bike.front.x-bike.front.px)/DT;
+  const gmG=groundInfo(bike.front.x);
+  if(gmG.y!==Infinity&&gmG.m<0){
+    const vT=Math.max(60,MAXV/(1+(-gmG.m)*1.3));
+    if(vh>vT)vh=vT+(vh-vT)*0.10;
+  }
+  if(vh>MAXV){vh=MAXV;}else if(vh<-MAXV){vh=-MAXV;}
+  if(vh!==(bike.front.x-bike.front.px)/DT){
+    bike.front.px=bike.front.x-vh*DT;bike.rear.px=bike.rear.x-vh*DT;bike.head.px=bike.head.x-vh*DT;
+  }
+  bike.speed=lerp(bike.speed,(bike.front.x-bike.front.px)/DT,0.12);
+  bike.wheelRear+=(bike.rear.x-bike.rear.px)/DT*(1/WHEEL_R)*0.06;
+  bike.wheelFront+=(bike.front.x-bike.front.px)/DT*(1/WHEEL_R)*0.06;
+  if(bike.stunned>0)bike.stunned-=DT;
+}
+
+function nextLevel(){
+  if(mode==="level"&&selLevel<LEVELS.length-1){
+    selLevel++;
+    buildLevel(selLevel);resetBike(40);crashed=false;clearing=false;camX=0;
+    HUD.coins.textContent="◎ "+gold;maxWheelieDist=0;
+    levelStartTime=time;coinGot=0;totalCoins=LEVELS[selLevel].coinN;
+    showToast("关卡 "+(selLevel+1)+" · "+LEVELS[selLevel].name,800);
+  }else{
+    state="menu";overlay.classList.remove("hidden");raceAI=null;
+    if(mode==="level"&&selLevel>=LEVELS.length-1)showToast("🎉 全部通关！");
+  }}
+function crash(){crashed=true;crashTimer=1.1;bike.stunned=LAMP_STUN;playCrashSound();emitParticles(bike.head.x,bike.head.y,20,{color:"#ff6b35",spd:2,life:25,size:3,grav:0.06});showToast("💥 摔车！",700);}
+function respawn(){resetBike(lastSafeX);bike.locked=false;crashed=false;camX=lastSafeX-W*0.35;showToast("! 头着地：回到安全点",420);}
+function pitRewind(){resetBike(lastSafeX);bike.locked=false;crashed=false;camX=lastSafeX-W*0.35;showToast("落入鸿沟，回到安全点重新跳",600);}
+
+function updateCoins(){
+  const mx=(bike.rear.x+bike.front.x)/2,my=(bike.rear.y+bike.front.y)/2;
+  for(const c of coins){if(!c.taken&&Math.hypot(c.x-mx,c.y-my)<45){c.taken=true;gold+=30;coinGot++;save();playCoinSound();emitParticles(c.x,c.y,12,{color:"#ffd700",spd:2.5,life:30,size:3,grav:0.03});HUD.coins.textContent="◎ "+gold;}}
+}
+function emitRideDust(){
+  if(bike.grounded>0&&!crashed&&Math.abs(bike.speed)>30){
+    for(const p of [bike.rear,bike.front]){if(Math.random()<0.35){const gi=groundInfo(p.x);
+      if(gi.y!==Infinity)emitParticles(p.x+Math.random()*4-2,gi.y-2,1,{color:"#c4a882",spd:0.6,life:18,size:3,grav:0.02});}}}
+}
+
+// ---------------- 粒子系统 ----------------
+let particles=[];
+function emitParticles(x,y,count,cfg){
+  for(let i=0;i<count;i++){const a=Math.random()*6.2832,s=0.5+Math.random()*1.5;
+    particles.push({x,y,vx:Math.cos(a)*s*cfg.spd,vy:Math.sin(a)*s*cfg.spd-0.5,
+      life:cfg.life||40,maxLife:cfg.life||40,size:cfg.size||2+Math.random()*2,
+      color:cfg.color||"#fff",decay:cfg.decay||0.97,grav:cfg.grav||0.04});}}
+function updateParticles(){
+  for(let i=particles.length-1;i>=0;i--){const p=particles[i];
+    p.x+=p.vx;p.y+=p.vy;p.vy+=p.grav;p.vx*=p.decay;p.vy*=p.decay;
+    p.life--;if(p.life<=0||p.y>H*2)particles.splice(i,1);}}
+function drawParticles(cx,cy){
+  for(const p of particles){const sx=p.x-cx,sy=p.y-cy;
+    if(sx<-50||sx>W+50)continue;
+    const a=p.life/p.maxLife;
+    ctx.globalAlpha=a;ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(sx,sy,p.size*a,0,7);ctx.fill();}
+  ctx.globalAlpha=1;}
+
+// ---------------- 音效（Web Audio API） ----------------
+let audioCtx=null,audioInit=false;
+function initAudio(){if(audioInit)return;try{audioCtx=new(window.AudioContext||window.webkitAudioContext)();audioInit=true;}catch(e){}}
+function playTone(freq,dur,type,gain){
+  if(!audioCtx)return;try{const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+    o.type=type||"square";o.frequency.setValueAtTime(freq,audioCtx.currentTime);
+    g.gain.setValueAtTime((gain||0.08),audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+    o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+dur);}catch(e){}}
+function playCoinSound(){playTone(880,0.12,"sine",0.1);setTimeout(()=>playTone(1320,0.15,"sine",0.08),80);}
+function playCrashSound(){playTone(120,0.3,"sawtooth",0.12);playTone(80,0.4,"square",0.08);}
+function playLandSound(){playTone(200,0.1,"sine",0.06);}
+function playJumpSound(){playTone(400,0.08,"sine",0.06);setTimeout(()=>playTone(500,0.08,"sine",0.05),50);}
+
+// ---------------- 平衡指示器 ----------------
+let bikeAngle=0, maxWheelieDist=0, wheelieDist=0, airTime=0, landed=false;
+function updateStats(){
+  const ang=Math.atan2(bike.front.y-bike.rear.y,bike.front.x-bike.rear.x);
+  bikeAngle=ang;
+  const frontGround=groundInfo(bike.front.x);
+  const frontOffGround=(frontGround.y===Infinity||bike.front.y<frontGround.y-WHEEL_R-2);
+  if(bike.grounded>0&&frontOffGround&&!crashed){wheelieDist+=Math.abs(bike.speed)*0.016;maxWheelieDist=Math.max(maxWheelieDist,wheelieDist);}
+  else if(!crashed){wheelieDist=0;}
+  if(bike.grounded===0&&!crashed){airTime+=1/60;landed=false;}
+  else if(!landed&&bike.grounded>0){landed=true;if(airTime>0.15)playLandSound();airTime=0;}
+}
+function drawBalanceBar(){
+  const bw=120,bh=8,bx=W/2-bw/2,by=30;
+  ctx.fillStyle="rgba(0,0,0,0.35)";ctx.beginPath();ctx.roundRect(bx-2,by-2,bw+4,bh+4,4);ctx.fill();
+  const ang=Math.atan2(bike.front.y-bike.rear.y,bike.front.x-bike.rear.x);
+  const norm=clamp(ang*2.5, -1, 1);
+  const cx=bx+bw/2+norm*(bw/2-4);
+  const hue=120-Math.abs(norm)*120;
+  ctx.fillStyle=`hsl(${hue},90%,55%)`;ctx.beginPath();ctx.roundRect(cx-4,by-1,8,bh+2,3);ctx.fill();
+  ctx.fillStyle="rgba(255,255,255,0.4)";ctx.beginPath();ctx.roundRect(bx+bw/2-1,by-1,2,bh+2,1);ctx.fill();
+  if(maxWheelieDist>0.5){ctx.fillStyle="rgba(255,255,255,0.7)";ctx.font="10px sans-serif";ctx.textAlign="center";
+    ctx.fillText("🏍 "+Math.round(maxWheelieDist)+"m",bx+bw/2,by-6);}
+}
+function drawDriveIndicator(){
+  const bw=104,bh=10,bx=W/2-bw/2,by=H-30;
+  ctx.fillStyle="rgba(0,0,0,0.32)";ctx.beginPath();ctx.roundRect(bx-3,by-3,bw+6,bh+8,6);ctx.fill();
+  ctx.font="bold 11px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";
+  // 左：刹车/A
+  ctx.fillStyle=key.left?"#ff5252":"rgba(255,255,255,0.45)";
+  ctx.fillText("◀ A",bx+bw*0.17,by+bh/2+1);
+  // 中：车
+  ctx.fillStyle="rgba(255,255,255,0.75)";ctx.fillText("🚲",bx+bw*0.5,by+bh/2+1);
+  // 右：加速/D
+  ctx.fillStyle=key.right?"#4cff88":"rgba(255,255,255,0.45)";
+  ctx.fillText("D ▶",bx+bw*0.82,by+bh/2+1);
+  ctx.textBaseline="alphabetic";
+}
+
+// ---------------- 绘制 ----------------
+function skyAndBg(cx,cy){
+  const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,"#7ec8f7");g.addColorStop(0.7,"#cdeffd");g.addColorStop(1,"#eef8fc");ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,230,150,.95)";ctx.beginPath();ctx.arc(W-120,90,40,0,7);ctx.fill();
+  ctx.fillStyle="rgba(255,255,255,.75)";
+  for(let i=0;i<6;i++){const bw=120+(i%3)*30,bx=((i*260-(cx*0.2)%W)%W+W)%W,by=60+(i%3)*40;
+    ctx.beginPath();ctx.ellipse(bx,by,bw,bw*0.32,0,0,7);ctx.fill();}
+  ctx.fillStyle="#9cc5e0";ctx.beginPath();ctx.moveTo(0,H);
+  for(let x=0;x<=W;x+=8){const wy=H*0.62-Math.sin((x+cx*0.4)*0.01)*46-Math.sin((x+cx*0.4)*0.03)*22;ctx.lineTo(x,wy);}
+  ctx.lineTo(W,H);ctx.closePath();ctx.fill();
+}
+
+function drawTerrain(cx,cy){
+  const colors=[["#3f7d3a","#58a24f","#8b5e3c"],["#5a7a3a","#6d9a4a","#9a7a4a"],["#4a5a6a","#6a7a8a","#6a5a4a"]];
+  const pal=colors[lvIdx%colors.length];
+  // 地面（裂缝处水平断开，露出背景天空）
+  ctx.fillStyle=pal[0];ctx.beginPath();ctx.moveTo(0,cy);
+  let lastG=cy;
+  for(let x=0;x<=W;x+=6){
+    const wx=x+cx;const gy=groundY(wx);
+    if(gy===Infinity){ctx.lineTo(x,lastG);}else{lastG=gy-cy;ctx.lineTo(x,gy-cy);}
+  }
+  ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.closePath();ctx.fill();
+  ctx.fillStyle=pal[1];ctx.beginPath();
+  for(let x=0;x<=W;x+=6){const gy=groundY(x+cx);if(gy===Infinity)continue;ctx.lineTo(x,gy-cy-8);}
+  ctx.strokeStyle=pal[1];ctx.lineWidth=8;ctx.stroke();
+  ctx.fillStyle="rgba(0,0,0,.08)";ctx.beginPath();
+  ctx.moveTo(0,cy);for(let x=0;x<=W;x+=6){const gy=groundY(x+cx);if(gy===Infinity){ctx.lineTo(x,lastG);}else ctx.lineTo(x,Math.min(gy+40,cy+H)-cy);}
+  ctx.lineTo(0,H);ctx.closePath();ctx.fill();
+  // 裂缝深渊：只在地面以下黑色渐变，上方与天空环境自然融合 + 断崖壁亮线
+  for(const gp of gaps){
+    const sx=gp.start-cx, ex=gp.end-cx;
+    if(ex<-20||sx>W+20)continue;
+    const gy=Math.min(groundY(gp.start-2),groundY(gp.end+2))-cy;
+    if(gy>H+80)continue;
+    const top=Math.max(0,gy);
+    const bottom=Math.min(H,gy+420);
+    const grd=ctx.createLinearGradient(0,top,0,bottom);
+    grd.addColorStop(0,"rgba(6,9,15,0.98)");
+    grd.addColorStop(0.45,"rgba(10,14,22,0.88)");
+    grd.addColorStop(1,"rgba(10,14,22,0)");
+    ctx.fillStyle=grd;
+    ctx.fillRect(sx,top,ex-sx,bottom-top);
+    // 断崖壁亮线（清晰可辨）
+    ctx.fillStyle="rgba(255,255,255,0.45)";
+    ctx.fillRect(sx,top,2,bottom-top);
+    ctx.fillRect(ex-2,top,2,bottom-top);
+  }
+}
+function drawSpeedLines(){
+  if(Math.abs(bike.speed)<80||crashed)return;
+  const intens=clamp(Math.abs(bike.speed)/300,0,0.3);
+  ctx.strokeStyle=`rgba(255,255,255,${intens})`;ctx.lineWidth=1.5;
+  for(let i=0;i<12;i++){const x=Math.random()*W,y=Math.random()*H*0.6,l=10+Math.random()*25;
+    ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-l*Math.sign(bike.speed),y);ctx.stroke();}
+}
+
+function drawDeco(cx,cy){
+  for(const t of decoTree){const sx=t.x-cx;if(sx<-40||sx>W+40)continue;const gy=groundY(t.x);if(gy===Infinity)continue;const y=gy-cy;
+    ctx.fillStyle="#5b3a1e";ctx.fillRect(sx-3,y-14,6,14);
+    ctx.fillStyle="#2f7a35";ctx.beginPath();ctx.moveTo(sx,y-14-24);ctx.quadraticCurveTo(sx-20,y-8,sx,y-4);ctx.quadraticCurveTo(sx+20,y-8,sx,y-14-24);ctx.fill();}
+  for(const r of decoRock){const sx=r.x-cx;if(sx<-40||sx>W+40)continue;const gy=groundY(r.x);if(gy===Infinity)continue;const y=gy-cy;
+    ctx.fillStyle="#8a8f98";ctx.beginPath();ctx.ellipse(sx,y,9,6,0,0,7);ctx.fill();
+    ctx.fillStyle="#a9aeb6";ctx.beginPath();ctx.ellipse(sx-2,y-1,5,3,0,0,7);ctx.fill();}
+}
+
+function drawCoins(cx,cy){
+  for(const c of coins){if(c.taken)continue;const sx=c.x-cx;if(sx<-20||sx>W+20)continue;const y=c.y-cy;
+    const sxr=Math.sin(c.ph)*6;c.ph+=0.05;
+    ctx.fillStyle="#ffd166";ctx.strokeStyle="#d9a400";ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(sx,y,7,Math.max(2,7-Math.abs(sxr)*0.6),0,0,7);ctx.fill();ctx.stroke();
+    ctx.fillStyle="#d9a400";ctx.beginPath();ctx.arc(sx,y,2,0,7);ctx.fill();}
+}
+
+function drawFlag(cx,cy){
+  const sx=finishX-cx;if(sx<-20||sx>W+20)return;const gy=groundY(finishX);
+  const y=gy-cy;const base=Math.min(H,gy+10);
+  ctx.strokeStyle="#555";ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(sx,y-120);ctx.lineTo(sx,H);ctx.stroke();
+  ctx.fillStyle="#e11";ctx.beginPath();ctx.moveTo(sx,y-120);ctx.lineTo(sx+34,y-108);ctx.lineTo(sx,y-96);ctx.closePath();ctx.fill();
+  ctx.fillStyle="#fff";ctx.font="11px sans-serif";ctx.textAlign="right";ctx.fillText("终点",sx-6,y-118);ctx.textAlign="left";
+}
+
+function drawBike(){
+  const P=bike;const cxm=(P.rear.x+P.front.x)/2,cym=(P.rear.y+P.front.y)/2;
+  const ang=Math.atan2(P.front.y-P.rear.y,P.front.x-P.rear.x);
+  ctx.save();ctx.translate(cxm-camX,cym-camY);ctx.rotate(ang);
+  const hw=WHEELBASE*0.5,hr=SEAT_H;
+  // 车架 + 减震效果（squash：落地压缩→回弹振荡）
+  const sq2=bike.squash||0;
+  const mdy=hr*0.55+sq2*4; // 车架中段随减震压缩下沉（sq2>0压缩）
+  ctx.strokeStyle="#314ccd";ctx.lineWidth=4;ctx.lineCap="round";
+  ctx.beginPath();ctx.moveTo(-hw,0);ctx.lineTo(0,-mdy);ctx.lineTo(hw,0);ctx.moveTo(-hw,0);ctx.lineTo(-hw*0.2,-hr*0.72+sq2*3);ctx.moveTo(hw,0);ctx.lineTo(hw*0.5,-hr*0.75+sq2*3);ctx.stroke();
+  // 前后减震弹簧：压缩越深弹簧圈越密 + 橙色反馈
+  ctx.strokeStyle=`rgba(255,${Math.round(210-Math.abs(sq2)*160)},${Math.round(60-Math.abs(sq2)*40)},${0.35+Math.abs(sq2)*0.65})`;
+  ctx.lineWidth=2;
+  for(const [ax,ay,bx,by] of [[-hw*0.2,-hr*0.72+sq2*3,0,-mdy],[hw*0.5,-hr*0.75+sq2*3,0,-mdy]]){
+    const L=Math.hypot(bx-ax,by-ay)||1e-3;
+    const coils=2+Math.abs(sq2)*2.5;
+    const nx=-(by-ay)/L,ny=(bx-ax)/L;
+    ctx.beginPath();
+    for(let i=0;i<=Math.round(coils*10);i++){
+      const t=i/(coils*10);
+      const px=ax+(bx-ax)*t,py=ay+(by-ay)*t;
+      const off=Math.sin(i*0.63)*2.2;
+      if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px+nx*off,py+ny*off);
+    }
+    ctx.stroke();
+  }
+  // 座椅在后轮上方
+  ctx.fillStyle="#222";ctx.fillRect(-hw-2,-hr*0.8-4,10,4);
+  // 车把
+  ctx.strokeStyle="#333";ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(hw*0.5,-hr*0.75);ctx.lineTo(hw*0.62,-hr*1.0);ctx.stroke();
+  ctx.fillStyle="#e88c1f";ctx.fillRect(hw*0.42,-hr*1.0,12,3);
+  // 轮子
+  for(const [off,spin] of [[-hw,P.wheelRear],[hw,P.wheelFront]]){
+    ctx.strokeStyle="#2a2a2a";ctx.lineWidth=4;ctx.beginPath();ctx.arc(off,0,WHEEL_R,0,7);ctx.stroke();
+    ctx.strokeStyle="#c0392b";ctx.lineWidth=3;ctx.beginPath();ctx.arc(off,0,WHEEL_R-1.5,0,7);ctx.stroke();
+    ctx.strokeStyle="#666";ctx.lineWidth=2;ctx.beginPath();
+    const r=WHEEL_R-3,ph=spin;
+    for(let i=0;i<4;i++){const a=i*Math.PI/2+ph;ctx.moveTo(off,0);ctx.lineTo(off+Math.cos(a)*r,Math.sin(a)*r);}
+    ctx.stroke();
+    ctx.fillStyle="#555";ctx.beginPath();ctx.arc(off,0,2.6,0,7);ctx.fill();
+  }
+  // 骑手（落地时随减震轻微下沉）
+  const glyphY=-hr*0.72+3*(bike.squash||0);
+  ctx.strokeStyle="#f4a259";ctx.lineWidth=4;ctx.lineCap="round";
+  ctx.beginPath();ctx.moveTo(-hw*0.2,glyphY);ctx.lineTo(hw*0.5,glyphY-8);ctx.stroke();
+  ctx.fillStyle="#2e7d64";
+  ctx.beginPath();ctx.ellipse(-4,glyphY-6,9,11,0,0,7);ctx.fill();
+  ctx.fillStyle="#ffcba5";
+  ctx.beginPath();ctx.arc(-2,glyphY-22,7,0,7);ctx.fill();
+  ctx.fillStyle="#e63946";
+  ctx.beginPath();ctx.arc(-2,glyphY-25,7.5,Math.PI,0);ctx.fill();
+  ctx.strokeStyle="#333";ctx.lineWidth=3;
+  const pda=(P.wheelRear*0.3);
+  ctx.beginPath();ctx.moveTo(-hw*0.35,Math.cos(0+pda)*6);ctx.lineTo(-hw*0.35,Math.sin(0+pda)*6);ctx.stroke();
+  ctx.restore();
+}
+
+// ---------------- 升级车间 ----------------
+let shopOpen=false;
+function openShop(){shopOpen=true;renderShop();document.getElementById("shop").classList.remove("hidden");}
+function closeShop(){shopOpen=false;document.getElementById("shop").classList.add("hidden");if(state==="menu"||state==="ended")backToMenu();}
+function renderShop(){
+  document.getElementById("shopGold").textContent=gold;
+  const st=document.getElementById("shopTitle");if(st)st.textContent="🛠 升级 "+VEHICLES[currentVehicle].name;
+  const u=getUp();
+  for(const k of ["engine","tire","frame","susp"]){
+    const lv=u[k]||0;
+    document.getElementById("lv-"+k).textContent="Lv "+lv;
+    const btn=document.querySelector('[data-buy="'+k+'"]');
+    if(lv>=MAX_LV){btn.textContent="已满级";btn.disabled=true;btn.style.opacity=.5;}
+    else{const c=upCost(lv+1);btn.textContent="升级 "+c+" 🪙";btn.disabled=gold<c;}
+  }
+}
+function buyUpgrade(k){
+  const u=getUp();
+  const lv=u[k]||0;
+  if(lv>=MAX_LV)return;
+  const c=upCost(lv+1);
+  if(gold<c){document.getElementById("shopNote").textContent="金币不足，去关卡里收集吧！";return;}
+  gold-=c;u[k]=lv+1;applyUpgrades();save();renderShop();
+  document.getElementById("shopNote").textContent="升级成功！";
+  playCoinSound();
+}
+function loadSave(){
+  try{gold=parseInt(localStorage.getItem("bike_gold")||"0",10)||0;
+    const u=JSON.parse(localStorage.getItem("bike_up")||"{}");
+    // 旧格式（裸engine/tire）迁移到当前车辆
+    if(u.engine!==undefined){
+      const id=VEHICLES[currentVehicle].id;
+      upgrades={};upgrades[id]={engine:Math.min(MAX_LV,u.engine||0),tire:Math.min(MAX_LV,u.tire||0),frame:Math.min(MAX_LV,u.frame||0),susp:Math.min(MAX_LV,u.susp||0)};
+    }else{
+      upgrades=u;
+    }
+    unlocked=Math.min(LEVELS.length-1,parseInt(localStorage.getItem("bike_unlocked")||"0",10)||0);
+    try{stars=JSON.parse(localStorage.getItem("bike_stars")||"[]");}catch(e){stars=[];}
+    while(stars.length<LEVELS.length)stars.push(0);
+    currentVehicle=parseInt(localStorage.getItem("bike_veh")||"0",10)||0;
+    try{ownedVehicles=JSON.parse(localStorage.getItem("bike_owned")||"[0]");}catch(e){ownedVehicles=[0];}
+    if(!ownedVehicles.includes(currentVehicle))currentVehicle=ownedVehicles[0]||0;
+    // 旧存档迁移：金币单位×10（版本1→2）
+    if(localStorage.getItem("bike_v")!=="2"){gold*=10;localStorage.setItem("bike_v","2");save();}
+  }catch(e){}
+  applyUpgrades();
+}
+function save(){try{localStorage.setItem("bike_gold",gold);localStorage.setItem("bike_up",JSON.stringify(upgrades));
+  localStorage.setItem("bike_unlocked",unlocked);localStorage.setItem("bike_stars",JSON.stringify(stars));
+  localStorage.setItem("bike_veh",currentVehicle);localStorage.setItem("bike_owned",JSON.stringify(ownedVehicles));}catch(e){}}
+document.getElementById("closeShop").addEventListener("click",closeShop);
+for(const k of ["engine","tire","frame","susp"])document.querySelector('[data-buy="'+k+'"]').addEventListener("click",()=>buyUpgrade(k));
+loadSave();
+
+// ---------------- 自由模式 ----------------
+let freeFeat=[],freeCum=[]; // freeCum[i]=前i个断层完全饱和的总下降（前缀和）
+function freeInit(){
+  mode="free";lvIdx=0;finishX=Infinity;gaps=[];coins=[];decoTree=[];decoRock=[];freeGenX=0;freeFeat=[];freeCum=[0];clearing=false;
+}
+function freeHill(x){
+  // 波浪形路线 + 下坡台阶：低频正弦起伏 + 每1400px小台阶下降（O(1)）
+  const d=Math.max(0,x-400);
+  const diff=Math.min(1,d/120000);
+  const diffS=diff*diff*(3-2*diff);
+  let y=300;
+  y+=Math.sin(x*0.004+1.7)*(26+diffS*160);
+  y+=Math.sin(x*0.0013+3.1)*(22+diffS*110);
+  y+=Math.sin(x*0.0007+5.2)*(18+diffS*80);
+  // 下坡台阶：已满台阶累积 + 当前部分
+  const stepGap=1400,stepDrop=15+diffS*10;
+  const segIdx=Math.floor(d/stepGap);
+  y+=stepDrop*segIdx;
+  const cur=d%stepGap;
+  if(cur>0){const t=clamp(cur/40,0,1);y+=stepDrop*(t*t*(3-2*t));}
+  return y;
+}
+function freeFill(){
+  const viewR=camX+W*2;let guard=0;
+  while(freeGenX<viewR&&guard++<200){
+    const d=Math.max(0,freeGenX-400);
+    const diff=Math.min(1,d/120000);          // 难度因子 0→1（12万px后封顶，缓慢递增）
+    const diffS=diff*diff*(3-2*diff);          // smoothstep 更平滑
+    // 地形由 freeHill 波浪函数生成（低频正弦，难度随距离递增）
+    // 金币（随难度略减，鼓励前进）
+    if(Math.random()<0.85-diffS*0.4)coins.push({x:freeGenX,y:groundY(freeGenX)-30,taken:false,ph:Math.random()*6.28});
+    freeGenX+=Math.round(170+diffS*260+Math.random()*280); // 特征间隔随难度增大
+  }
+  coins=coins.filter(c=>c.x>camX-400&&!c.taken);
+}
+
+// ---------------- 比赛模式（AI竞速） ----------------
+function raceInit(){raceAI={x:40,spd:0,finish:false};}
+function raceUpdate(dt){
+  if(!raceAI||raceAI.finish)return;
+  const gi=groundInfo(raceAI.x);
+  if(gi.y===Infinity)return; // 裂缝前等待
+  // AI 与玩家车完全同规格：极速=玩家当前车MAXV，上坡减速/下坡加速同玩家物理
+  const base=Math.max(120,MAXV*(0.95+Math.sin(time*0.7+raceAI.x*0.001)*0.12));
+  let target=base*(gi.m>0?1.28:1-Math.min(0.8,Math.max(0,-gi.m)*0.85));
+  raceAI.spd+=(target-raceAI.spd)*Math.min(1,dt*2.2);
+  raceAI.x+=raceAI.spd*dt;
+  if(raceAI.x>=finishX)raceAI.finish=true;
+}
+function drawRaceHUD(){
+  if(mode!=="race"||!raceAI)return;
+  const bw=Math.min(W*0.4,300),bh=10,bx=W/2-bw/2,by=16;
+  ctx.fillStyle="rgba(0,0,0,0.35)";ctx.beginPath();ctx.roundRect(bx-2,by-2,bw+4,bh+4,4);ctx.fill();
+  const px=clamp(((bike.rear.x+bike.front.x)/2)/finishX,0,1);
+  const ax=clamp(raceAI.x/finishX,0,1);
+  ctx.fillStyle="#e63946";ctx.beginPath();ctx.roundRect(bx,by,bw*ax,bh,3);ctx.fill();
+  ctx.fillStyle="#4cff88";ctx.beginPath();ctx.roundRect(bx,by,bw*px,bh,3);ctx.fill();
+  ctx.fillStyle="rgba(255,255,255,0.85)";ctx.font="11px sans-serif";ctx.textAlign="center";
+  ctx.fillText("你(绿) vs AI(红)",W/2,by-4);
+  ctx.textAlign="left";
+  // 画AI对手车（红色）在赛道上
+  const gi=groundInfo(raceAI.x);
+  if(gi.y!==Infinity){
+    const sx=raceAI.x-camX, sy=gi.y-WHEEL_R-camY;
+    if(sx>-40&&sx<W+40&&isFinite(sy)){
+      ctx.fillStyle="#e63946";
+      ctx.beginPath();ctx.arc(sx, sy, 6, 0, 7);ctx.fill();
+      ctx.beginPath();ctx.arc(sx+14, sy, 6, 0, 7);ctx.fill();
+      ctx.fillStyle="#b3202f";ctx.fillRect(sx+5,sy-15,10,5);
+      ctx.fillStyle="#fff";ctx.font="9px sans-serif";ctx.textAlign="center";
+      ctx.fillText("AI",sx+7,sy-20);
+      ctx.textAlign="left";
+    }
+  }
+}
+
+// ---------------- 主循环 ----------------
+let camX=0,camY=0,zoom=1.4,state="menu",lastT=0,time=0;
+let mode="level",lastMode="level",freeGenX=0;
+
+function showToast(txt,ms){toast.textContent=txt;toast.style.opacity=1;toast.style.transition="none";setTimeout(()=>{toast.style.transition="opacity .4s";toast.style.opacity=0;},ms||900);}
+
+let levelStartTime=0,coinGot=0,totalCoins=0;
+function hidePanel(){const p=document.getElementById("modePanel");p.classList.add("hidden");p.innerHTML="";}
+function showPanel(html){const p=document.getElementById("modePanel");p.innerHTML=html;p.classList.remove("hidden");}
+function backToMenu(){hidePanel();overlay.classList.remove("hidden");}
+
+function renderLevelsPanel(){
+  showPanel(`<div class="modeTitle">🏁 闯关模式 · 选择关卡</div>
+  <div class="lvGrid" id="lvGrid">${LEVELS.map((L,i)=>{
+    const locked=i>unlocked;
+    const st=stars[i]||0;
+    return `<div class="lvCell ${locked?"locked":st>0?"done":""}" data-lv="${i}" style="border-color:${VEHICLES[currentVehicle].color}44;${locked?"opacity:.45;cursor:not-allowed":""}">
+      <div>第${i+1}关</div><div style="font-size:10px;opacity:.7">${L.name}</div>
+      <div class="stars">${locked?"🔒":st>0?"★".repeat(st)+"☆".repeat(3-st):"☆☆☆"}</div>
+      <div style="font-size:10px">${locked?"通关解锁":(L.len/100)+"m"}</div>
+    </div>`;}).join("")}</div>
+  <div class="panelNote">星级：通关1★ · 金币70%以上2★ · 快速通关3★</div>
+  <button class="btn backBtn" id="backLevels">返回</button>`);
+  document.getElementById("lvGrid").addEventListener("click",(e)=>{
+    const cell=e.target.closest(".lvCell");if(!cell)return;
+    const lv=+cell.dataset.lv;
+    if(lv>unlocked){showToast("🔒 先通关第"+(unlocked+1)+"关解锁",800);return;}
+    startGame("level",lv);
+  });
+  document.getElementById("backLevels").addEventListener("click",backToMenu);
+}
+function renderRacePanel(){
+  showPanel(`<div class="modeTitle">🏆 比赛模式 · 与AI竞速</div>
+  <div class="lvGrid" id="lvGridRace">${LEVELS.map((L,i)=>{
+    const locked=i>unlocked;
+    return `<div class="lvCell ${locked?"locked":""}" data-lv="${i}" style="border-color:#e6394644;${locked?"opacity:.45;cursor:not-allowed":""}">
+      <div>第${i+1}关</div><div style="font-size:10px;opacity:.7">${L.name}</div>
+      <div class="stars">🏆</div>
+      <div style="font-size:10px">${locked?"通关解锁":(L.len/100)+"m"}</div>
+    </div>`;}).join("")}</div>
+  <div class="panelNote">先到终点赢 300 🪙</div>
+  <button class="btn backBtn" id="backRace">返回</button>`);
+  document.getElementById("lvGridRace").addEventListener("click",(e)=>{
+    const cell=e.target.closest(".lvCell");if(!cell)return;
+    const lv=+cell.dataset.lv;
+    if(lv>unlocked){showToast("🔒 先通关第"+(unlocked+1)+"关解锁",800);return;}
+    startGame("race",lv);
+  });
+  document.getElementById("backRace").addEventListener("click",backToMenu);
+}
+function renderGaragePanel(){
+  showPanel(`<div class="modeTitle">🏍️ 车库</div>
+  ${VEHICLES.map((v,i)=>{
+    const own=ownedVehicles.includes(i);
+    const sel=i===currentVehicle;
+    return `<div class="vehCard ${sel?"selected":""}" onclick="buyOrSelectVeh(${i})">
+      <div style="font-size:24px">${v.name}</div>
+      <div style="flex:1"><div class="vname">${v.name}</div><div class="vdesc">${v.desc}</div>
+      <div class="vstat">速度${Math.round(v.spd*100)}% · 驱动${Math.round(v.drv*100)}% · 抓地${Math.round(v.grp*100)}% · 重量${Math.round(v.wgt*100)}%</div></div>
+      <div>${sel?"✅ 使用中":own?"已拥有":("🪙 "+v.price)}</div>
+    </div>`;}).join("")}
+  <div class="panelNote" id="pnNote"></div>
+  <button class="btn backBtn" onclick="backToMenu()">返回</button>`);
+}
+function buyOrSelectVeh(i){
+  const pn=document.getElementById("pnNote");
+  if(ownedVehicles.includes(i)){
+    currentVehicle=i;applyUpgrades();save();renderGaragePanel();
+    const p2=document.getElementById("pnNote");if(p2)p2.textContent="已切换到 "+VEHICLES[i].name;
+  }else{
+    const v=VEHICLES[i];
+    if(gold>=v.price){gold-=v.price;ownedVehicles.push(i);currentVehicle=i;applyUpgrades();save();renderGaragePanel();
+      const p2=document.getElementById("pnNote");if(p2)p2.textContent="🎉 购买并切换到 "+v.name;HUD.coins.textContent="◎ "+gold;}
+    else{pn&&(pn.textContent="金币不足，需要 "+v.price+" 🪙");}
+  }
+}
+
+function startGame(m,lv){
+  try{
+    lastMode=m||lastMode;mode=lastMode;
+    selLevel=(lv!==undefined)?lv:(selLevel||0);
+    hidePanel();
+    if(mode==="free"){freeInit();}else{buildLevel(selLevel);}
+    resetBike(40);crashed=false;clearing=false;camX=0;particles=[];
+    maxWheelieDist=0;airTime=0;wheelieDist=0;landed=false;
+    levelStartTime=time;coinGot=0;
+    totalCoins=mode==="level"?(LEVELS[selLevel].coinN||0):0;
+    if(mode==="race")raceInit();
+    HUD.coins.textContent="◎ "+gold;state="play";overlay.classList.add("hidden");
+  }catch(err){
+    console.error("startGame 错误:",err);
+    showToast("⚠️ 出错了："+err.message,1500);
+  }
+}
+document.getElementById("btnLevels").addEventListener("click",()=>{initAudio();if(state==="menu")renderLevelsPanel();});
+document.getElementById("btnRace").addEventListener("click",()=>{initAudio();if(state==="menu")renderRacePanel();});
+document.getElementById("btnGarage").addEventListener("click",()=>{initAudio();if(state==="menu")renderGaragePanel();});
+document.getElementById("btnFree").addEventListener("click",()=>{initAudio();if(state==="menu")startGame("free");});
+document.getElementById("btnShop").addEventListener("click",()=>{initAudio();openShop();});
+
+function loop(t){
+  requestAnimationFrame(loop);
+  try{
+  if(!lastT)lastT=t;let rawDt=clamp((t-lastT)/1000,0,1/30);lastT=t;
+  time+=rawDt;
+  if(state==="play"&&!shopOpen){
+    if(bike.locked){
+      if(key.right||key.left||key.dive){bike.locked=false;}
+      else {
+        bike.rear.x=bike.spawnX;bike.front.x=bike.spawnX+WHEELBASE;bike.head.x=bike.spawnX+WHEELBASE*0.5;
+        rawDt=0;
+      }
+    }
+    if(!bike.locked){
+      stepPhysics();updateParticles();emitRideDust();updateStats();
+      if(crashed){crashTimer-=rawDt;if(crashTimer<=0){respawn();}}
+      const mid=(bike.rear.x+bike.front.x)/2;
+      const midY=(bike.rear.y+bike.front.y)/2;
+      if(bike.grounded>0&&!crashed)lastSafeX=mid;
+      if(!crashed&&midY>H*3){pitRewind();}
+      updateCoins();
+      if(mode==="race"){raceUpdate(rawDt);
+        if(raceAI.finish&&!clearing){clearing=true;showToast("😵 对手先到终点！");setTimeout(()=>nextLevel(),900);}
+      }
+      if(mode==="free"){freeFill();}
+      else if(!clearing&&(bike.rear.x+bike.front.x)/2>finishX){
+        clearing=true;
+        if(mode==="race"){
+          const won=!raceAI.finish;
+          if(won){gold+=300;save();showToast("🏆 比赛获胜！🪙+300");}
+          else{showToast("🏁 抵达终点（对手更快）");}
+        }else if(mode==="level"){
+          const elapsed=time-levelStartTime;
+          const ratio=totalCoins>0?coinGot/totalCoins:1;
+          let s=1;
+          if(ratio>=0.7)s=2;
+          if(elapsed<LEVELS[selLevel].len/230)s=3;
+          stars[selLevel]=Math.max(stars[selLevel]||0,s);
+          if(selLevel>=unlocked&&selLevel<LEVELS.length-1)unlocked=selLevel+1;
+          gold+=150;save();
+          showToast("🏁 通关 "+"★".repeat(s)+"！🪙+150");
+        }
+        setTimeout(()=>nextLevel(),800);
+      }
+    }
+  }
+  // 相机
+  const mx=(bike.rear.x+bike.front.x)/2,my=(bike.rear.y+bike.front.y)/2;
+  const targetX=clamp(mx-W*0.38/zoom,0,Math.max(0,finishX-W*0.45/zoom));
+  const targetY=my-H*0.55/zoom;
+  camX=lerp(camX,targetX,0.10);camY=lerp(camY,targetY,0.30);
+
+  // 绘制
+  skyAndBg(camX,camY);
+  ctx.save();
+  ctx.scale(zoom,zoom);
+  drawParticles(camX,camY);
+  drawDeco(camX,camY);
+  drawTerrain(camX,camY);
+  drawCoins(camX,camY);
+  drawFlag(camX,camY);
+  if(state==="play"||state==="ended")drawBike();
+  ctx.restore();
+
+  if(state==="play"){drawBalanceBar();drawDriveIndicator();drawSpeedLines();drawRaceHUD();}
+
+  ctx.fillStyle="rgba(255,255,255,0.5)";ctx.font="11px sans-serif";ctx.textAlign="right";
+  ctx.fillText("缩放 "+Math.round(zoom*100)+"%  ·  R重启  ·  +/-缩放",W-12,H-12);
+  ctx.textAlign="left";
+
+  HUD.speed.textContent=Math.round(Math.abs(bike.speed)*0.12)+" km/h"+(airTime>0.1?" ✈ "+Math.round(airTime*10)/10+"s":"");
+  if(mode==="free"){
+    HUD.lvl.textContent="♾ 自由模式 · "+Math.round(mx/10)+"m";
+    HUD.prog.style.width="100%";
+    HUD.prog.parentNode.style.opacity=0.3;
+  }else{
+    HUD.lvl.textContent=(mode==="race"?"🏆 比赛 第"+(selLevel+1)+"关":"关卡 "+(selLevel+1)+" · "+LEVELS[selLevel].name);
+    HUD.prog.style.width=clamp((mx/finishX)*100,0,100)+"%";
+    HUD.prog.parentNode.style.opacity=1;
+  }
+  if(state==="menu")HUD.lvlDesc.textContent="🚲 "+VEHICLES[currentVehicle].name+" · 🪙 "+gold+" · 已解锁 "+(unlocked+1)+"/"+LEVELS.length+" 关";
+  }catch(err){console.error("loop错误:",err);}
+}
+// 触摸控制与全屏（手机/平板）
+if(('ontouchstart' in window)||(navigator.maxTouchPoints||0)>0){document.getElementById("touch").classList.remove("hidden");document.getElementById("touchBtn").classList.add("on");}
+document.getElementById("touchBtn").addEventListener("click",()=>{
+  const tEl=document.getElementById("touch");
+  tEl.classList.toggle("hidden");
+  document.getElementById("touchBtn").classList.toggle("on",!tEl.classList.contains("hidden"));
+});
+document.querySelectorAll(".tbtn[data-k]").forEach(b=>{
+  const k=b.dataset.k;
+  const on=ev=>{ev.preventDefault();key[k]=true;};
+  const off=ev=>{ev.preventDefault();key[k]=false;};
+  b.addEventListener("touchstart",on,{passive:false});
+  b.addEventListener("touchend",off,{passive:false});
+  b.addEventListener("touchcancel",off,{passive:false});
+  b.addEventListener("mousedown",on);b.addEventListener("mouseup",off);b.addEventListener("mouseleave",off);
+});
+document.getElementById("fullBtn").addEventListener("click",()=>{
+  const d=document.documentElement;
+  if(document.fullscreenElement||document.webkitFullscreenElement){
+    if(document.exitFullscreen)document.exitFullscreen();
+    else if(document.webkitExitFullscreen)document.webkitExitFullscreen();
+  }else if(d.requestFullscreen){d.requestFullscreen();}
+  else if(d.webkitRequestFullscreen){d.webkitRequestFullscreen();}
+});
+
+// 启动初始化：构建第一关（让菜单显示正确目标距离）并同步金币显示
+buildLevel(0);
+HUD.coins.textContent="◎ "+gold;
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
