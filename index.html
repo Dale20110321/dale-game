@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>自行车越野 · 真实物理版</title>
+<meta name="description" content="原生 JavaScript + Canvas 的物理越野自行车游戏：闯关 / 比赛 / 无限模式，三质点刚体物理、燃料、特技与成就。">
+<link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+
+  <div id="touch" class="hidden">
+    <button class="tbtn tleft" data-k="left" aria-label="刹车 / 空中逆时针转体">◀</button>
+    <button class="tbtn tright" data-k="right" aria-label="加速 / 空中顺时针转体">▶</button>
+  </div>
+  <button id="fullBtn" class="tbtn tfull" aria-label="全屏">⛶</button>
+  <button id="touchBtn" class="tbtn ttoggle" aria-label="方向键开关">🎮</button>
+
+  <div id="hud">
+    <div class="lvl" id="lvl">关卡 1</div>
+    <div class="spd" id="speed">0 km/h</div>
+    <div class="coins" id="coins">🪙 0</div>
+    <div class="fuelwrap"><i id="fuel"></i><b id="fuelTxt">100%</b></div>
+    <div class="prog" id="progLabel">进度</div>
+    <div class="bar" id="progBar"><i id="prog"></i></div>
+  </div>
+
+  <div id="comboTag"></div>
+  <div id="toast"></div>
+
+  <div id="overlay">
+    <h1 id="ovTitle">🚲 越野自行车</h1>
+    <div class="sub" id="ovSub">物理引擎越野：闯关 · 比赛 · 特技 · 燃料 · 多主题</div>
+    <div class="keys" id="ovKeys">→/D 加速（空中顺时针转体） &nbsp;←/A 刹车（空中逆时针转体） &nbsp;P/Esc 暂停 &nbsp;R 重开 &nbsp;M 静音</div>
+    <div class="menuBtns">
+      <button class="btn" id="btnLevels">🏁 闯关模式</button>
+      <button class="btn" id="btnRace">🏆 比赛模式</button>
+      <button class="btn" id="btnFree">♾️ 无限模式</button>
+      <button class="btn ghost" id="btnGarage">🏍️ 车库</button>
+      <button class="btn ghost" id="btnAch">🏅 成就</button>
+      <button class="btn ghost" id="btnShop">🔧 升级车间</button>
+      <button class="btn ghost" id="btnDonate">☕ 你喜欢这个游戏吗</button>
+    </div>
+    <div id="modePanel" class="hidden"></div>
+    <div class="lvlDesc" id="lvlDesc"></div>
+  </div>
+
+  <div id="shop" class="hidden">
+    <h2 id="shopTitle">🛠 升级车间</h2>
+    <div class="upGold">🪙 金币 <span id="shopGold">0</span></div>
+    <div class="upItm"><div class="upT">⚙️ 引擎</div><div class="upD">爬坡力 / 极速 / 油耗</div><div class="upL" id="lv-engine">Lv0</div><button class="btn sm" data-buy="engine">升级</button></div>
+    <div class="upItm"><div class="upT">🛞 轮胎</div><div class="upD">抓地 / 防滑 / 极速</div><div class="upL" id="lv-tire">Lv0</div><button class="btn sm" data-buy="tire">升级</button></div>
+    <div class="upItm"><div class="upT">🛡️ 车架</div><div class="upD">耐摔 / 抗倒立</div><div class="upL" id="lv-frame">Lv0</div><button class="btn sm" data-buy="frame">升级</button></div>
+    <div class="upItm"><div class="upT">🛠️ 减震</div><div class="upD">落地缓冲 / 更稳</div><div class="upL" id="lv-susp">Lv0</div><button class="btn sm" data-buy="susp">升级</button></div>
+    <div class="upNote" id="shopNote"></div>
+    <button class="btn" id="closeShop">返回</button>
+  </div>
+
+  <div id="donate" class="hidden">
+    <h2>☕ 一杯咖啡</h2>
+    <div class="dntText">
+      这个小游戏是我一个人熬了很久、一行一行敲出来的：没有广告，也没有内购，完全免费。<br>
+      如果你玩得开心，就当路过了我的小摊——愿意的话，可以留下一杯咖啡 ☕<br>
+      谢谢你的每一份心意，祝你一路顺风不摔车 🙂
+    </div>
+    <div class="qrBox" id="qrBox"><span>把你的收款二维码保存为 <b>assets/qr.png</b>，游戏里就会自动显示</span><img id="qrImg" src="assets/qr.png" alt="收款二维码"></div>
+    <div class="dntTip">（二维码只在本地显示，不会上传到任何地方）</div>
+    <button class="btn" id="closeDonate">返回</button>
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
