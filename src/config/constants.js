@@ -97,6 +97,8 @@ export const I_BODY =
 /** 约束求解：残差收敛阈值（px）与迭代上限（收敛判据驱动，不是写死 6 次） */
 export const SOLVER_TOL = 0.05;
 export const SOLVER_ITERS = 10;
+/** 法向力上限系数：Fn ≤ K × mTot × g（轮胎不可能无上限地推，防止深穿透爆冲） */
+export const FN_MAX_K = 40;
 /** 单侧接触的允许压入深度（px） */
 export const PEN_TOL = 2;
 /** 数值异常兜底速度上限（px/s）：只用于异常，断言其在整个测试中永不触发 */

@@ -16,6 +16,7 @@ import {
   LAND_REF, VSPD_CAP, DOWNHILL_K, CONTACT_TOL, STUN_TIME,
   SUSP_K_BASE, SUSP_C_BASE, SUSP_TRAVEL_BASE, SOLVER_TOL, SOLVER_ITERS,
   ROLL_RES_K, FRICTION_BASE, BRAKE_TORQUE_BASE, WHEEL_I_BASE, torqueAt,
+  PEN_TOL, FN_MAX_K,
   OBST_R, OBST_VIS_H, OBST_HIT_V, CRASH_FUEL_LOSS, CRASH_TIME_PENALTY,
   deriveHandling, deriveRigidBody, deriveSuspension, deriveFriction,
 } from "../config/constants.js";
@@ -378,12 +379,12 @@ export function stepPhysics() {
       sus.t = tr;
       sus.v = tRate;
       let Fn = Math.max(0, SUS.k * tr + SUS.c * Math.max(0, tRate));
-      if (pen > SUS.travel) {
-        // 行程到底：硬限位（防穿模）；超出部分记为穿透量，断言其 ≤ 容差
-        Fn += (pen - SUS.travel) * SUS.k * 2.5;
-        b.penetration = Math.max(b.penetration, pen - SUS.travel);
-      }
+      // 法向力上限：轮胎的推力不可能无上限。没有这条，深穿透（掉出地图/高速砸地）
+      // 会算出天文数字的法向力 → 整车被爆冲抛飞 → 落地倒立 → 摔车重生循环（实测 54 关卡死）。
+      const FN_MAX = FN_MAX_K * rb.mTot * P.GRAV;
+      if (Fn > FN_MAX) Fn = FN_MAX;
       b.fn[wk] = Fn;
+      b.penetration = Math.max(b.penetration, Math.max(0, pen - SUS.travel));
 
       const n = groundNormal(node.x);
       const cxp = node.x;
@@ -403,6 +404,22 @@ export function stepPhysics() {
       if (Math.abs(J) > Jmax) J = Math.sign(J) * Jmax;
       b.slip[wk] = clamp(slipV / Math.max(20, Math.abs(w) * WHEEL_R), -1, 1);
       applyImpulseAt(b, rb, tx * J, ty * J, cxp, cyp, sub);
+
+      // 回弹耗散（关键）：接触点只能推不能拉，所以"弹簧回弹"的能量在接触侧无处耗散。
+      // 物理上悬挂阻尼器在杆件**伸长**时把车架往下拉（内力），这部分只作用于车架、不经接地点。
+      // 少了它弹簧就会无阻尼回弹 → 整车持续弹跳（实测空中占比恒定 40%、速度在 0↔490 震荡）。
+      if (tRate < 0) {
+        const Fe = Math.min(-tRate * SUS.c, FN_MAX);
+        applyForceAt(b, rb, -n.x * Fe, -n.y * Fe, node.x, node.y, sq);
+      }
+
+      // 穿透位置修正（单侧、只推出）：每子步限速，保证穿透 ≤ 容差的同时不会瞬移；
+      // 真正掉出地图时由 game 层的 belowWorld → pitRewind 兜底（不会靠这个修正爬回来）。
+      const over = pen - SUS.travel - PEN_TOL;
+      if (over > 0) {
+        const push = Math.min(over, 2);
+        for (const p of [b.rear, b.front, b.head]) { p.y -= push; p.py -= push; }
+      }
 
       // 车轮被反作用冲量减速；滚动阻力（∝ 法向力）也在轮上耗散
       w -= (J * WHEEL_R) / IW;
