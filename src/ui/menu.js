@@ -120,9 +120,11 @@ function visibleEntries() {
   if (!menuGroups) return [];
   const btns = [];
   if (resumeBtn.style.display !== "none") btns.push(resumeBtn);
+  // 分组被隐藏（暂停态）时不要在里面游走焦点
+  if (menuGroups.style.display === "none") return btns;
   for (const el of menuGroups.querySelectorAll("button[data-entry]")) {
-    if (el.offsetParent === null && el.style.display === "none") continue;
     if (el.disabled) continue;
+    if (el.offsetParent === null) continue; // 浏览器中：被 display:none 隐藏的祖先
     btns.push(el);
   }
   return btns;
@@ -132,6 +134,12 @@ function visibleEntries() {
 function onMenuKeydown(e) {
   if (!overlay || overlay.classList.contains("hidden")) return;
   if (store.state !== "menu" && store.state !== "pause") return;
+  // Esc 关面板：不依赖"当前有可聚焦入口"，优先处理
+  if (e.code === "Escape" && modePanel && !modePanel.classList.contains("hidden")) {
+    e.preventDefault();
+    hidePanel();
+    return;
+  }
   const btns = visibleEntries();
   if (!btns.length) return;
   const active = document.activeElement;
@@ -143,11 +151,6 @@ function onMenuKeydown(e) {
   };
   if (e.code === "ArrowDown" || e.code === "ArrowRight") move(1);
   else if (e.code === "ArrowUp" || e.code === "ArrowLeft") move(-1);
-  else if (e.code === "Escape" && modePanel && !modePanel.classList.contains("hidden")) {
-    // Esc 关闭面板（回到上一级）；未开面板时不拦截，交给 input.js 处理暂停
-    e.preventDefault();
-    hidePanel();
-  }
 }
 if (typeof window !== "undefined" && window.addEventListener) {
   window.addEventListener("keydown", onMenuKeydown);

@@ -186,6 +186,10 @@ export function nextLevel() {
         " · " + (THEMES[segmentThemeAt(NL, 0)] || THEMES[0]).name,
       800
     );
+    // 从结算结果卡进入下一关：必须恢复游玩状态并收起菜单遮罩，
+    // 否则 store.state 会停在 "ended"，update() 直接早退 → 看起来"点不动"。
+    store.state = "play";
+    presenter.hideOverlay();
   } else {
     presenter.toMenu();
     if (store.mode === "level" && store.selLevel >= LEVELS.length - 1) showToast("🎉 全部通关！");
@@ -315,7 +319,7 @@ function finishLevel() {
     result.stars = s;
     result.goldGain = 200;
     result.time = elapsed;
-    result.nextLabel = store.selLevel < LEVELS.length - 1 ? "下一关 →" : "🎯 最终任务";
+    result.nextLabel = store.selLevel < LEVELS.length - 1 ? "下一关 →" : "🏠 返回菜单";
     if (!run.runCrashed) checkAch("noc");
     if (run.totalCoins > 0 && run.coinGot >= run.totalCoins) checkAch("coinall");
     if (store.stars.length >= LEVELS.length && store.stars.every((v) => v >= 3)) checkAch("allstar");

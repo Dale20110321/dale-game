@@ -85,3 +85,21 @@
 - Task 8 依赖 Task 2（动效作用于组件与 toast）
 - Task 9 依赖 Task 3、Task 4、Task 5（对比度与键盘流程需面板与 HUD 就位）
 - Task 10 依赖 Task 1~9 全部完成
+
+---
+
+## Task 11: 修复回归：结算结果卡「下一关」后状态卡死（实机反馈）
+
+> 触发：用户反馈"后退好像用不了了"。核对后确认为二期引入的真实回归，
+> 根因是 Task 8.3 的 `showResultCard()` 把 `store.state` 置为 `"ended"`，
+> 而 `nextLevel()` 的前进分支没有恢复 `"play"` / 收起菜单遮罩，
+> 导致 `update()` 直接早退 —— 画面停在菜单遮罩上，看起来"点不动"。
+
+- [x] SubTask 11.1: 把无头测试桩的元素 `addEventListener` 升级为真实监听表（支持 `dispatchEvent`），新增「面板交互（集成）」断言组；先复现失败（`state=ended 遮罩隐藏=false`）
+- [x] SubTask 11.2: `src/game/game.js` 的 `nextLevel()` 前进分支补 `store.state = "play"` + `presenter.hideOverlay()`；末关按钮文案由「🎯 最终任务」改为「🏠 返回菜单」（此前点击只会回菜单，文案与行为不符）
+- [x] SubTask 11.3: `styles/main.css` 的 `#modePanel` 补 `position: relative; z-index: 1`，避免被菜单活体背景 `#menuBg` 覆盖
+- [x] SubTask 11.4: `src/ui/menu.js` 键盘导航：Esc 关面板不再依赖"当前有可聚焦入口"；分组被隐藏时不在隐藏按钮之间游走焦点
+- [x] SubTask 11.5: 新增 6 项集成断言（返回 → 主菜单 / Esc 关面板 / 结算卡弹出 / 下一关可继续 / 返回菜单 / 三组入口可见），全量 425 项检查全绿、`--levels` 72 关全部可通关
+
+# Task Dependencies
+- Task 11 依赖 Task 1~10 全部完成（回归修复）

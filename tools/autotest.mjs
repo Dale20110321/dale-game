@@ -52,6 +52,8 @@ function makeCtx() {
 }
 
 function makeEl(id) {
+  // 真事件监听表：面板里的按钮点击/键盘可以通过 dispatchEvent 真实回放（原来 addEventListener 是空函数）
+  const listeners = new Map();
   return {
     id,
     style: {},
@@ -74,8 +76,20 @@ function makeEl(id) {
       },
       contains(c) { return this._s.has(c); },
     },
-    addEventListener: noop,
-    removeEventListener: noop,
+    addEventListener(type, fn) {
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(fn);
+    },
+    removeEventListener(type, fn) {
+      const a = listeners.get(type) || [];
+      const i = a.indexOf(fn);
+      if (i >= 0) a.splice(i, 1);
+    },
+    dispatchEvent(ev) {
+      for (const fn of listeners.get(ev && ev.type) || []) fn(ev);
+      return true;
+    },
+    _listeners: listeners,
     setAttribute(k, v) { this.attrs = this.attrs || {}; this.attrs[k] = String(v); },
     getAttribute(k) { return (this.attrs || {})[k] === undefined ? null : (this.attrs || {})[k]; },
     hasAttribute(k) { return (this.attrs || {})[k] !== undefined; },
@@ -735,6 +749,81 @@ if (ONLY_MODULES) {
         /onPanelKeydown/.test(panelSrc) && /role="button" tabindex="0"/.test(compSrc) &&
         /tabindex="0" aria-label=/.test(panelSrc),
       "菜单方向键+Esc、面板 Enter/空格 委托、卡片与关卡格可聚焦");
+  }
+
+  // ---------------- 面板 / 结算 交互（集成：真实派发点击事件） ----------------
+  section("面板交互（集成）");
+  {
+    const menu = await import(new URL("../src/ui/menu.js", import.meta.url).href);
+    const { renderLevelsPanel } = await import(new URL("../src/ui/panels.js", import.meta.url).href);
+    const panelEl = document.getElementById("modePanel");
+    const overlayEl = document.getElementById("overlay");
+    const groupsEl = document.getElementById("menuGroups");
+
+    // 构造"点击某个 data-act"的合成事件（closest 返回自身，和真实委托一致）
+    const clickAct = (act, extra) => {
+      const target = { dataset: Object.assign({ act }, extra || {}), classList: { contains: () => false } };
+      target.closest = () => target;
+      panelEl.dispatchEvent({ type: "click", target });
+    };
+
+    // 1) 面板「返回」→ 回到主菜单
+    store.state = "menu";
+    overlayEl.classList.remove("hidden");
+    renderLevelsPanel();
+    const opened = !panelEl.classList.contains("hidden");
+    clickAct("back");
+    check("面板「返回」回到主菜单（面板关闭 + 菜单可见）",
+      opened && panelEl.classList.contains("hidden") && !overlayEl.classList.contains("hidden") && store.state === "menu",
+      `打开=${opened} 关闭=${panelEl.classList.contains("hidden")} 菜单可见=${!overlayEl.classList.contains("hidden")} state=${store.state}`);
+
+    // 2) Esc 关面板
+    renderLevelsPanel();
+    dispatchWin("keydown", { code: "Escape", preventDefault: noop });
+    check("Esc 关闭已打开的面板", panelEl.classList.contains("hidden"),
+      panelEl.classList.contains("hidden") ? "已关闭" : "仍打开");
+
+    // 3) 结算结果卡：到达终点 → 出现结果卡 →「下一关」可继续游玩
+    startGame("level", 0);
+    overlayEl.classList.add("hidden");
+    key.right = true;
+    key.left = false;
+    update(DT); // 解锁起步
+    bike.rear.x = bike.front.x = bike.head.x = store.finishX + 10;
+    update(DT); // 触发 finishLevel → 结果卡
+    const cardShown = store.state === "ended" && !panelEl.classList.contains("hidden") && !overlayEl.classList.contains("hidden");
+    check("到达终点弹出结算结果卡", cardShown,
+      `state=${store.state} 面板可见=${!panelEl.classList.contains("hidden")} 遮罩可见=${!overlayEl.classList.contains("hidden")}`);
+
+    clickAct("resultNext");
+    check("结算卡「下一关」可继续游玩（状态回到 play 且收起遮罩）",
+      store.state === "play" && overlayEl.classList.contains("hidden"),
+      `state=${store.state} 遮罩隐藏=${overlayEl.classList.contains("hidden")} selLevel=${store.selLevel}`);
+
+    // 4) 结算卡「返回菜单」
+    store.state = "play";
+    bike.rear.x = bike.front.x = bike.head.x = store.finishX + 10;
+    update(DT);
+    if (store.state === "ended") clickAct("resultMenu");
+    check("结算卡「返回菜单」回到主菜单",
+      store.state === "menu" && !overlayEl.classList.contains("hidden") && panelEl.classList.contains("hidden"),
+      `state=${store.state} 菜单可见=${!overlayEl.classList.contains("hidden")}`);
+
+    // 5) 主菜单分组必须重新可见（否则"返回"后菜单是空的）
+    check("返回后菜单三组入口可见",
+      groupsEl.style.display !== "none" && panelEl.classList.contains("hidden"),
+      `menuGroups.display="${groupsEl.style.display}"`);
+
+    // 6) 暂停 / 继续
+    startGame("level", 0);
+    menu.togglePause();
+    const paused = store.state === "pause" && !overlayEl.classList.contains("hidden") && groupsEl.style.display === "none";
+    menu.togglePause();
+    check("暂停 → 继续可正常切换（状态回 play 且收起遮罩）",
+      paused && store.state === "play" && overlayEl.classList.contains("hidden"),
+      `暂停态正确=${paused} · 继续后 state=${store.state} · 遮罩隐藏=${overlayEl.classList.contains("hidden")}`);
+
+    menu.showMenu();
   }
 
   const midX = () => (bike.rear.x + bike.front.x) / 2;

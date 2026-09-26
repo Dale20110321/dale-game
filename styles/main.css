@@ -232,6 +232,7 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 .menuGroups { display: flex; flex-direction: column; align-items: center; }
 
 #modePanel {
+  position: relative; z-index: 1; /* 必须高于 #menuBg 的渐晕层，否则面板会被背景蒙住 */
   max-width: 640px; max-height: 54vh; overflow-y: auto; margin-top: var(--space-3);
   padding: var(--space-3); background: var(--glass-fill); border: 1px solid var(--glass-border);
   border-radius: var(--radius-card); text-align: left;
