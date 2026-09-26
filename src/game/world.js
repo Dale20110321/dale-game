@@ -1,6 +1,6 @@
 // 世界实体：关卡构建（金币 / 油罐 / 加速带 / 装饰）、拾取、骑尘
 import { mulberry32, clamp } from "../core/utils.js";
-import { SUB_DT, REF_SPEED, DUST_V, DUST_HEAVY_V, OBST_R, KICK_V, KICK_MIN_V, KICK_LIFT, KICK_FRAMES, KICK_BOOST, hazardSpeed, gateSpeed } from "../config/constants.js";
+import { SUB_DT, REF_SPEED, DUST_V, DUST_HEAVY_V, OBST_R, KICK_V, KICK_MIN_V, hazardSpeed, gateSpeed } from "../config/constants.js";
 import { THEMES } from "../config/themes.js";
 import { levelAt, levelHillY, STEP_W, variantRule, segmentThemeAt } from "../config/levels.js";
 import { store, world, bike } from "../core/store.js";
@@ -398,7 +398,7 @@ export function updateBoosts() {
     if (Math.abs(mx - b.x) > 26) continue;
     b.taken = true;
     const imp = 230; // 瞬时增速 px/s
-    for (const p of [bike.rear, bike.front, bike.head]) p.px -= imp * SUB_DT * 0.9;
+    for (const p of bike.pts) p.px -= imp * SUB_DT * 0.9;
     bike.speed = Math.max(bike.speed, imp * 0.8);
     emitParticles(b.x, b.y - 4, 18, { color: "#4cff88", spd: 2.4, life: 24, size: 3, grav: -0.02 });
     addShakeLocal(3);
@@ -407,34 +407,21 @@ export function updateBoosts() {
   }
 }
 
-/** 跳台：贴地足够快压上去 → 进入"发射中"，在若干帧内持续给向上推力 */
+/** 跳台：贴地足够快压上去 → 一次性给整车一个干净的向上速度冲量（确定性滞空源） */
 export function updateJumps() {
   if (!world.jumps.length) return;
   const b = bike;
   const mx = (b.rear.x + b.front.x) / 2;
   for (const j of world.jumps) {
-    // 发射中：持续施加向上推力 + 保持"腾空中"保护。
-    // 用持续推力而非一次性冲量，是因为贴地钳制会逐子步吞掉单次冲量
-    // （轮子仍在接触带内时 first 子步就会被 susClimb 拉回），
-    // 持续推力在若干帧内累计，净效果稳定可控。
-    if (j.boost > 0) {
-      j.boost--;
-      for (const p of [b.rear, b.front, b.head]) p.py += KICK_V * SUB_DT * KICK_BOOST;
-      continue;
-    }
     if (j.used || store.run.crashed) continue;
-    // 触发窗口放宽到 ±60px：高速下车身一帧掠过可能超过 10px，窗口太窄会漏触发
+    // 触发窗口 ±60px：高速下车身一帧掠过可能超过 10px，窗口太窄会漏触发
     if (mx < j.x - 60 || mx > j.x + 60) continue;
     if (b.grounded === 0 && b.rear.y < j.y - 60) continue;
-    const v = Math.abs(b.speed);
-    if (v < KICK_MIN_V) continue; // 太慢只是骑过去，不触发
+    if (Math.abs(b.speed) < KICK_MIN_V) continue; // 太慢只是骑过去，不触发
     j.used = true;
-    j.boost = KICK_FRAMES;
-    // 抬离接触带：y 与 py 同时平移（只动 y 会凭空产生巨大速度）
-    for (const p of [b.rear, b.front, b.head]) {
-      p.y -= KICK_LIFT;
-      p.py -= KICK_LIFT;
-    }
+    // 真正的速度冲量：Δv = KICK_V（向上 = py 增大的方向，因为 v = (y−py)/dt）。
+    // 直接给 py 加偏移会逐帧累积（旧实现因此把车抛到几千像素高空）。
+    for (const p of b.pts) p.py += KICK_V * SUB_DT;
     emitParticles(j.x, j.y - 6, 14, { color: "#7ce7ff", spd: 2.2, life: 26, size: 3, grav: -0.02 });
     addShakeLocal(2.5);
     showToast("🛫 起飞台！", 600);

@@ -29,57 +29,46 @@ export const toKmh = (pxs) => (pxs / PX_PER_M) * 3.6;
 export const kmhToPxs = (kmh) => (kmh / 3.6) * PX_PER_M;
 
 // ---------------- 手感缩放（用户反馈"走得太快"后整体降速） ----------------
-/** 加速度降为原来的 1/3 */
-export const ACCEL_K = 1 / 3;
 /** 极速降为原来的 2/3 */
 export const SPD_K = 2 / 3;
-/** 极速公式的原始上限与基准（px/s 的半标度基准） */
+/** 参考极速公式的原始上限与基准（px/s 的半标度基准） */
 export const MAXV_RAW_CAP = 350;
 export const MAXV_BASE = 130;
-/** 驱动 / 刹车基础值（px/s²，半标度基准） */
-export const DRIVE_BASE = 600;
-export const BRAKE_BASE = 600;
 
 /**
  * 平路基准极速（0 升级、spd=1）真实 px/s —— 油耗模型反推、AI 基准都用它。
  * 这是"半标度 → 真实 px/s"的一个合法出口，其它地方禁止再写裸 *SUB。
+ * ★ 第 3 期后它只是**标定参考**：真实极速由"扭矩曲线 × 传动 − 空气阻力"平衡自然产生，
+ *   不再有任何直接改写速度的钳制。
  */
 export const REF_SPEED = MAXV_BASE * SUB * SPD_K;
 
 /**
- * 由"车辆倍率 + 升级等级"推导驾驶参数。
+ * 由"车辆数据 + 升级等级"推导驾驶参数（扭矩峰值 / 刹车峰值 / 参考极速 / 容差）。
  * ★ 所有半标度 → 真实 px/s 的换算只允许在这里发生（保持标度唯一事实来源）。
  */
-export function deriveHandling(grav, traction, veh, up) {
-  const sus = up.susp || 0;
+export function deriveHandling(veh, up) {
+  const p = veh.phys || {};
   return {
-    DRIVE: Math.min(grav * 0.95, (DRIVE_BASE + 20 * up.engine + 16 * up.tire) * veh.drv * ACCEL_K),
-    BRAKE: Math.min(grav * 0.95, (BRAKE_BASE + 16 * up.tire + 10 * up.frame) * veh.grp * traction),
+    /** 发动机扭矩峰值（游戏单位）：升级与车辆扭矩曲线共同决定 */
+    torquePeak: TORQUE_PEAK_BASE * (p.torque || 1) * (1 + 0.020 * up.engine + 0.016 * up.tire),
+    /** 刹车扭矩峰值 */
+    brakePeak: BRAKE_TORQUE_BASE * veh.grp * (1 + 0.016 * up.tire + 0.010 * up.frame),
+    /** 参考极速（HUD / 相机 / AI 标定用） */
     MAXV: Math.min(MAXV_RAW_CAP, MAXV_BASE + 2.5 * up.engine + 1.5 * up.tire) * SUB * veh.spd * SPD_K,
     // 倒立摔车判定的容差基准（越大越抗摔）：由车架升级 + 车重推导。
     // 0 级（up.frame=0, veh.wgt=1）≈ 4，满级（up.frame=100）≈ 14。
-    // 它被 physics/bike.js 用来缩小"头贴近地面才算倒立摔车"的容差 → 车架等级越高越耐摔。
     crashMargin: Math.min(14, 2 + 0.1 * up.frame + veh.wgt * 2),
     fuelMax: veh.tank * (1 + 0.004 * up.frame),
-    susAbsorb: Math.max(0.05, 0.25 - 0.002 * sus),
-    susClimb: Math.max(1, 6 - 0.05 * sus),
-    susRot: Math.max(0.3, 0.7 - 0.004 * sus),
   };
 }
 
 // ---------------- 空中姿态控制（骑手摆身） ----------------
 // 定标依据：滞空 0.9s 全程按键，累计转角 ≥ 2π（完成一圈空翻）
-//   θ(T) = W·T − W²/(2A)，T=0.9, W=9.5, A=40 → 6.53 rad ≥ 2π
+//   θ(T) = ½·A·T²（角冲量持续施加，角速度上限 W），T=0.9, A=40 → 16 rad ≥ 2π
+// 松键后角速度**保持**（Task 7：角动量守恒，不做人为衰减），落地由地面吸收。
 export const AIR_ROT_MAX = 9.5;
 export const AIR_ROT_ACC = 40;
-export const AIR_ROT_RELEASE = 0.05;
-/**
- * 空中骑手切向阻尼系数。
- * 必须为 1（不阻尼）：骑手是刚性固定在车上的，空中不能有相对阻尼——
- * 否则头会"拖在后面"，形成隐形的自动回正力矩（既违背角动量守恒，
- * 又会跟玩家按下的空中转体对抗，导致空翻翻不到一圈、倒立落地永远摔不下来）。
- */
-export const AIR_HEAD_DAMP = 1.0;
 // ---------------- 刚体质量与几何 ----------------
 export const M_R = 1.0;
 export const M_F = 1.0;
@@ -90,6 +79,8 @@ export const COM_UP = (M_H * SEAT_H) / M_TOT;
 export const I_BODY =
   (M_R + M_F) * ((WHEELBASE * WHEELBASE) / 4 + COM_UP * COM_UP) +
   M_H * (SEAT_H - COM_UP) * (SEAT_H - COM_UP);
+/** 单轮（相对）质量：车轮是独立刚体，由悬挂弹簧连到车架 */
+export const M_W = 0.22;
 
 // ---------------- 刚体 / 悬挂 / 摩擦 / 扭矩（第 3 期 Task 1.1 / 1.3） ----------------
 // 全部物理常量集中在这一个文件；标度换算也只允许在这里发生。
@@ -101,23 +92,35 @@ export const SOLVER_ITERS = 10;
 export const FN_MAX_K = 40;
 /** 单侧接触的允许压入深度（px） */
 export const PEN_TOL = 2;
-/** 数值异常兜底速度上限（px/s）：只用于异常，断言其在整个测试中永不触发 */
+/**
+ * 骑手身体（头）的碰撞半径（px）。倒立 / 前翻时骑手身体会**真的撑在地面上**，
+ * 不再穿地坠出地图；因此"身体的碰撞"与"车架等级的抗摔容差"共同决定倒立摔车。
+ */
+export const HEAD_R = 18;
+/**
+ * 数值异常兜底速度上限（px/s）。**只用于数值异常**（NaN 前兆 / 极端穿透），
+ * 正常游玩与全部测试中都不应触发；tools/autotest.mjs 有断言守护"从未触发"。
+ * 它替代了旧模型里 VSPD_CAP / DOWNHILL_K / MAXV 那种"每帧改写速度"的硬夹断。
+ */
 export const NUM_CAP_V = 6000;
 
 /** 轮上扭矩峰值基准（游戏单位 px·px/s²） */
-export const TORQUE_PEAK_BASE = 8300;
+export const TORQUE_PEAK_BASE = 18000;
 /** 扭矩峰值转速基准（车轮角速度 rad/s） */
 export const TORQUE_RPM_BASE = 18;
 /** 扭矩衰减区间：ω > rpm×LO 后线性衰减，ω = rpm×HI 归零 */
 export const TORQUE_FADE_LO = 1.6;
 export const TORQUE_FADE_HI = 3.2;
-/** 车轮转动惯量基准（决定加速时轮子"吃掉"多少扭矩） */
-export const WHEEL_I_BASE = 40;
+/** 车轮转动惯量：I = K · ½ m R²（实心圆盘近似） */
+export const WHEEL_I_K = 1.0;
+export const wheelInertia = (mW) => WHEEL_I_K * 0.5 * mW * WHEEL_R * WHEEL_R;
 
 /** 悬挂：刚度 / 阻尼 / 行程基准（由车辆 + 减震升级缩放） */
 export const SUSP_K_BASE = 780;
-export const SUSP_C_BASE = 130;
+export const SUSP_C_BASE = 70;
 export const SUSP_TRAVEL_BASE = 16;
+/** 可伸张（droop）行程占行程上限的比例：防止轮子无限下垂 */
+export const SUSP_EXT_K = 0.55;
 /** 减震升级：每级 +2% 刚度 / +3% 阻尼 / +0.08px 行程 */
 export const SUSP_K_UP = 0.02;
 export const SUSP_C_UP = 0.03;
@@ -130,40 +133,55 @@ export const FRICTION_TIRE_UP = 0.006;
 /** 刹车扭矩基准（远大于驱动扭矩：刹车本来就比加速猛） */
 export const BRAKE_TORQUE_BASE = 12000;
 
-/** 空气阻力系数（∝ v²）与滚动阻力系数（∝ 法向力） */
-export const AIR_DRAG_K = 0.0016;
-export const ROLL_RES_K = 0.05;
+/** 空气阻力系数（∝ v²）与滚动阻力系数（∝ 法向力）：极速的"自然上限" */
+export const AIR_DRAG_K = 0.0026;
+export const ROLL_RES_K = 0.02;
+/** 接触位置修正系数（Baumgarte）：把侵入速度按比例补回，避免穿透累积 */
+export const CONTACT_BIAS = 0.25;
+/**
+ * 位置修正速度上限（px/s）。没有它时，修正速度 ∝ 侵入深度会随深度无界增长：
+ * 掉进深坑（局部地面远在上方）时会在一个子步内注入上千 px/s，逼出数值兜底。
+ * 上限取 ≈0.77×REF_SPEED：正常行驶（侵入 ≤ 数 px）完全不受影响。
+ */
+export const BIAS_MAX_V = 400;
+/** 单侧接触的"接触带"（px，沿法线）：在此范围内仍算接触，用于腾空判定 */
+export const CONTACT_BAND = 2;
 
 const c01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 /**
- * 由车辆数据推导三质点刚体（质量 / 质心高度 / 转动惯量）。
- * ★ 这里真实引用 M_R / M_F / M_H / M_TOT / COM_UP / I_BODY（不再是死代码），
- *   并把车辆差异（质量、惯量）带进求解器。
+ * 由车辆数据推导刚体（车架三质点的质量 / 质心高度 / 转动惯量，加上单轮质量）。
+ * ★ 真实引用 M_R / M_F / M_H / M_TOT / COM_UP / I_BODY（不再是死代码）：
+ *   车架 = 后轴 / 前轴 / 骑手三质点，车轮是独立刚体（由悬挂弹簧连到车架），
+ *   车辆差异（质量、惯量）因此真正进入求解器。
  */
 export function deriveRigidBody(veh) {
   const p = (veh && veh.phys) || {};
   const k = p.mass || (veh && veh.wgt) || 1;
   const inertia = p.inertia || 1;
   return {
-    mass: k,
+    k,
+    mCh: M_TOT * k, // 车架质量（= mR + mF + mH）
+    mW: M_W * k, // 单轮质量
+    mTot: M_TOT * k + 2 * M_W * k, // 整车质量（车架 + 两轮）
     mR: M_R * k,
     mF: M_F * k,
     mH: M_H * k,
-    mTot: M_TOT * k,
     comUp: COM_UP,
     iBody: I_BODY * k * inertia,
   };
 }
 
-/** 由车辆 + 减震升级推导悬挂（刚度 / 阻尼 / 行程上限） */
+/** 由车辆 + 减震升级推导悬挂（刚度 / 阻尼 / 行程上限 / 可伸张行程） */
 export function deriveSuspension(veh, up) {
   const p = (veh && veh.phys) || {};
   const s = (up && up.susp) || 0;
+  const travel = (p.travel || SUSP_TRAVEL_BASE) + SUSP_TRAVEL_UP * s;
   return {
     k: SUSP_K_BASE * (p.suspK || 1) * (1 + SUSP_K_UP * s),
     c: SUSP_C_BASE * (p.suspC || 1) * (1 + SUSP_C_UP * s),
-    travel: (p.travel || SUSP_TRAVEL_BASE) + SUSP_TRAVEL_UP * s,
+    travel,
+    ext: travel * SUSP_EXT_K,
   };
 }
 
@@ -173,26 +191,25 @@ export function deriveFriction(traction, veh, up) {
   return FRICTION_BASE * (traction || 1) * ((veh && veh.grp) || 1) * (1 + FRICTION_TIRE_UP * t);
 }
 
-/** 轮上扭矩曲线：ω 超过峰值转速后线性衰减（高转没劲），throttle 为 0~1 */
-export function torqueAt(veh, omega, throttle) {
+/**
+ * 轮上扭矩曲线：ω 超过峰值转速后线性衰减（高转没劲），throttle 为 0~1。
+ * peak 由 deriveHandling 给出（含车辆扭矩与发动机升级），未给出时回退到车辆基准。
+ */
+export function torqueAt(veh, omega, throttle, peak) {
   const p = (veh && veh.phys) || {};
-  const peak = TORQUE_PEAK_BASE * (p.torque || 1);
+  const P = peak || TORQUE_PEAK_BASE * (p.torque || 1);
   const w0 = TORQUE_RPM_BASE * (p.rpm || 1);
   const w = Math.abs(omega || 0);
   let f = 1;
   if (w > w0 * TORQUE_FADE_LO) {
     f = c01(1 - (w - w0 * TORQUE_FADE_LO) / (w0 * (TORQUE_FADE_HI - TORQUE_FADE_LO)));
   }
-  return peak * f * c01(throttle || 0);
+  return P * f * c01(throttle || 0);
 }
 
 // ---------------- 落地反馈与视觉特效阈值（一律真实 px/s） ----------------
 /** 落地冲击归一化基准：竖向速度达到此值 = 压到底 */
 export const LAND_REF = 520;
-/** 竖向速度安全上限（防止数值爆掉） */
-export const VSPD_CAP = 1200;
-/** 下坡允许超过极速的倍率 */
-export const DOWNHILL_K = 1.35;
 /** 骑尘 / 高速扬尘的启动速度 */
 export const DUST_V = 150;
 export const DUST_HEAVY_V = 320;
@@ -200,8 +217,6 @@ export const DUST_HEAVY_V = 320;
 export const SPEEDLINE_V = 260;
 export const SPEEDLINE_REF = 560;
 
-/** 贴地吸附带宽（px） */
-export const CONTACT_TOL = 12;
 /** 摔车昏迷时长（秒） */
 export const STUN_TIME = 1.1;
 /** 出生点 x */
@@ -231,21 +246,12 @@ export const CRASH_TIME_PENALTY = 2;
 
 // ---------------- 跳台（airtime 变体专用，确定性滞空源） ----------------
 /**
- * 跳台抬升速度基准（px/s）。
- * 注意：贴地钳制会吞掉一部分上冲，因此实际滞空明显小于 2v/g；
- * 数值是实测标定值（见 tools/autotest.mjs 的"跳台滞空可靠性"断言），不要凭公式改。
+ * 跳台抬升速度（px/s）：一次性施加给整车的向上速度冲量。
+ * 滞空 ≈ 2v/g = 2×250/750 ≈ 0.67s（与 KICK_TARGET 对应）。
  */
-export const KICK_V = 900;
+export const KICK_V = 250;
 /** 触发跳台所需的最低车速（px/s）：太慢只是骑过去 */
 export const KICK_MIN_V = 220;
-/**
- * 跳台抬离接触带的高度（px）：必须 > CONTACT_TOL，
- * 否则轮子仍被判定为"在接触带内"，贴地钳制会立刻吸掉上冲（跳台失效）。
- */
-export const KICK_LIFT = 30;
-/** 跳台发射持续帧数与推力倍率（持续推力比单次冲量更抗贴地钳制） */
-export const KICK_FRAMES = 9;
-export const KICK_BOOST = 1.0;
 /** 每个跳台的达标滞空（秒）：目标线 = 跳台数 × 该值 */
 export const KICK_TARGET = 0.62;
 

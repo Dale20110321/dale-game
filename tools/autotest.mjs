@@ -220,12 +220,13 @@ if (ONLY_MODULES) {
   const { THEMES } = await import(new URL("../src/config/themes.js", import.meta.url).href);
   const { Stepper } = await import(new URL("../src/core/loop.js", import.meta.url).href);
   const { groundInfo, groundY } = await import(new URL("../src/physics/terrain.js", import.meta.url).href);
-  const { stepPhysics, resetBike, rotateBikeAround, crash } = await import(new URL("../src/physics/bike.js", import.meta.url).href);
+  const { stepPhysics, resetBike, rotateBikeAround, crash, capHitCount } = await import(new URL("../src/physics/bike.js", import.meta.url).href);
   const { updateStats } = await import(new URL("../src/game/stats.js", import.meta.url).href);
-  const { startGame, update, runGuard, restart } = await import(new URL("../src/game/game.js", import.meta.url).href);
-  const { SUBV, SUB_DT, DT, toM, REF_SPEED, OBST_HIT_V, CRASH_FUEL_LOSS, CRASH_TIME_PENALTY } = await import(
-    new URL("../src/config/constants.js", import.meta.url).href
-  );
+  const { startGame, update, runGuard, restart, initGame } = await import(new URL("../src/game/game.js", import.meta.url).href);
+  const {
+    SUBV, SUB_DT, DT, toM, REF_SPEED, OBST_HIT_V, CRASH_FUEL_LOSS, CRASH_TIME_PENALTY,
+    OBST_R, gateSpeed, hazardSpeed,
+  } = await import(new URL("../src/config/constants.js", import.meta.url).href);
   const { hasAch } = await import(new URL("../src/game/progress.js", import.meta.url).href);
   const { save, loadSave, loadAchList, getUp } = await import(new URL("../src/core/storage.js", import.meta.url).href);
   const { drawScene } = await import(new URL("../src/render/scene.js", import.meta.url).href);
@@ -756,6 +757,13 @@ if (ONLY_MODULES) {
   section("面板交互（集成）");
   {
     const menu = await import(new URL("../src/ui/menu.js", import.meta.url).href);
+    // 结算结果卡由 game 层通过注入的 presenter 渲染（Task 8.3）。测试里必须接上真实实现，
+    // 否则 presentResult 缺失会走"定时自动推进"的回退分支，结算卡不会出现。
+    initGame({
+      hideOverlay: menu.hideOverlay,
+      toMenu: () => { store.state = "menu"; },
+      presentResult: menu.showResultCard,
+    });
     const { renderLevelsPanel } = await import(new URL("../src/ui/panels.js", import.meta.url).href);
     const panelEl = document.getElementById("modePanel");
     const overlayEl = document.getElementById("overlay");
@@ -790,7 +798,7 @@ if (ONLY_MODULES) {
     key.right = true;
     key.left = false;
     update(DT); // 解锁起步
-    bike.rear.x = bike.front.x = bike.head.x = store.finishX + 10;
+    for (const p of bike.pts) { p.x = store.finishX + 10; p.y = groundY(p.x) - 14; p.px = p.x; p.py = p.y; }
     update(DT); // 触发 finishLevel → 结果卡
     const cardShown = store.state === "ended" && !panelEl.classList.contains("hidden") && !overlayEl.classList.contains("hidden");
     check("到达终点弹出结算结果卡", cardShown,
@@ -801,9 +809,12 @@ if (ONLY_MODULES) {
       store.state === "play" && overlayEl.classList.contains("hidden"),
       `state=${store.state} 遮罩隐藏=${overlayEl.classList.contains("hidden")} selLevel=${store.selLevel}`);
 
-    // 4) 结算卡「返回菜单」
-    store.state = "play";
-    bike.rear.x = bike.front.x = bike.head.x = store.finishX + 10;
+    // 4) 结算卡「返回菜单」（重开一局，否则上一局的 clearing 会让通关判定不再触发）
+    startGame("level", 0);
+    key.right = true;
+    key.left = false;
+    update(DT); // 解锁起步
+    for (const p of bike.pts) { p.x = store.finishX + 10; p.y = groundY(p.x) - 14; p.px = p.x; p.py = p.y; }
     update(DT);
     if (store.state === "ended") clickAct("resultMenu");
     check("结算卡「返回菜单」回到主菜单",
@@ -871,7 +882,7 @@ if (ONLY_MODULES) {
     // 落地：抬高后自由落体，必须派发 onLand
     startGame("level", 0);
     seen.length = 0;
-    for (const p of [bike.rear, bike.front, bike.head]) { p.y -= 220; p.py -= 220; }
+    for (const p of bike.pts) { p.y -= 220; p.py -= 220; }
     let tl = 0;
     while (tl < 4 && !seen.some((s) => s.startsWith("land:"))) {
       autoInput();
@@ -995,6 +1006,452 @@ if (ONLY_MODULES) {
       `tol=${C.SOLVER_TOL} iters=${C.SOLVER_ITERS} pen=${C.PEN_TOL} cap=${C.NUM_CAP_V}`);
   }
 
+  // ============================================================
+  //  第 3 期物理护栏
+  //    Task 2.2-2.4 约束求解器 / 3.2 3.5 单侧接触与坡顶腾空 /
+  //    4.3-4.6 轮上动力学 / 5.5 悬挂行程差异 / 6.4 阻力与极速 /
+  //    7.3 7.4 空中角动量 / 9.1-9.7 数值正确性护栏
+  // ============================================================
+  const P3 = await import(new URL("../src/config/constants.js", import.meta.url).href);
+  const T3 = await import(new URL("../src/physics/terrain.js", import.meta.url).href);
+  const B3 = await import(new URL("../src/physics/bike.js", import.meta.url).href);
+  const { WHEELBASE: WB3, SEAT_H: SH3, SOLVER_TOL: TOL3, PEN_TOL: PEN3, NUM_CAP_V: CAP3, START_X: SX3, SUB_DT: SSUB3 } = P3;
+  const vehBak3 = store.currentVehicle;
+  const upBak3 = JSON.parse(JSON.stringify(store.upgrades || {}));
+  /** 固定 0 级升级：隔离升级数值，让物理量测得的差异只来自"物理本身" */
+  const zeroUp3 = () => { const u = getUp(); u.engine = 0; u.tire = 0; u.frame = 0; u.susp = 0; };
+  const setVel3 = (vx, vy) => { for (const p of bike.pts) { p.px = p.x - vx * SSUB3; p.py = p.y - vy * SSUB3; } };
+  const avg3 = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+  /** 质心速度 + 质心高度 → 机械能 E = ½mv² + m·g·h（h 向上为正 = -y） */
+  const energyOf = (m, g) => {
+    const sv = { vx: 0, vy: 0, mt: 0 };
+    for (const p of bike.pts) { sv.vx += p._vx * p.m; sv.vy += p._vy * p.m; sv.mt += p.m; }
+    const cy = bike.pts.reduce((a, p) => a + p.y * p.m, 0) / sv.mt;
+    return { v: Math.hypot(sv.vx / sv.mt, sv.vy / sv.mt), E: 0.5 * m * ((sv.vx / sv.mt) ** 2 + (sv.vy / sv.mt) ** 2) + m * g * (-cy) };
+  };
+  const stripJs = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+
+  // ---------------- Task 2.4：约束收敛 / 刚性不漂移 / 逆质量加权 ----------------
+  section("约束求解器（收敛 / 刚性 / 逆质量加权）");
+  {
+    let maxResid = 0, sumResid = 0, maxRigid = 0, sumRigid = 0, nR = 0;
+    const Lr = Math.hypot(WB3 * 0.5, SH3);
+    for (const lv of [20, 45, 71]) {
+      zeroUp3(); startGame("level", lv);
+      key.right = true; key.left = false;
+      for (let i = 0; i < 1800; i++) {
+        update(DT);
+        if (store.state !== "play") break;
+        maxResid = Math.max(maxResid, bike.solverResid);
+        sumResid += bike.solverResid;
+        const e = Math.max(
+          Math.abs(Math.hypot(bike.axleF.x - bike.axleR.x, bike.axleF.y - bike.axleR.y) - WB3),
+          Math.abs(Math.hypot(bike.head.x - bike.axleR.x, bike.head.y - bike.axleR.y) - Lr),
+          Math.abs(Math.hypot(bike.head.x - bike.axleF.x, bike.head.y - bike.axleF.y) - Lr)
+        );
+        maxRigid = Math.max(maxRigid, e);
+        sumRigid += e;
+        nR++;
+      }
+    }
+    check("约束残差收敛到阈值内（均值 < SOLVER_TOL，瞬时最大亚像素级）",
+      sumResid / nR < TOL3 && maxResid < 0.6,
+      `均值 ${(sumResid / nR).toFixed(4)}px / 最大 ${maxResid.toFixed(3)}px（SOLVER_TOL=${TOL3}，${nR} 帧）`);
+    check("刚体距离约束不漂移（平均误差 <0.05px、瞬时最大 <6px）",
+      sumRigid / nR < 0.05 && maxRigid < 6,
+      `均值 ${(sumRigid / nR).toFixed(4)}px / 最大 ${maxRigid.toFixed(2)}px（轮距 ${WB3}px、骑手杆长 ${Lr.toFixed(1)}px）`);
+
+    // 逆质量加权：把最轻的"骑手质点"沿 +x 推开 30px（不注入速度），
+    // 单步后它的修正量必须大于两个轴心质点（重端少动）
+    zeroUp3(); startGame("level", 0);
+    key.right = false; key.left = false;
+    resetBike(300);
+    for (const p of bike.pts) { p.y -= 400; p.py -= 400; }
+    setVel3(0, 0);
+    const hx0 = bike.head.x, rx0 = bike.axleR.x, fx0 = bike.axleF.x;
+    bike.head.x += 30; bike.head.px += 30;
+    stepPhysics();
+    const dh = Math.abs(bike.head.x - (hx0 + 30));
+    const dr = Math.abs(bike.axleR.x - rx0);
+    const df = Math.abs(bike.axleF.x - fx0);
+    check("约束修正按逆质量加权（最轻的骑手质点修正量最大）",
+      dh > dr && dh > df && dh / Math.max(1e-6, dr) > 1.2,
+      `Δhead=${dh.toFixed(2)}px > ΔaxleR=${dr.toFixed(2)} / ΔaxleF=${df.toFixed(2)}（比值 ${(dh / Math.max(1e-6, dr)).toFixed(2)}，mR/mH=${(store.phys.rb.mR / store.phys.rb.mH).toFixed(2)}）`);
+  }
+
+  // ---------------- Task 3.2 / 3.5：单侧接触与坡顶自然腾空 ----------------
+  section("单侧接触与坡顶腾空");
+  {
+    // 逐关正确切关后扫描：找全 72 关最尖的坡顶（腾空的几何条件 d²y/dx² 最大处）
+    let crest = { lv: 0, x: 0, c: -1 };
+    for (let i = 0; i < LEVELS.length; i++) {
+      startGame("level", i);
+      const li = LEVELS[i];
+      for (let x = 900; x < li.len - 900; x += 7) {
+        const cc = T3.groundCurvature(x);
+        if (cc > crest.c) crest = { lv: i, x, c: cc };
+      }
+    }
+    function crestJump(speed) {
+      zeroUp3(); startGame("level", crest.lv);
+      key.left = false; key.right = false;
+      resetBike(crest.x - 180);
+      setVel3(speed, 0);
+      let air = 0, g = 0;
+      while (g++ < 1200) {
+        stepPhysics();
+        if (bike.grounded === 0) air += DT;
+        if (g > 80 && air > 0 && bike.grounded > 0) break;
+      }
+      return air;
+    }
+    const slow = crestJump(180), fast = crestJump(480);
+    check("低速过坡顶几乎不离地", slow < 0.1, `${slow.toFixed(3)}s @180px/s`);
+    check("高速过坡顶自然腾空（单侧接触，无任何起飞判据）", fast >= 0.3, `${fast.toFixed(3)}s @480px/s`);
+    check("腾空时长随车速增加", fast > slow + 0.15, `慢 ${slow.toFixed(3)}s → 快 ${fast.toFixed(3)}s`);
+
+    zeroUp3(); startGame("level", 0);
+    key.right = true; key.left = false;
+    let airF = 0, tF = 0;
+    for (let i = 0; i < 600; i++) { update(DT); tF += DT; if (bike.grounded === 0) airF += DT; }
+    check("平缓起伏上不出现无理由离地（第1关全油门 10s）",
+      airF / tF < 0.05, `空中占比 ${((airF / tF) * 100).toFixed(1)}%`);
+
+    check("无 rearAir / frontAir 腾空状态机与曲率起飞判据",
+      !/\brearAir\b|\bfrontAir\b|\bLAUNCH_K\b|\bLAUNCH_MAX\b/.test(stripJs(readFileSync(join(ROOT, "src", "physics", "bike.js"), "utf8"))),
+      "bike.js（剥注释）无 rearAir / frontAir / LAUNCH_K / LAUNCH_MAX");
+  }
+
+  // ---------------- Task 4.3-4.6：轮上动力学（滑移 / 锁死 / 陡坡打滑） ----------------
+  section("轮上动力学（滑移率 / 刹车锁死 / 陡坡打滑）");
+  {
+    // 同关同车，只改场景 traction：滚动段（0.5–1.5s）滑移率对比
+    function gripLaunch(traction) {
+      zeroUp3(); startGame("level", 0);
+      store.phys.TRACTION = traction; B3.applyUpgrades();
+      key.right = false; key.left = false; resetBike(300);
+      key.right = true;
+      const slips = [];
+      let v1s = 0;
+      for (let i = 0; i < 180; i++) {
+        update(DT);
+        if (i >= 30 && i < 90) slips.push(bike.slip.rear);
+        if (i === 59) v1s = Math.abs(bike.speed);
+      }
+      return { meanSlip: avg3(slips), v1s, mu: store.phys.mu };
+    }
+    const hi = gripLaunch(1.0);   // 高抓地（绿野 traction = 1.0）
+    const lo = gripLaunch(0.62);  // 冰川 traction = 0.62
+    check("高抓地场景满油门滚动段滑移率在阈值内（不打滑）",
+      Math.abs(hi.meanSlip) < 0.25, `μ=${hi.mu.toFixed(2)} 平均滑移=${hi.meanSlip.toFixed(3)}`);
+    check("冰川场景同油门滑移率显著更高（该打滑处打滑）",
+      lo.meanSlip < hi.meanSlip - 0.15 && lo.meanSlip < -0.35,
+      `高抓地 ${hi.meanSlip.toFixed(3)} → 冰川 ${lo.meanSlip.toFixed(3)}（μ ${hi.mu.toFixed(2)}→${lo.mu.toFixed(2)}）`);
+    check("冰川场景同油门加速度更低",
+      lo.v1s < hi.v1s, `1.0s 车速：高抓地 ${hi.v1s.toFixed(0)}px/s > 冰川 ${lo.v1s.toFixed(0)}px/s`);
+
+    // 陡坡：法向力下降（摩擦上限下降）→ 打滑且无法继续加速
+    let steep = { lv: 0, x: 0, m: 0 };
+    for (let i = 0; i < LEVELS.length; i++) {
+      startGame("level", i);
+      const li = LEVELS[i];
+      for (let x = 700; x < li.len - 700; x += 7) {
+        const m = T3.groundSlope(x);
+        if (m < steep.m) steep = { lv: i, x, m };
+      }
+    }
+    /** 同一关内：陡上坡段 / 平路段 的法向力与滑移（重力、车辆、升级都相同） */
+    function segRun(x, pick) {
+      zeroUp3(); startGame("level", steep.lv);
+      key.left = false; key.right = false;
+      resetBike(x);
+      key.right = true;
+      const fns = [], slips = [], vs = [];
+      for (let i = 0; i < 220; i++) {
+        update(DT);
+        const m = T3.groundSlope((bike.rear.x + bike.front.x) / 2);
+        if (pick === "steep" ? m < -0.25 : Math.abs(m) < 0.1) {
+          fns.push(bike.fn.rear + bike.fn.front);
+          slips.push(bike.slip.rear);
+          vs.push(Math.abs(bike.speed));
+        }
+      }
+      return { fn: avg3(fns), slip: avg3(slips), minSlip: Math.min(0, ...slips), v0: vs[0] || 0, v1: vs[vs.length - 1] || 0, n: fns.length };
+    }
+    // 同关找一处平地做基线（避免重力/车辆差异污染对比）
+    let flatX = -1;
+    for (let x = 700; x < LEVELS[steep.lv].len - 900; x += 6) {
+      let ok = true;
+      for (let d = 0; d <= 200; d += 20) if (Math.abs(T3.groundSlope(x + d)) > 0.1) { ok = false; break; }
+      if (ok) { flatX = x; break; }
+    }
+    const steepSeg = segRun(steep.x - 60, "steep");
+    const flatSeg = flatX > 0 ? segRun(flatX, "flat") : { fn: 0 };
+    check("陡坡上法向力下降（摩擦上限随之下降）",
+      flatSeg.fn > 0 && steepSeg.fn < flatSeg.fn,
+      `平地（第${steep.lv + 1}关）Fn=${flatSeg.fn.toFixed(0)} → 陡上坡 ${(Math.atan(-steep.m) * 57.3).toFixed(0)}° Fn=${steepSeg.fn.toFixed(0)}`);
+    check("陡坡上出现打滑且无法继续加速",
+      steepSeg.minSlip < -0.3 && steepSeg.v1 - steepSeg.v0 < 60,
+      `陡上坡滑移 均值=${steepSeg.slip.toFixed(3)}/最负=${steepSeg.minSlip.toFixed(3)}，段内车速 ${steepSeg.v0.toFixed(0)}→${steepSeg.v1.toFixed(0)}px/s`);
+
+    // 刹车锁死：刹后轮速归零、转滑动摩擦（slip > 0 = 拖滞）
+    zeroUp3(); startGame("level", 0);
+    key.right = true; key.left = false;
+    for (let i = 0; i < 240; i++) update(DT);
+    const wBefore = Math.abs(bike.wheelRot.rear), vBefore = Math.abs(bike.speed);
+    key.right = false; key.left = true;
+    let minW = Infinity, maxSlipB = 0;
+    for (let i = 0; i < 40; i++) { update(DT); minW = Math.min(minW, Math.abs(bike.wheelRot.rear)); maxSlipB = Math.max(maxSlipB, bike.slip.rear); }
+    check("刹车扭矩过大时轮子锁死（角速度归零、转滑动摩擦）",
+      minW < 0.5 && maxSlipB > 0.3 && vBefore > 100,
+      `刹前 ω=${wBefore.toFixed(1)}rad/s v=${vBefore.toFixed(0)}px/s → 刹后 min|ω|=${minW.toFixed(2)} 最大拖滞滑移=${maxSlipB.toFixed(3)}`);
+
+    // 滑移率作为状态量暴露（渲染层可读）
+    check("滑移率 / 轮上状态作为状态量暴露给渲染层",
+      typeof bike.slip.rear === "number" && typeof bike.wheelRot.rear === "number" &&
+        typeof bike.wheelAcc.rear === "number" && typeof bike.fn.rear === "number" && typeof bike.susp.rear.t === "number",
+      `slip=${bike.slip.rear.toFixed(3)} ω=${bike.wheelRot.rear.toFixed(1)} α=${bike.wheelAcc.rear.toFixed(1)} Fn=${bike.fn.rear.toFixed(0)} 行程=${bike.susp.rear.t.toFixed(2)}`);
+  }
+
+  // ---------------- Task 5.5：悬挂行程差异 + 画面下沉派生 ----------------
+  section("悬挂行程（减震 0 vs 满级）");
+  {
+    function dropS(lv) {
+      const u = getUp(); u.engine = 0; u.tire = 0; u.frame = 0; u.susp = lv;
+      startGame("level", 0);
+      key.right = false; key.left = false;
+      resetBike(220);
+      store.cam.shake = 0;
+      for (const p of bike.pts) { p.y -= 160; p.py -= 160; }
+      setVel3(0, 0);
+      let peak = 0, g = 0;
+      while (g++ < 600) { stepPhysics(); peak = Math.max(peak, Math.abs(bike.susp.rear.t)); if (bike.grounded > 0) break; }
+      return { travel: store.phys.susp.travel, k: store.phys.susp.k, peak, squash: bike.squash };
+    }
+    const s0 = dropS(0), s100 = dropS(100);
+    check("减震 0 级与满级的行程/刚度可观测地不同",
+      s100.travel > s0.travel && s100.k > s0.k,
+      `行程 ${s0.travel}→${s100.travel}px · 刚度 ${s0.k.toFixed(0)}→${s100.k.toFixed(0)}`);
+    check("同落差下悬挂压缩量差异可观测",
+      Math.abs(s0.peak - s100.peak) > 0.02,
+      `峰值压缩：0 级 ${s0.peak.toFixed(2)}px vs 满级 ${s100.peak.toFixed(2)}px`);
+    check("画面下沉量由悬挂行程派生（-1 ≤ squash ≤ 0，无独立弹簧）",
+      s100.squash <= 0.001 && s100.squash >= -1.001 && !/squashK|SQUASH_K/.test(stripJs(readFileSync(join(ROOT, "src", "physics", "bike.js"), "utf8"))),
+      `squash=${s100.squash.toFixed(3)}（由 susp 行程均值派生）`);
+  }
+
+  // ---------------- Task 6.1 / 6.4：阻力与极速自平衡 ----------------
+  section("阻力与极速自平衡（Task 6.1 / 6.4）");
+  {
+    zeroUp3(); startGame("level", 0);
+    world.hazards = []; world.obstacles = []; world.gates = []; world.jumps = []; world.boosts = [];
+    store.finishX = 1e9; store.run.lastSafeX = 300;
+    key.right = true; key.left = false;
+    let maxV = 0, winA = 0, winB = 0, t = 0;
+    for (let i = 0; i < 3600; i++) {
+      store.phys.fuel = 1;
+      update(DT); t += DT;
+      const v = Math.abs(bike.speed);
+      if (v > 0.5 && isFinite(v)) {
+        maxV = Math.max(maxV, v);
+        if (t > 20 && t <= 40) winA = Math.max(winA, v);
+        if (t > 40 && t <= 60) winB = Math.max(winB, v);
+      }
+    }
+    check("平路全油门车速收敛（后 20s 峰值不再高于前 20s）",
+      winB <= winA * 1.02, `峰值 前20s=${winA.toFixed(0)} / 后20s=${winB.toFixed(0)}px/s（MAXV=${store.phys.MAXV.toFixed(0)}px/s 仅作标定参考）`);
+    check("长程峰值有界（≤1.4×参考极速，无发散、无硬夹断外溢）",
+      maxV <= store.phys.MAXV * 1.4, `maxV=${maxV.toFixed(0)}px/s = ${(maxV / store.phys.MAXV).toFixed(2)}×MAXV`);
+  }
+
+  // ---------------- Task 7.3 / 7.4：空中角动量 ----------------
+  section("空中角动量（轻车/重车差异）");
+  {
+    function airRot3(vehIdx) {
+      store.currentVehicle = vehIdx;
+      zeroUp3(); startGame("level", 0);
+      key.right = true; key.left = false;
+      resetBike(220);
+      for (const p of bike.pts) { p.y -= 500; p.py -= 500; }
+      setVel3(0, 0);
+      let last = 0, g = 0, air = 0;
+      while (g++ < 3000) {
+        last = bike.rotAcc;
+        const wasAir = bike.grounded === 0;
+        stepPhysics();
+        if (wasAir) air += DT;
+        if (bike.grounded > 0) break;
+      }
+      return { rot: Math.abs(last), air, iBody: store.phys.rb.iBody };
+    }
+    const light = airRot3(1), heavy = airRot3(2);
+    check("同滞空同角冲量下最轻车转角显著大于最重车",
+      light.rot > heavy.rot * 1.5,
+      `竞速车 ${light.rot.toFixed(2)}rad（I=${light.iBody.toFixed(0)}） vs 越野车 ${heavy.rot.toFixed(2)}rad（I=${heavy.iBody.toFixed(0)}），比值 ${(light.rot / heavy.rot).toFixed(2)}`);
+    check("源码无 AIR_HEAD_DAMP 人造阻尼与 enforceHeadSide 镜像补丁",
+      !/AIR_HEAD_DAMP|enforceHeadSide/.test(stripJs(readFileSync(join(ROOT, "src", "physics", "bike.js"), "utf8"))),
+      "bike.js（剥注释）无上述旧补丁（改由角冲量 + projHeadSide 不等式约束）");
+    store.currentVehicle = vehBak3;
+  }
+
+  // ---------------- Task 9.1 / 9.3-9.7：数值正确性护栏 ----------------
+  section("数值护栏（可复现 / 静止稳定 / 穿透 / 能量 / 起步 / 发散）");
+  {
+    // 9.1 完全可复现：相同初始状态 + 相同输入序列跑两次，逐帧状态完全一致
+    function trace3(seed) {
+      zeroUp3(); startGame("level", 5);
+      // 时钟用「相对本局起点」的增量：store.time 跨局连续累加，绝对值天然不可复现
+      const t0 = store.time;
+      const tr = [];
+      for (let i = 0; i < 480; i++) {
+        key.right = ((i + seed) % 13) !== 0;
+        key.left = ((i + seed) % 13) === 0;
+        update(DT);
+        tr.push([bike.rear.x, bike.rear.y, bike.front.x, bike.head.x, bike.wheelRot.rear, bike.wheelRot.front, bike.susp.rear.t, bike.susp.front.t, store.phys.fuel, store.time - t0]);
+      }
+      return tr;
+    }
+    const tA = trace3(0), tB = trace3(0);
+    let diffCount = 0;
+    for (let i = 0; i < tA.length; i++) for (let j = 0; j < tA[i].length; j++) if (tA[i][j] !== tB[i][j]) diffCount++;
+    check("完全可复现：同初始状态 + 同输入 → 逐帧状态完全一致",
+      diffCount === 0, `${tA.length} 帧 × ${tA[0].length} 分量，差异分量 ${diffCount} 个`);
+
+    // 9.3a 未起步（锁定）时完全静止且时钟不推进
+    zeroUp3(); startGame("level", 0);
+    key.right = false; key.left = false;
+    resetBike(300);
+    const lx0 = bike.rear.x, ly0 = bike.rear.y, lt0 = store.time;
+    for (let i = 0; i < 180; i++) update(DT);
+    check("未起步（锁定）时完全静止：不滑动、不抖动、时钟不推进",
+      bike.rear.x === lx0 && bike.rear.y === ly0 && store.time === lt0,
+      `Δx=${(bike.rear.x - lx0).toFixed(3)} Δy=${(bike.rear.y - ly0).toFixed(3)} Δt=${(store.time - lt0).toFixed(3)}s`);
+
+    // 9.3b 解锁后多坡度零速静置 3s：不发散 / 无高频振荡 / 机械能不增长
+    const stabRows = [];
+    let stabBad = 0;
+    for (const lv of [0, 30, 60, 71]) {
+      for (const frac of [0.2, 0.5, 0.8]) {
+        zeroUp3(); startGame("level", lv);
+        const x = T3.canSpot(LEVELS[lv].len, Math.round(LEVELS[lv].len * frac));
+        store.run.lastSafeX = x;
+        key.right = true; key.left = false; resetBike(x);
+        update(DT); // 解锁
+        key.right = false;
+        const m = store.phys.rb.mTot, g = store.phys.GRAV;
+        let e0 = null, eMax = -Infinity, maxV = 0, flips = 0, prev = 0;
+        for (let i = 0; i < 180; i++) {
+          update(DT);
+          const vx = (bike.rear.x - bike.rear.px) / SSUB3, vy = (bike.rear.y - bike.rear.py) / SSUB3;
+          maxV = Math.max(maxV, Math.hypot(vx, vy));
+          const sg = Math.sign(vx);
+          if (sg && prev && sg !== prev) flips++;
+          if (sg) prev = sg;
+          const { E } = energyOf(m, g);
+          if (e0 === null) e0 = E;
+          eMax = Math.max(eMax, E);
+        }
+        const growth = ((eMax - e0) / Math.abs(e0)) * 100;
+        if (!(maxV <= REF_SPEED * 0.75) || flips > 2 || growth > 0.5) {
+          stabBad++;
+          stabRows.push(`第${lv + 1}关@${frac}(v=${maxV.toFixed(0)},翻转=${flips},ΔE=${growth.toFixed(2)}%)`);
+        }
+      }
+    }
+    check("多坡度零速静置不发散（速度有界 / 无高频振荡 / 机械能不增长）",
+      stabBad === 0,
+      stabBad ? stabRows.join(",") : "12 个坡度工况全部通过（车辆沿坡自然滚动，非静摩擦锁死）");
+
+    // 9.4 高速撞断层：穿透有界
+    let worstPen = 0, worstLv = 0;
+    for (let lv = 0; lv < LEVELS.length; lv++) {
+      const L = LEVELS[lv];
+      if (!L.steps || !L.steps.length) continue;
+      zeroUp3(); startGame("level", lv);
+      let tested = 0;
+      for (const s of L.steps) {
+        if (s.cx < 700 || s.cx > L.len - 700) continue;
+        if (tested++ >= 2) break;
+        key.left = false; key.right = false;
+        resetBike(Math.round(s.cx - 220));
+        setVel3(600, 0);
+        for (let i = 0; i < 200; i++) { stepPhysics(); if (bike.penetration > worstPen) { worstPen = bike.penetration; worstLv = lv; } }
+      }
+    }
+    check("高速撞断层穿透不超过容差（有界）",
+      worstPen <= PEN3 + 0.5, `最大穿透=${worstPen.toFixed(2)}px（PEN_TOL=${PEN3}，第${worstLv + 1}关）`);
+
+    // 9.5 无动力自由滑行：机械能不增长
+    zeroUp3(); startGame("level", 0);
+    world.hazards = []; world.obstacles = []; world.gates = []; world.jumps = []; world.boosts = [];
+    store.finishX = 1e9; store.run.lastSafeX = 300;
+    key.right = true; key.left = false;
+    for (let i = 0; i < 180; i++) update(DT);
+    key.right = false;
+    const mG = store.phys.rb.mTot, gG = store.phys.GRAV;
+    let eG0 = null, eGMax = -Infinity;
+    const gx0 = (bike.rear.x + bike.front.x) / 2;
+    for (let i = 0; i < 300; i++) {
+      store.phys.fuel = 1;
+      update(DT);
+      const { E } = energyOf(mG, gG);
+      if (eG0 === null) eG0 = E;
+      eGMax = Math.max(eGMax, E);
+    }
+    const glideDist = (bike.rear.x + bike.front.x) / 2 - gx0;
+    check("无动力自由滑行中机械能不增长",
+      eGMax <= eG0 + Math.abs(eG0) * 0.005,
+      `滑行 ${glideDist.toFixed(0)}px，能量最大增长 ${(((eGMax - eG0) / Math.abs(eG0)) * 100).toFixed(3)}%`);
+
+    // 9.6 从静止可起步：72 关正式出生点全部可起步 + 每关 3 个独立采样位置成功率
+    const startBad = [];
+    let sampleBad = 0, sampleTot = 0;
+    const moveFrom = (lv, x) => {
+      zeroUp3(); startGame("level", lv);
+      store.run.lastSafeX = x;
+      key.right = false; key.left = false;
+      resetBike(x);
+      const x0 = bike.rear.x;
+      key.right = true;
+      for (let i = 0; i < 120; i++) update(DT);
+      return bike.rear.x - x0;
+    };
+    for (let lv = 0; lv < LEVELS.length; lv++) {
+      const mv = moveFrom(lv, SX3);
+      if (mv < 60) startBad.push(`第${lv + 1}关(${mv.toFixed(0)}px)`);
+      for (const frac of [0.2, 0.5, 0.8]) {
+        sampleTot++;
+        const m2 = moveFrom(lv, Math.round(LEVELS[lv].len * frac));
+        if (m2 < 25) sampleBad++;
+      }
+    }
+    check("全部 72 关正式出生点从静止均可起步",
+      startBad.length === 0, startBad.length ? startBad.slice(0, 6).join(",") : "72/72 出生点 2s 内前进 ≥60px");
+    check("每关独立采样位置从静止可起步比例 ≥95%（失败处为陡上坡自然倒退）",
+      sampleBad / sampleTot <= 0.05, `${sampleTot - sampleBad}/${sampleTot} 可起步（${(((sampleTot - sampleBad) / sampleTot) * 100).toFixed(1)}%）`);
+
+    // 9.7 颠簸/断层长程：无 NaN、无爆冲、无振荡发散
+    zeroUp3(); startGame("level", 71);
+    key.right = true; key.left = false;
+    let dNaN = false, dvMaxV = 0, dvMaxVy = 0, dvAir = 0, dvT = 0;
+    for (let i = 0; i < 1800; i++) {
+      update(DT); dvT += DT;
+      if (store.state !== "play") break;
+      if (!isFinite(bike.rear.x) || !isFinite(bike.speed) || !isFinite(bike.wheelRot.rear) || !isFinite(bike.susp.rear.t)) { dNaN = true; break; }
+      dvMaxV = Math.max(dvMaxV, Math.abs(bike.speed));
+      dvMaxVy = Math.max(dvMaxVy, Math.abs((bike.rear.y - bike.rear.py) / SSUB3));
+      if (bike.grounded === 0) dvAir += DT;
+    }
+    check("颠簸/断层长程无 NaN、无爆冲、无振荡发散",
+      !dNaN && dvMaxV < CAP3 && dvMaxVy < 500 && dvAir / Math.max(0.1, dvT) < 0.4,
+      `NaN=${dNaN} maxV=${dvMaxV.toFixed(0)}px/s max|vy|=${dvMaxVy.toFixed(0)}px/s 空中占比=${((dvAir / Math.max(0.1, dvT)) * 100).toFixed(0)}%`);
+  }
+
+  // 恢复车辆 / 升级 / 场景抓地（后续关卡回归依赖干净基线）
+  store.upgrades = upBak3;
+  store.currentVehicle = vehBak3;
+  B3.applyUpgrades();
+
   const midX = () => (bike.rear.x + bike.front.x) / 2;
   const mx_of = () => (bike.rear.x + bike.front.x) / 2;
 
@@ -1032,15 +1489,22 @@ if (ONLY_MODULES) {
       if (!brake) {
         for (const o of world.obstacles) {
           const d = o.x - mx;
-          if (d < -30 || d > 260) continue;
-          if (spd > OBST_HIT_V * 0.8) { brake = true; break; }
+          if (d < -30) continue;
+          // 制动距离判据（而不是固定 260px 视距）：高速时提前很多刹车，
+          // 低速时几乎不刹——既避免"起飞后撞上落点的障碍"，又不牺牲整体节奏。
+          if (spd > OBST_HIT_V * 0.8 && d < 200 + spd * 0.75) { brake = true; break; }
         }
       }
     }
     const ang = Math.atan2(bike.front.y - bike.rear.y, bike.front.x - bike.rear.x);
     if (bike.grounded === 0) {
-      if (brake) { key.right = false; key.left = true; }
-      else { key.right = ang < -0.05; key.left = ang > 0.05; }
+      // 空中：速度环 PD 姿态控制（目标水平）。用"目标角速度 + 死区"而不是开关式全力矩，
+      // 否则 40rad/s² 的满舵会把车直接甩过 90° → 空中乱翻、落地必摔。
+      const e = Math.atan2(Math.sin(ang), Math.cos(ang));
+      const w = bike.angRate;
+      const wTarget = Math.max(-2.6, Math.min(2.6, -e * 3.0));
+      key.right = wTarget > w + 0.5;
+      key.left = wTarget < w - 0.5;
       return;
     }
     key.right = !brake;
@@ -1049,7 +1513,7 @@ if (ONLY_MODULES) {
 
   /** 设定整车瞬时速度（px/s） */
   function setVelocity(vx, vy) {
-    for (const p of [bike.rear, bike.front, bike.head]) {
+    for (const p of bike.pts) {
       p.px = p.x - vx * SUB_DT;
       p.py = p.y - vy * SUB_DT;
     }
@@ -1145,6 +1609,57 @@ if (ONLY_MODULES) {
     }
   }
 
+  // ---------------- 三星时限可达性 & 机制常量未放宽（第 3 期 Task 6.3 / 11.2） ----------------
+  section("三星时限可达性与机制常量");
+  {
+    // den3 可达：参考骑手（刹车策略，非最优）实际用时必须落在三星时限的合理倍数内。
+    // 参考骑手为了安全会主动刹车，因此用时天然长于三星线；这里守护的是"时限没有紧到
+    // 物理上没戏"（实测最紧 ≈1.5×，阈值留到 1.6×）。
+    let worstIdx = 0;
+    let worstRatio = 0;
+    const unreachable = [];
+    for (let i = 0; i < LEVELS.length; i++) {
+      const st = starTime(LEVELS[i]);
+      const ratio = levelTimes[i] / st;
+      if (ratio > worstRatio) { worstRatio = ratio; worstIdx = i; }
+      if (!(ratio <= 1.6)) unreachable.push(`第${i + 1}关 ${levelTimes[i].toFixed(1)}s>${(st * 1.6).toFixed(1)}s`);
+    }
+    check(
+      "三星时限物理可达（参考骑手用时 ≤ 时限的 1.6×）",
+      unreachable.length === 0,
+      unreachable.length
+        ? unreachable.join("；")
+        : `72 关全部可达；最紧为第${worstIdx + 1}关 ${levelTimes[worstIdx].toFixed(1)}s / ${starTime(LEVELS[worstIdx]).toFixed(1)}s = ${worstRatio.toFixed(2)}×`
+    );
+
+    // 机制常量不得为了"更好过"而被放宽（安全带：数值一旦漂移立刻失败）
+    check(
+      "障碍物判定半径未放宽（OBST_R=17）",
+      OBST_R === 17,
+      `OBST_R=${OBST_R}`
+    );
+    check(
+      "撞障碍速度阈值未放宽（OBST_HIT_V=330）",
+      OBST_HIT_V === 330,
+      `OBST_HIT_V=${OBST_HIT_V}`
+    );
+    check(
+      "摔车代价未放宽（燃料 -8% / 计时 +2s）",
+      CRASH_FUEL_LOSS === 0.08 && CRASH_TIME_PENALTY === 2,
+      `CRASH_FUEL_LOSS=${CRASH_FUEL_LOSS} CRASH_TIME_PENALTY=${CRASH_TIME_PENALTY}`
+    );
+    check(
+      "限时门要求未放宽（gateSpeed(den3)=den3×0.8）",
+      near(gateSpeed(248), 248 * 0.8, 1e-9) && near(gateSpeed(REF_SPEED), REF_SPEED * 0.8, 1e-9),
+      `gateSpeed(248)=${gateSpeed(248).toFixed(1)} gateSpeed(REF_SPEED)=${gateSpeed(REF_SPEED).toFixed(1)}`
+    );
+    check(
+      "危险段限速未放宽（hazardSpeed(0)=REF_SPEED×0.95）",
+      near(hazardSpeed(0), REF_SPEED * 0.95, 1e-9) && hazardSpeed(1) < hazardSpeed(0),
+      `hazardSpeed(0)=${hazardSpeed(0).toFixed(1)} hazardSpeed(1)=${hazardSpeed(1).toFixed(1)}（越靠后越严）`
+    );
+  }
+
   // ---------------- 单关诊断（--diag=<关卡序号，0 起>）：排查卡死/摔车分布用 ----------------
   if (DIAG >= 0) {
     startGame("level", DIAG);
@@ -1205,7 +1720,18 @@ if (ONLY_MODULES) {
       t += dtPerCall;
       done += stepper.lastSteps;
     }
-    return { x: midX(), fuel: store.phys.fuel, simTime: store.time, consumed: t, steps: done };
+    return {
+      x: midX(),
+      fuel: store.phys.fuel,
+      simTime: store.time,
+      consumed: t,
+      steps: done,
+      // 轮上状态（转动角 / 悬挂行程）也必须与帧率无关
+      wr: bike.wheelRot.rear,
+      wf: bike.wheelRot.front,
+      sr: bike.susp.rear.t,
+      sf: bike.susp.front.t,
+    };
   }
   const r60 = runFixed(1200, 1 / 60);
   const r120 = runFixed(1200, 1 / 120);
@@ -1213,6 +1739,25 @@ if (ONLY_MODULES) {
   const dpx = (a, b) => Math.abs(a.x - b.x);
   check("1/60 与 1/120 同帧数位移一致", dpx(r60, r120) < 1, `Δ=${dpx(r60, r120).toFixed(4)}px`);
   check("1/60 与 1/144 同帧数位移一致", dpx(r60, r144) < 1, `Δ=${dpx(r60, r144).toFixed(4)}px`);
+  const dfield = (a, b, k) => Math.abs(a[k] - b[k]);
+  const wheelMaxD = Math.max(
+    dfield(r60, r120, "wr"), dfield(r60, r120, "wf"),
+    dfield(r60, r144, "wr"), dfield(r60, r144, "wf")
+  );
+  const suspMaxD = Math.max(
+    dfield(r60, r120, "sr"), dfield(r60, r120, "sf"),
+    dfield(r60, r144, "sr"), dfield(r60, r144, "sf")
+  );
+  check(
+    "车轮转角与帧率无关（1/60 vs 1/120 / 1/144）",
+    wheelMaxD < 0.05,
+    `后轮=${r60.wr.toFixed(2)} / ${r120.wr.toFixed(2)} / ${r144.wr.toFixed(2)}rad，最大差 ${wheelMaxD.toExponential(2)}rad`
+  );
+  check(
+    "悬挂行程与帧率无关（1/60 vs 1/120 / 1/144）",
+    suspMaxD < 0.02,
+    `后减震=${r60.sr.toFixed(3)} / ${r120.sr.toFixed(3)} / ${r144.sr.toFixed(3)}px，最大差 ${suspMaxD.toExponential(2)}px`
+  );
   check("油耗与帧率无关", near(r60.fuel, r144.fuel, 1e-9), `Δ=${Math.abs(r60.fuel - r144.fuel).toExponential(2)}`);
   check(
     "20 秒（1200 步）实际消耗时间一致",
@@ -1225,10 +1770,12 @@ if (ONLY_MODULES) {
   function dropTest(vy) {
     startGame("level", 0);
     key.right = false;
+    key.left = false; // 纯垂直落地：不能有空中转体输入，否则落地姿态随机
     const x = 220;
     resetBike(x);
+    store.cam.shake = 0; // 清掉上一段用例残留的震屏，否则基线不干净
     const lift = 160;
-    for (const p of [bike.rear, bike.front, bike.head]) p.y -= lift;
+    for (const p of bike.pts) p.y -= lift;
     setVelocity(0, vy);
     let guard = 0;
     let prevRot = 0;
@@ -1262,7 +1809,7 @@ if (ONLY_MODULES) {
     const x = 220;
     resetBike(x);
     const lift = 500; // 自由落体 500px ≈ 1.15s 滞空
-    for (const p of [bike.rear, bike.front, bike.head]) p.y -= lift;
+    for (const p of bike.pts) p.y -= lift;
     setVelocity(0, 0);
     let guard = 0;
     let lastRot = 0;
@@ -1290,7 +1837,7 @@ if (ONLY_MODULES) {
     const mx = (bike.rear.x + bike.front.x) / 2;
     const my = (bike.rear.y + bike.front.y) / 2;
     rotateBikeAround(mx, my, (160 * Math.PI) / 180);
-    for (const p of [bike.rear, bike.front, bike.head]) p.y -= 220;
+    for (const p of bike.pts) p.y -= 220;
     setVelocity(0, 0);
     let guard = 0;
     while (guard++ < 900 && !store.run.crashed) stepPhysics();
@@ -1567,7 +2114,7 @@ if (ONLY_MODULES) {
       key.right = false;
       key.left = false;
       resetBike(240);
-      for (const p of [bike.rear, bike.front, bike.head]) p.y -= 300; // 先离地，避免悬挂把它锚回地面
+      for (const p of bike.pts) p.y -= 300; // 先离地，避免悬挂把它锚回地面
       setVelocity(0, -300); // 同样的向上初速（px/s）
       const y0 = (bike.rear.y + bike.front.y) / 2;
       let minY = y0;
@@ -1760,7 +2307,7 @@ if (ONLY_MODULES) {
       key.left = false;
       resetBike(o.x - 110);
       bike.locked = false;
-      for (const p of [bike.rear, bike.front, bike.head]) {
+      for (const p of bike.pts) {
         p.y = groundY(p.x) - 12 - lift;
         p.py = p.y;
       }
@@ -1824,10 +2371,8 @@ if (ONLY_MODULES) {
     key.left = false;
     let allInTime = true;
     for (const g of world.gates) {
-      bike.rear.x = g.x + 6;
-      bike.front.x = g.x + 6;
-      bike.head.x = g.x + 6;
-      for (const p of [bike.rear, bike.front, bike.head]) {
+      for (const p of bike.pts) p.x = g.x + 6;
+      for (const p of bike.pts) {
         p.y = groundY(p.x) - 12;
         p.px = p.x;
         p.py = p.y; // 同步 px/py → 速度为 0，避免瞬移造成高速误判
@@ -1837,10 +2382,8 @@ if (ONLY_MODULES) {
     }
     check("按时通过全部门", allInTime && store.run.gateIdx === world.gates.length,
       `通过 ${store.run.gateIdx}/${world.gates.length}`);
-    bike.rear.x = store.finishX + 8;
-    bike.front.x = store.finishX + 8;
-    bike.head.x = store.finishX + 8;
-    for (const p of [bike.rear, bike.front, bike.head]) { p.px = p.x; p.py = p.y; }
+    for (const p of bike.pts) p.x = store.finishX + 8;
+    for (const p of bike.pts) { p.px = p.x; p.py = p.y; }
     update(DT);
     check("按时通过全部门可正常结算并计星",
       store.run.clearing === true && store.run.failed === false && (store.stars[0] || 0) > 0,
@@ -1857,10 +2400,8 @@ if (ONLY_MODULES) {
     const unlockBefore = store.unlocked;
     store.run.levelStartTime = store.time - 1e6; // 本关计时早已超时
     const g0 = world.gates[0];
-    bike.rear.x = g0.x + 6;
-    bike.front.x = g0.x + 6;
-    bike.head.x = g0.x + 6;
-    for (const p of [bike.rear, bike.front, bike.head]) {
+    for (const p of bike.pts) p.x = g0.x + 6;
+    for (const p of bike.pts) {
       p.y = groundY(p.x) - 12;
       p.px = p.x;
       p.py = p.y;
@@ -2350,9 +2891,8 @@ if (ONLY_MODULES) {
     key.right = true;
     key.left = false;
     update(DT); // 解锁起步
-    bike.rear.x = store.finishX + 10;
-    bike.front.x = store.finishX + 10;
-    bike.head.x = store.finishX + 10;
+    // 传送时同步 px/py（= 速度为 0）：只改 x 会让下一子步解算出上百万 px/s 的假速度
+    for (const p of bike.pts) { p.x = store.finishX + 10; p.px = p.x; }
     update(DT); // 触发 finishLevel()（延迟 800ms 结算）
     restart();
     check(
@@ -2381,7 +2921,7 @@ if (ONLY_MODULES) {
       const mx = (bike.rear.x + bike.front.x) / 2;
       const my = (bike.rear.y + bike.front.y) / 2;
       rotateBikeAround(mx, my, (160 * Math.PI) / 180);
-      for (const p of [bike.rear, bike.front, bike.head]) p.y -= 220;
+      for (const p of bike.pts) p.y -= 220;
       setVelocity(0, 0);
       let steps = 0;
       while (steps++ < 900 && !store.run.crashed) stepPhysics();
@@ -2440,7 +2980,7 @@ if (ONLY_MODULES) {
     key.left = false;
     update(DT); // 解锁起步
     const yb = store.phys.minY + 900;
-    for (const p of [bike.rear, bike.front, bike.head]) {
+    for (const p of bike.pts) {
       p.y = yb;
       p.py = yb; // 同步 py → 速度为 0
     }
@@ -2602,6 +3142,16 @@ if (ONLY_MODULES) {
     results.push(`    ${failed.join(", ") || "无"}`);
   }
 
+  // ---------------- 数值异常兜底从未触发（第 3 期 Task 9.2） ----------------
+  // NUM_CAP_V 是"最后一道保险"：只有速度发散到 ±6000px/s 或出现 NaN 才会兜底。
+  // 上面跑完了全量断言（含 72 关试跑、极速、发散压力用例），一次都不该触发。
+  section("数值异常兜底未触发");
+  check(
+    "整个测试过程中速度兜底（NUM_CAP_V）从未触发",
+    capHitCount() === 0,
+    `累计触发 ${capHitCount()} 次（覆盖全部 72 关试跑与压力用例）`
+  );
+
   // ---------------- 静态检查（死代码 / 裸换算 / 导入导出一致） ----------------
   section("静态检查");
   {
@@ -2615,11 +3165,17 @@ if (ONLY_MODULES) {
     };
     walk("src");
 
-    // 1) 死代码 / 历史遗留常量
-    const banned = ["SUS_K", "SUS_C", "SUS_MAX", "SEP_V", "ROLL_DRAG", "MAXV_CAP", "bike.impact", "freeFeat", "freeCum", "bikeAngle", "bike_impact"];
+    // 1) 死代码 / 历史遗留常量（先剥注释，避免"注释里提到"被误判）
+    const banned = [
+      "SUS_K", "SUS_C", "SUS_MAX", "SEP_V", "ROLL_DRAG", "MAXV_CAP",
+      "bike.impact", "freeFeat", "freeCum", "bikeAngle", "bike_impact",
+      // 第 3 期移除的旧物理补丁（腾空助推 / 速度上限 / 下坡加成 / 空中阻尼 / 头部镜像补丁）
+      "LAUNCH_K", "LAUNCH_MAX", "VSPD_CAP", "DOWNHILL_K", "AIR_HEAD_DAMP", "enforceHeadSide",
+    ];
     const bannedHits = [];
     for (const f of files) {
-      const src = readFileSync(join(ROOT, f), "utf8");
+      const raw = readFileSync(join(ROOT, f), "utf8");
+      const src = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
       for (const b of banned) if (src.includes(b)) bannedHits.push(f + ":" + b);
     }
     check("无历史遗留死代码", bannedHits.length === 0, bannedHits.join(",") || "无");
