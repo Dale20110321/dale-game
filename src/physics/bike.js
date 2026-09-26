@@ -7,6 +7,7 @@
 //    · 落地冲击 —— 法向速度被悬挂吸收，压缩量驱动画面下沉
 //    · 陡坡打滑 / 前轮离地 —— 法向力变小则摩擦上限变小
 //  注意：本文件所有速度换算必须用 SUBV（真实 px/s），不要写裸 *SUB。
+//  分层：本文件不 import render/ 与 ui/；摔车/落地等表现通过 ./events.js 的注入回调派发。
 // ============================================================
 import {
   SUB, SUB_DT, SUBV,
@@ -21,11 +22,7 @@ import { store, bike, world } from "../core/store.js";
 import { clamp, lerp, wrapAngle } from "../core/utils.js";
 import { getUp } from "../core/storage.js";
 import { groundInfo, groundY } from "./terrain.js";
-import { emitParticles } from "../render/particles.js";
-import { addShake } from "../render/camera.js";
-import { settleLanding } from "../game/stats.js";
-import { playCrashSound } from "../core/audio.js";
-import { showToast } from "../core/toast.js";
+import { physEvents } from "./events.js";
 import { key } from "../core/input.js";
 
 /** 按当前车辆 + 升级等级重算驾驶参数（公式统一放在 config/constants.js 的 deriveHandling） */
@@ -131,10 +128,13 @@ export function crash() {
   const P = store.phys;
   P.fuel = Math.max(0, P.fuel - CRASH_FUEL_LOSS * P.fuelMax);
   run.penaltyTime += CRASH_TIME_PENALTY;
-  addShake(11);
-  playCrashSound();
-  emitParticles(bike.head.x, bike.head.y, 20, { color: "#ff6b35", spd: 2, life: 25, size: 3, grav: 0.06 });
-  showToast("💥 摔车！燃料 -8% · 计时 +2s", 900);
+  // 表现与反馈交给注入的物理事件回调（Task 8）：震屏 / 音效 / 粒子 / 提示
+  physEvents().onCrash({
+    x: bike.head.x,
+    y: bike.head.y,
+    fuelLoss: CRASH_FUEL_LOSS,
+    timePenalty: CRASH_TIME_PENALTY,
+  });
 }
 
 /**
@@ -450,14 +450,15 @@ export function stepPhysics() {
     const vimp = Math.abs(b.front.y - b.front.py) * SUBV; // 真实落地竖向速度 px/s
     b.squashVel = -clamp(vimp / LAND_REF, 0.6, 2.4);
     b.squash = -0.3;
-    addShake(clamp((vimp / LAND_REF) * 3.0, 1.0, 7));
-    const gi = groundInfo((b.rear.x + b.front.x) / 2);
-    if (gi.y !== Infinity) {
-      emitParticles((b.rear.x + b.front.x) / 2, gi.y - 2, 8, {
-        color: "#c4a882", spd: 1.6, life: 20, size: 3, grav: 0.03,
-      });
-    }
-    settleLanding();
+    const midX = (b.rear.x + b.front.x) / 2;
+    const gi = groundInfo(midX);
+    // 震屏 / 粒子 / 落地结算均通过事件派发（Task 8）
+    physEvents().onLand({
+      x: midX,
+      y: (b.rear.y + b.front.y) / 2,
+      gy: gi.y,
+      vimp,
+    });
   }
 
   // ---------------- 悬挂弹簧（画面下沉） ----------------

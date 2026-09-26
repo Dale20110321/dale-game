@@ -215,27 +215,34 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
    ============================================================ */
 #overlay {
   position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  background: var(--scrim); color: var(--text-hi); text-align: center;
+  align-items: center;
+  justify-content: center;      /* 老浏览器兜底 */
+  justify-content: safe center; /* 内容溢出时不把顶部挤出屏幕（否则面板/按钮点不到） */
+  background: var(--scrim-strong); color: var(--text-hi); text-align: center;
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px); /* Safari */
   z-index: 20;
   overflow-y: auto; /* 小屏/横屏时按钮不再被裁掉 */
-  padding: var(--space-5) var(--space-4);
+  padding: var(--space-4) var(--space-4) var(--space-5);
 }
 #overlay.hidden { display: none; }
-#overlay h1 { font-size: clamp(28px, 7vw, var(--font-display-size)); letter-spacing: 2px; margin-bottom: var(--space-2); }
-#overlay .sub { font-size: 15px; color: var(--text-mid); margin-bottom: var(--space-4); max-width: 560px; line-height: var(--font-body-lh); }
-#overlay .keys { font-size: var(--font-caption-size); color: var(--text-lo); margin-bottom: var(--space-1); }
+#overlay h1 { font-size: clamp(24px, 5vw, 36px); letter-spacing: 1px; margin-bottom: var(--space-1); }
+#overlay .sub { font-size: 13px; color: var(--text-mid); margin-bottom: var(--space-2); max-width: 520px; line-height: var(--font-body-lh); }
+#overlay .keys { font-size: var(--font-caption-size); color: var(--text-lo); margin-bottom: 0; }
 
 .btn.sm { margin: 0; }
 .menuGroups { display: flex; flex-direction: column; align-items: center; }
 
 #modePanel {
-  position: relative; z-index: 1; /* 必须高于 #menuBg 的渐晕层，否则面板会被背景蒙住 */
-  max-width: 640px; max-height: 54vh; overflow-y: auto; margin-top: var(--space-3);
-  padding: var(--space-3); background: var(--glass-fill); border: 1px solid var(--glass-border);
+  position: relative; z-index: 2; /* 高于 #menuBg 渐晕层 */
+  flex: 0 0 auto;              /* ★ 关键：不允许被 flex 压缩成一条缝（否则面板"打不开"） */
+  width: min(680px, 92vw);
+  max-height: min(64vh, 560px);
+  overflow-y: auto; margin-top: var(--space-3);
+  padding: var(--space-3); background: var(--glass-fill-strong); border: 1px solid var(--glass-border);
   border-radius: var(--radius-card); text-align: left;
+  box-shadow: var(--glass-shadow-out);
+  -webkit-overflow-scrolling: touch;
 }
 #modePanel.hidden { display: none; }
 /* 进出场过渡：基础态即可见，.enter 为进场起点（过渡走令牌时长/缓动） */
@@ -395,17 +402,22 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 /* ============================================================
    支线卡片墙
    ============================================================ */
-.branchWall { display: flex; flex-direction: column; gap: var(--space-2); }
+/* 支线卡片墙：两列（12 张只需 6 行，大幅减少滚动） */
+.branchWall { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
 .branchCard {
-  display: flex; align-items: center; gap: var(--space-3);
+  display: flex; align-items: center; gap: var(--space-2);
   background: var(--glass-fill); border-radius: var(--radius-card);
-  padding: var(--space-3) var(--space-4); cursor: pointer;
+  padding: var(--space-2) var(--space-3); cursor: pointer;
   border: 2px solid transparent; border-left: 4px solid var(--theme-accent, var(--success));
 }
 .branchCard:hover { background: var(--glass-hover); }
 .branchCard.open { background: var(--success-soft); border-color: var(--success); }
 .branchCard.locked { color: var(--text-lo); cursor: not-allowed; }
 .branchCard .brName { font-size: 15px; font-weight: var(--font-title-weight); }
+/* 卡片文字一律单行省略，避免换行把卡片撑得参差不齐 */
+.branchCard .vname, .branchCard .vdesc, .branchCard .vstat {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .branchCard .brSub { font-size: var(--font-micro-size); color: var(--text-lo); }
 .branchCard .brStars { font-size: var(--font-caption-size); color: var(--gold); margin-top: 2px; }
 .branchCard .brDone { font-size: var(--font-caption-size); font-weight: var(--font-title-weight); color: var(--success); text-align: right; }
@@ -457,31 +469,41 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
    ============================================================ */
 #menuBg {
   position: absolute; inset: 0; z-index: 0; pointer-events: none;
-  opacity: .55;
+  opacity: .32;
   background:
     radial-gradient(60% 45% at 18% 12%, var(--accent-glow), transparent 70%),
     radial-gradient(50% 40% at 82% 78%, var(--gold-glow), transparent 72%);
 }
 #menuBg .glow {
-  position: absolute; width: 46vmin; height: 46vmin; border-radius: var(--radius-pill);
+  position: absolute; width: 34vmin; height: 34vmin; border-radius: var(--radius-pill);
   background: radial-gradient(circle, var(--accent-glow), transparent 65%);
-  filter: blur(6px);
-  animation: drift 26s var(--ease-std) infinite alternate;
+  filter: blur(10px);
+  animation: drift 30s var(--ease-std) infinite alternate;
 }
 #menuBg .glow.g2 { background: radial-gradient(circle, var(--gold-glow), transparent 65%); animation-duration: 34s; animation-delay: -8s; }
 @keyframes drift {
   from { transform: translate3d(6vw, 8vh, 0) scale(1); }
   to { transform: translate3d(58vw, 42vh, 0) scale(1.25); }
 }
-#overlay .hero, #overlay .menuGroups { position: relative; z-index: 1; width: 100%; }
-.heroSummary { display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: center; margin-bottom: var(--space-3); }
-.heroSummary .stat { min-width: 84px; align-items: center; }
-.menuGroup { margin-top: var(--space-3); }
+#overlay .hero { position: relative; z-index: 1; width: 100%; max-width: 680px; }
+#overlay .menuGroups { position: relative; z-index: 1; }
+.heroSummary { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); justify-content: center; margin-bottom: var(--space-2); }
+/* 两组并排 + 主玩法通栏：把纵向高度压到视口内（高度不够时下面的说明文字自动隐藏） */
+.menuGroups {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: var(--space-3); align-items: start; width: 100%; max-width: 680px;
+}
+.menuGroup[data-group="main"] { grid-column: 1 / -1; }
+.menuGroup[data-group="support"] .grpBtns .btn { grid-column: 1 / -1; }
+.menuGroup { margin-top: 0; }
 .menuGroup .grpHead {
   font-size: var(--font-micro-size); font-weight: var(--font-micro-weight);
-  letter-spacing: 2px; color: var(--text-lo); margin-bottom: var(--space-2);
+  letter-spacing: 2px; color: var(--text-lo); margin-bottom: var(--space-1); text-align: center;
 }
-.grpBtns { display: flex; gap: var(--space-2); flex-wrap: wrap; justify-content: center; }
+/* 等宽网格：按钮对齐，不再参差不齐 */
+.grpBtns { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-2); width: 100%; }
+.grpBtns .btn { width: 100%; min-height: 44px; padding: 8px var(--space-3); font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.grpBtns .btn.lg { grid-column: 1 / -1; min-height: 52px; font-size: 17px; }
 
 /* ============================================================
    小屏 / 横屏适配
@@ -500,12 +522,17 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 @media (max-width: 767px) {
   .lvGrid { grid-template-columns: repeat(3, 1fr); }
   .statGrid { grid-template-columns: 1fr; }
-  .menuGroup .grpBtns .btn { flex: 1 1 44%; }
+  .menuGroups { grid-template-columns: 1fr; }
+  .branchWall { grid-template-columns: 1fr; }
+}
+/* 视口不够高时收起说明文字，保证 10 个入口全部落在视口内（否则点不到） */
+@media (max-height: 820px) {
+  #overlay .sub, #overlay .keys { display: none; }
 }
 @media (max-width: 519px) {
   .lvGrid { grid-template-columns: repeat(2, 1fr); }
   .btn { padding: 10px var(--space-5); font-size: 16px; }
-  .heroSummary .stat { min-width: 68px; }
+  .grpBtns { grid-template-columns: 1fr; }
 }
 @media (max-height: 480px) {
   #overlay { justify-content: flex-start; }

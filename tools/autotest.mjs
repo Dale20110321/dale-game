@@ -93,6 +93,7 @@ function makeEl(id) {
     setAttribute(k, v) { this.attrs = this.attrs || {}; this.attrs[k] = String(v); },
     getAttribute(k) { return (this.attrs || {})[k] === undefined ? null : (this.attrs || {})[k]; },
     hasAttribute(k) { return (this.attrs || {})[k] !== undefined; },
+    removeAttribute(k) { if (this.attrs) delete this.attrs[k]; },
     insertBefore: noop,
     appendChild: noop,
     closest: () => null,
@@ -184,7 +185,7 @@ const MODULE_LIST = [
   "config/constants.js", "config/themes.js", "config/vehicles.js", "config/levels.js",
   "core/utils.js", "core/canvas.js", "core/store.js", "core/audio.js", "core/storage.js",
   "core/input.js", "core/loop.js", "core/toast.js",
-  "physics/terrain.js", "physics/bike.js", "physics/fuel.js",
+  "physics/terrain.js", "physics/bike.js", "physics/fuel.js", "physics/events.js",
   "game/progress.js", "game/stats.js", "game/world.js", "game/race.js", "game/game.js",
   "render/particles.js", "render/camera.js", "render/background.js", "render/terrain.js",
   "render/bike.js", "render/entities.js", "render/hud.js", "render/scene.js", "render/postfx.js",
@@ -406,8 +407,8 @@ if (ONLY_MODULES) {
     const rb = els("btnRanked");
     check("未解锁入口写明解锁条件与当前进度",
       /0\/72/.test(fb.textContent) && fb.classList.contains("lockedBtn") &&
-        /最终任务/.test(rb.textContent) && rb.classList.contains("lockedBtn"),
-      `最终任务="${fb.textContent}" · 排位赛="${rb.textContent}"`);
+        /最终任务/.test(rb.getAttribute("aria-label") || "") && rb.classList.contains("lockedBtn"),
+      `最终任务="${fb.textContent}" aria="${fb.getAttribute("aria-label")}" · 排位赛="${rb.textContent}" aria="${rb.getAttribute("aria-label")}"`);
 
     const { renderFinalePanel } = await import(new URL("../src/ui/panels.js", import.meta.url).href);
     const { hidePanel } = menu;
@@ -824,6 +825,73 @@ if (ONLY_MODULES) {
       `暂停态正确=${paused} · 继续后 state=${store.state} · 遮罩隐藏=${overlayEl.classList.contains("hidden")}`);
 
     menu.showMenu();
+  }
+
+  // ---------------- 物理层分层与事件解耦（Task 8） ----------------
+  section("物理层分层");
+  {
+    const physFiles = readdirSync(join(ROOT, "src", "physics")).filter((f) => f.endsWith(".js"));
+    const banned = ["../render/", "./render/", "../ui/", "./ui/", "core/toast", "core/audio", "/game/", "../game/"];
+    // 剥掉注释再扫描：注释里为说明规则会提到这些字样，不能算依赖
+    const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    const hits = [];
+    for (const f of physFiles) {
+      const src = stripComments(readFileSync(join(ROOT, "src", "physics", f), "utf8"));
+      for (const b of banned) if (src.includes(b)) hits.push(f + " → " + b);
+    }
+    check("physics/** 不再依赖 render / ui / toast / audio / game",
+      hits.length === 0,
+      hits.length ? hits.join(" ; ") : `${physFiles.length} 个物理文件 import 全部单向`);
+
+    const bikeSrc2 = readFileSync(join(ROOT, "src", "physics", "bike.js"), "utf8");
+    check("物理层只派发事件（onCrash / onLand）",
+      /physEvents\(\)\.onCrash/.test(bikeSrc2) && /physEvents\(\)\.onLand/.test(bikeSrc2) &&
+        !/emitParticles|addShake|playCrashSound|settleLanding/.test(bikeSrc2),
+      "bike.js 无表现层调用，改走 ./events.js");
+
+    const { initPhysicsEvents, physEvents } = await import(
+      new URL("../src/physics/events.js", import.meta.url).href
+    );
+    const realHooks = physEvents();
+    const seen = [];
+    initPhysicsEvents({
+      onCrash: (e) => seen.push("crash:" + Math.round(e.timePenalty * 100) / 100 + ":" + Math.round(e.fuelLoss * 100)),
+      onLand: (e) => seen.push("land:" + Math.round(e.vimp)),
+    });
+
+    startGame("level", 0);
+    key.right = true;
+    key.left = false;
+    update(DT);
+    crash();
+    check("摔车事件派发到注入回调（含惩罚参数）",
+      seen.some((s) => s.startsWith("crash:")),
+      seen.filter((s) => s.startsWith("crash:")).join(",") || "未触发");
+
+    // 落地：抬高后自由落体，必须派发 onLand
+    startGame("level", 0);
+    seen.length = 0;
+    for (const p of [bike.rear, bike.front, bike.head]) { p.y -= 220; p.py -= 220; }
+    let tl = 0;
+    while (tl < 4 && !seen.some((s) => s.startsWith("land:"))) {
+      autoInput();
+      update(DT);
+      tl += DT;
+    }
+    check("落地事件派发到注入回调",
+      seen.some((s) => s.startsWith("land:")),
+      seen.join(",") || "未触发");
+
+    initPhysicsEvents(realHooks); // 恢复 game 层注入的真实表现接线
+    check("未注入时物理层为空操作（可无表现层运行）",
+      (() => {
+        initPhysicsEvents(null);
+        let threw = null;
+        try { crash(); } catch (e) { threw = e.message; }
+        initPhysicsEvents(realHooks);
+        return threw === null;
+      })(),
+      "initPhysicsEvents(null) 后 crash() 不抛错");
   }
 
   const midX = () => (bike.rear.x + bike.front.x) / 2;

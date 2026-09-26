@@ -6,7 +6,7 @@ import { LEVELS, BRANCHES } from "../config/levels.js";
 import { rankName } from "../config/constants.js";
 import { VEHICLES } from "../config/vehicles.js";
 import { isStorageAvailable } from "../core/storage.js";
-import { statRow, badge } from "./components.js";
+import { statRow, badge, chip } from "./components.js";
 import { nextLevel } from "../game/game.js";
 
 const overlay = document.getElementById("overlay");
@@ -55,19 +55,25 @@ export function renderHeroSummary() {
   const veh = VEHICLES[store.currentVehicle] || VEHICLES[0];
   const P = store.progress || {};
   const rating = P.rating || 0;
-  heroSummary.innerHTML = statRow([
-    { label: "车辆", value: veh.name },
-    { label: "金币", value: "🪙 " + store.gold },
-    { label: "通关进度", value: clearedCount() + "/" + LEVELS.length },
-    { label: "总星", value: totalStars() + "/" + LEVELS.length * 3 },
-    { label: "段位", value: P.invited === true ? rankName(rating) + " " + rating : "未受邀" },
-    { label: "无限最佳", value: (store.best || 0) + "m" },
-  ]);
+  // 紧凑一行 chips（比 6 个大数字块省高度，也不会把菜单撑出视口）
+  heroSummary.innerHTML = [
+    chip("🚲 车辆 " + veh.name),
+    chip("金币 " + store.gold, "gold"),
+    chip("通关进度 " + clearedCount() + "/" + LEVELS.length),
+    chip("总星 " + totalStars() + "/" + LEVELS.length * 3, "gold"),
+    chip(P.invited === true ? "段位 " + rankName(rating) + " " + rating : "段位 未受邀"),
+    chip("无限最佳 " + (store.best || 0) + "m"),
+  ].join("");
+}
+
+function setMenuGroupsVisible(v) {
+  const g = document.getElementById("menuGroups");
+  if (g) g.style.display = v ? "" : "none";
 }
 
 /**
- * 按存档状态刷新主菜单按钮：锁定项直接把"解锁条件 + 当前进度"写在按钮上，
- * 不需要进面板才知道（点击仍会打开面板查看条件，不会开局）。
+ * 按存档状态刷新主菜单按钮：按钮上只留**短标签 + 当前进度**（避免换行撑乱版式），
+ * 完整的解锁条件写在 aria-label / title，并在点开的面板里给出明确说明。
  */
 export function refreshMenuButtons() {
   const total = LEVELS.length;
@@ -77,28 +83,36 @@ export function refreshMenuButtons() {
   const btnFinale = document.getElementById("btnFinale");
   if (btnFinale) {
     const unlocked = done >= total;
+    const cond = "通关全部 " + total + " 关后解锁（当前 " + done + "/" + total + "）";
     btnFinale.textContent = unlocked
       ? (P.finaleDone ? "🎯 最终任务 ✅" : "🎯 最终任务")
-      : `🎯 最终任务 · 通关 ${done}/${total} 关解锁`;
+      : "🎯 最终任务 🔒 " + done + "/" + total;
     btnFinale.classList.toggle("lockedBtn", !unlocked);
+    const label = unlocked ? (P.finaleDone ? "最终任务（已通关，可重复挑战）" : "最终任务（已解锁）") : "最终任务：" + cond;
+    btnFinale.setAttribute("aria-label", label);
+    btnFinale.setAttribute("title", label);
   }
 
   const btnRanked = document.getElementById("btnRanked");
   if (btnRanked) {
     const rating = P.rating || 0;
-    btnRanked.textContent = P.invited === true
-      ? "🏆 排位赛 · " + rankName(rating) + " " + rating
-      : "🏆 排位赛 · 通关最终任务解锁";
-    btnRanked.classList.toggle("lockedBtn", P.invited !== true);
+    const unlocked = P.invited === true;
+    const cond = "通关「最终任务」后解锁排位赛";
+    btnRanked.textContent = unlocked
+      ? "🏆 排位 " + rankName(rating) + " " + rating
+      : "🏆 排位赛 🔒";
+    btnRanked.classList.toggle("lockedBtn", !unlocked);
+    const label = unlocked ? "排位赛：段位 " + rankName(rating) + " " + rating : "排位赛：" + cond;
+    btnRanked.setAttribute("aria-label", label);
+    btnRanked.setAttribute("title", label);
   }
 
   const btnFree = document.getElementById("btnFree");
   if (btnFree) {
-    btnFree.textContent = P.peak === true
-      ? "♾️ 无限模式 · 可选图"
-      : P.rating >= 2400
-        ? "♾️ 无限模式"
-        : "♾️ 无限模式 · 随机地形";
+    btnFree.textContent = P.peak === true ? "♾️ 无限 · 可选图" : "♾️ 无限模式";
+    const label = P.peak === true ? "无限模式：已登顶，可自选场景" : "无限模式：随机地形";
+    btnFree.setAttribute("aria-label", label);
+    btnFree.setAttribute("title", label);
   }
 
   const btnSave = document.getElementById("btnSave");
@@ -182,17 +196,25 @@ export function hideOverlay() {
 }
 
 export function showPanel(html) {
+  // 面板打开时收起菜单分组：改成"一屏一视图"，避免菜单与面板叠在一起
+  // （叠着会把顶部挤出视口，看起来坏且点不到）
+  setMenuGroupsVisible(false);
   modePanel.innerHTML = html;
   modePanel.classList.remove("hidden");
   // 进场过渡：先落到 .enter（位移 + 透明），强制回流后移除 → 过渡到基础态
   modePanel.classList.add("enter");
   void modePanel.offsetWidth;
   modePanel.classList.remove("enter");
+  // 面板在滚动容器里时保证可见（否则小屏/长内容会停在屏幕外 → "点不动"）
+  if (typeof modePanel.scrollIntoView === "function") {
+    try { modePanel.scrollIntoView({ block: "nearest" }); } catch (e) { modePanel.scrollIntoView(); }
+  }
 }
 
 export function hidePanel() {
   modePanel.classList.add("hidden");
   modePanel.innerHTML = "";
+  setMenuGroupsVisible(true);
 }
 
 /** 回到主菜单（结算 / 无限模式结束 / 面板返回） */
@@ -200,8 +222,7 @@ export function showMenu() {
   store.state = "menu";
   store.raceAI = null;
   hidePanel();
-  const groups = document.getElementById("menuGroups");
-  if (groups) groups.style.display = "";
+  setMenuGroupsVisible(true);
   setMenuChrome();
   overlay.classList.remove("hidden");
 }
@@ -215,8 +236,7 @@ export function showMenu() {
 export function showResultCard(res = {}) {
   store.state = "ended";
   overlay.classList.remove("hidden");
-  const groups = document.getElementById("menuGroups");
-  if (groups) groups.style.display = "none";
+  setMenuGroupsVisible(false);
   renderHeroSummary();
 
   const stars = res.stars === undefined ? null : Math.max(0, Math.min(3, res.stars));
@@ -286,8 +306,6 @@ if (modePanel && typeof modePanel.addEventListener === "function") {
     if (!el) return;
     if (el.dataset.act === "resultNext") {
       hidePanel();
-      const groups = document.getElementById("menuGroups");
-      if (groups) groups.style.display = "";
       nextLevel();
     } else if (el.dataset.act === "resultMenu") {
       showMenu();

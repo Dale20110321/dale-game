@@ -1,7 +1,7 @@
 // 游戏主状态机：闯关 / 比赛 / 排位 / 无限，通关结算与重生
 // 本模块不 import 任何 UI 模块，界面动作通过 initGame(presenter) 注入（避免循环依赖）
 import {
-  START_X, WHEELBASE, SUBV, toM, toKmh,
+  START_X, WHEELBASE, SUBV, toM, toKmh, LAND_REF,
   RATING_MIN, RATING_WIN_GAIN, RATING_LOSS,
   RATING_WIN_GAIN_ADVANCED, RATING_LOSS_ADVANCED, rankName,
 } from "../config/constants.js";
@@ -10,13 +10,18 @@ import { THEMES } from "../config/themes.js";
 import { store, bike, world } from "../core/store.js";
 import { key } from "../core/input.js";
 import { view } from "../core/canvas.js";
+import { clamp } from "../core/utils.js";
 import { showToast } from "../core/toast.js";
+import { playCrashSound } from "../core/audio.js";
+import { token } from "../config/ui-tokens.js";
 import { save, addStat, settleProgress, isAdvancedUnlocked } from "../core/storage.js";
 import { groundInfo, groundY, safeSpot } from "../physics/terrain.js";
 import { applyUpgrades, crash, resetBike, stepPhysics } from "../physics/bike.js";
+import { initPhysicsEvents } from "../physics/events.js";
 import { drainFuel, setFuel } from "../physics/fuel.js";
-import { updateParticles } from "../render/particles.js";
-import { updateStats } from "./stats.js";
+import { updateParticles, emitParticles } from "../render/particles.js";
+import { addShake } from "../render/camera.js";
+import { updateStats, settleLanding } from "./stats.js";
 import { addGold, checkAch } from "./progress.js";
 import {
   buildLevel, freeInit, freeFill, syncSegmentTheme,
@@ -25,6 +30,30 @@ import {
 import { raceInit, raceUpdate } from "./race.js";
 
 let presenter = { hideOverlay() {}, toMenu() {} };
+
+// ---------------- 物理事件 → 表现（第 3 期 Task 8） ----------------
+// 物理层只派发事件；震屏 / 音效 / 粒子 / 提示 / 落地结算在 game 层接线。
+// 颜色一律来自设计令牌或场景数据（不引入新的裸色值）。
+initPhysicsEvents({
+  onCrash: (e) => {
+    addShake(11);
+    playCrashSound();
+    emitParticles(e.x, e.y, 20, { color: token("danger"), spd: 2, life: 25, size: 3, grav: 0.06 });
+    showToast(
+      "💥 摔车！燃料 -" + Math.round(e.fuelLoss * 100) + "% · 计时 +" + e.timePenalty + "s",
+      900,
+      "danger"
+    );
+  },
+  onLand: (e) => {
+    addShake(clamp((e.vimp / LAND_REF) * 3.0, 1.0, 7));
+    const T = THEMES[store.phys.theme] || THEMES[0];
+    if (isFinite(e.gy)) {
+      emitParticles(e.x, e.gy - 2, 8, { color: T.dust.light, spd: 1.6, life: 20, size: 3, grav: 0.03 });
+    }
+    settleLanding();
+  },
+});
 
 /** 由 main.js 注入界面动作 */
 export function initGame(p) {
