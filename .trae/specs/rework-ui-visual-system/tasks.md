@@ -103,3 +103,18 @@
 
 # Task Dependencies
 - Task 11 依赖 Task 1~10 全部完成（回归修复）
+
+---
+
+## Task 12: 修复二期回归：面板/菜单"点不动"+ 版式返工（实机反馈）
+
+> 触发：用户反馈"这个 UI 改了过后不仅不好看，而且还点不动"。
+> 定位方式：无头 Edge 加载真实页面，对每个可点元素做 `elementFromPoint` 命中测试 +
+> 读取 `getBoundingClientRect` / `scrollHeight`（不再只靠无头断言猜）。
+
+- [x] SubTask 12.1: 复现并定位根因：`#overlay` 的 `justify-content:center` + `overflow-y:auto` 在内容超高时把整体挤出视口，`#modePanel` 作为 flex 子项被压缩到 **26px** 高（探针实测 `scrollH=1384 clientH=24`）→ 面板等于没出现，表现为"点不动"
+- [x] SubTask 12.2: 修 `#overlay` → `justify-content: safe center`；修 `#modePanel` → `flex: 0 0 auto` + 明确宽高 + 自有滚动 + `scrollIntoView`
+- [x] SubTask 12.3: 面板改"一屏一视图"：打开面板时收起菜单分组（`showPanel/hidePanel` 统一管理），不再与菜单叠加
+- [x] SubTask 12.4: 版式返工：状态摘要改一行紧凑 chips；按钮改等宽网格 + 单行省略；锁定项按钮只留短标签与当前进度，完整条件移入 `aria-label` / `title`；支线卡片墙改 2 列 + 文字单行省略
+- [x] SubTask 12.5: 遮罩加强（`scrim-strong` + 轻微模糊），场景退为氛围；校验 1280×720 下 `overlay 溢出=false`、10 个入口全部在视口内且可点
+- [x] SubTask 12.6: 把 `elementFromPoint` 命中测试的判定思路固化为可复现的排查手段（临时探针用后即删；结论写入本任务）
