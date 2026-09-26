@@ -2,9 +2,9 @@
 import { ctx, view } from "../core/canvas.js";
 import { WHEEL_R, toKmh, toM, SPEEDLINE_V, SPEEDLINE_REF } from "../config/constants.js";
 import { ACHS } from "../config/constants.js";
-import { LEVELS } from "../config/levels.js";
+import { LEVELS, VARIANT_INFO, variantRule, airTargetOf, levelAt } from "../config/levels.js";
 import { VEHICLES } from "../config/vehicles.js";
-import { store, bike } from "../core/store.js";
+import { store, bike, world } from "../core/store.js";
 import { clamp } from "../core/utils.js";
 import { key } from "../core/input.js";
 import { groundY } from "../physics/terrain.js";
@@ -51,10 +51,31 @@ export function syncHudDom() {
     if (HUD.progLabel) HUD.progLabel.style.opacity = 0.3;
   } else {
     if (HUD.lvl) {
-      HUD.lvl.textContent =
+      let txt =
         store.mode === "race"
           ? "🏆 比赛 第" + (store.selLevel + 1) + "关"
-          : "关卡 " + (store.selLevel + 1) + " · " + LEVELS[store.selLevel].name;
+          : "关卡 " + (store.selLevel + 1) + " · " + (levelAt(store.selLevel) || LEVELS[0]).name;
+      const L = levelAt(store.selLevel);
+      // 变体标识（normal 不显示，避免噪音）
+      if (store.mode === "level" && L && L.variant !== "normal") {
+        const vi = VARIANT_INFO[L.variant];
+        if (vi) txt += " · " + vi.icon + vi.name;
+      }
+      // 下一道限时门倒计时（关卡模式）
+      const g = store.mode === "level" ? world.gates[run.gateIdx] : null;
+      if (g) {
+        // 与判定口径一致：扣掉摔车昏迷的有效骑行时间
+        const ride = store.time - run.levelStartTime - run.crashStall;
+        const rem = g.limit - ride;
+        txt += " · ⏱ 第" + (run.gateIdx + 1) + "门 " + Math.max(0, rem).toFixed(1) + "s";
+      }
+      // airtime 变体：显示滞空目标进度
+      if (store.mode === "level" && L && variantRule(L.variant).airTarget > 0) {
+        const tgt = airTargetOf(L);
+        const cur = Math.min(world.airScore, tgt);
+        txt += " · 🕊 " + cur.toFixed(1) + "/" + tgt.toFixed(1) + "s";
+      }
+      HUD.lvl.textContent = txt;
     }
     if (HUD.prog) {
       HUD.prog.style.width = clamp((mx / Math.max(1, store.finishX)) * 100, 0, 100) + "%";

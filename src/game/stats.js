@@ -1,6 +1,6 @@
 // 单局统计与特技结算
 import { WHEEL_R } from "../config/constants.js";
-import { store, bike } from "../core/store.js";
+import { store, bike, world } from "../core/store.js";
 import { toM } from "../config/constants.js";
 import { groundInfo } from "../physics/terrain.js";
 import { emitParticles } from "../render/particles.js";
@@ -38,6 +38,12 @@ export function updateStats(dt) {
   }
 }
 
+/** 连招窗口内每次落地为 airtime 变体累计的滞空得分（秒）：连招越高倍率越大 */
+export function airScoreOf(airTime, combo) {
+  const mul = 1 + Math.max(0, combo - 1) * 0.35;
+  return airTime * mul;
+}
+
 /** 落地瞬间：翻转特技 + 空中时间奖励结算 */
 export function settleLanding() {
   const run = store.run;
@@ -67,6 +73,11 @@ export function settleLanding() {
     addGold(bonus);
     msgs.push("🕐 空中 +" + bonus);
     checkAch("air");
+  }
+
+  // airtime 变体：落地即累计滞空得分（连招越高倍率越大）
+  if (run.airTime > 0.15) {
+    world.airScore += airScoreOf(run.airTime, run.combo);
   }
 
   if (msgs.length) showCombo(msgs.join("   "));

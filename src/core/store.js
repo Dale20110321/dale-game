@@ -9,8 +9,10 @@ export const store = {
 
   // 流程状态
   state: "menu", // menu | play | pause | ended
-  mode: "level", // level | race | free
+  mode: "level", // level | race | free | ranked
   lastMode: "level",
+  /** 排位赛档位：false = 普通排位赛，true = 高级排位赛（同一 mode，仅数值档位不同） */
+  rankedAdvanced: false,
 
   // 进度
   lvIdx: 0,
@@ -26,6 +28,38 @@ export const store = {
   currentVehicle: 0,
   upgrades: {},
 
+  // 进度阶梯（Task 9）：支线通关 / 最终任务 / 比赛邀请 / 段位 / 登顶 / 无限模式可选场景
+  progress: {
+    /** 已通关的支线下标数组（支线 i 的 6 关全部有星 → 视为已通关）；完成度 = 通过数/6 由 stars 推导 */
+    branchCleared: [],
+    /** 最终任务是否通关 */
+    finaleDone: false,
+    /** 是否已收到排位赛邀请（通关最终任务后获得） */
+    invited: false,
+    /** 排位段位分（下限 0） */
+    rating: 0,
+    /** 排位战胜场数 */
+    wins: 0,
+    /** 排位战负场数 */
+    losses: 0,
+    /** 是否已登顶（rating ≥ RATING_PEAK 后永久为 true） */
+    peak: false,
+    /** 已解锁可用于无限模式（自由选图）的场景下标 */
+    freeThemes: [],
+  },
+
+  // 累计统计（Task 9.5，存档键 bike_stat）
+  stat: {
+    /** 总局数：每局结束结算时 +1 */
+    totalRuns: 0,
+    /** 总里程（米） */
+    totalMeters: 0,
+    /** 总时长（秒） */
+    totalSeconds: 0,
+    /** 最后游玩时间（ISO 字符串，空串表示尚未游玩） */
+    lastPlayed: "",
+  },
+
   // UI 开关
   shopOpen: false,
   donateOpen: false,
@@ -36,7 +70,7 @@ export const store = {
   // 环境 + 车辆派生参数（buildLevel / applyUpgrades 维护）
   phys: {
     theme: 0, // 当前地形主题索引（渲染用）
-    minY: 0, // 当前关卡地形最低点（世界 y），用于"掉出地图"判定
+    minY: 0, // 当前关卡地形最低点（世界 y 最大），用于"掉出地图"判定
     GRAV: 750,
     TRACTION: 1,
     DRIVE: 200,
@@ -52,6 +86,8 @@ export const store = {
 
   // 单局运行态
   run: {
+    // 单局世代号：重开/换关时递增，用于作废上一局的延迟结算回调
+    gen: 0,
     crashed: false,
     crashTimer: 0,
     clearing: false,
@@ -66,6 +102,14 @@ export const store = {
     levelStartTime: 0,
     coinGot: 0,
     totalCoins: 0,
+    /** 摔车累计计时惩罚（秒）：计入三星时限判定 */
+    penaltyTime: 0,
+    /** 摔车昏迷累计时长（秒）：限时门计时扣除它，避免"摔车=双重惩罚" */
+    crashStall: 0,
+    /** 已通过的限时门数量 */
+    gateIdx: 0,
+    /** 本局是否因机制判负（限时门超时）——不计星、不解锁 */
+    failed: false,
   },
 
   // 比赛 AI
@@ -79,7 +123,6 @@ export const bike = {
   head: { x: 0, y: 0, px: 0, py: 0 },
   grounded: 0,
   speed: 0,
-  stunned: 0,
   wheelRear: 0,
   wheelFront: 0,
   locked: true,
@@ -106,4 +149,15 @@ export const world = {
   decoRock: [],
   particles: [],
   freeGenX: 0,
+  /** 变体"赛前预加油"比例（占油箱）：buildLevel 按变体规则计算 */
+  prepFuel: 0,
+  /** 本局 airtime 变体的累计得分（滞空秒数 + 连招加权） */
+  airScore: 0,
+  /** 本局 airtime 变体的达标线（秒）：按跳台数量派生 */
+  airTarget: 0,
+  /** 机制实体：障碍物 / 危险段 / 限时门 / 跳台（buildLevel 构建，无限模式为空） */
+  obstacles: [],
+  hazards: [],
+  gates: [],
+  jumps: [],
 };

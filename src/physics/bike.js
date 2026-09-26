@@ -9,14 +9,15 @@
 //  注意：本文件所有速度换算必须用 SUBV（真实 px/s），不要写裸 *SUB。
 // ============================================================
 import {
-  SUB, SUB_DT, SUBV, DT,
+  SUB, SUB_DT, SUBV,
   WHEEL_R, WHEELBASE, SEAT_H,
   AIR_ROT_MAX, AIR_ROT_ACC, AIR_ROT_RELEASE, AIR_HEAD_DAMP, PITCH_TORQUE,
   LAUNCH_K, LAUNCH_MAX, LAND_REF, VSPD_CAP, DOWNHILL_K, CONTACT_TOL, STUN_TIME,
+  OBST_R, OBST_VIS_H, OBST_HIT_V, CRASH_FUEL_LOSS, CRASH_TIME_PENALTY,
   deriveHandling,
 } from "../config/constants.js";
 import { VEHICLES } from "../config/vehicles.js";
-import { store, bike } from "../core/store.js";
+import { store, bike, world } from "../core/store.js";
 import { clamp, lerp, wrapAngle } from "../core/utils.js";
 import { getUp } from "../core/storage.js";
 import { groundInfo, groundY } from "./terrain.js";
@@ -50,7 +51,6 @@ export function resetBike(x) {
   b.head.x = hx; b.head.y = hy; b.head.px = hx; b.head.py = hy;
   b.grounded = 0;
   b.speed = 0;
-  b.stunned = 0;
   b.wheelRear = 0;
   b.wheelFront = 0;
   b.frontGr = false;
@@ -119,19 +119,43 @@ export function rotateBikeAround(mx, my, rot, count) {
   if (count !== false) b.rotAcc += rot;
 }
 
-/** 摔车 */
+/** 摔车（附惩罚：扣 8% 燃料 + 2s 计时惩罚） */
 export function crash() {
   const run = store.run;
   if (run.crashed) return;
   run.crashed = true;
   run.runCrashed = true;
   run.crashTimer = STUN_TIME;
-  bike.stunned = STUN_TIME;
   run.combo = 0;
+  // 摔车惩罚：燃料与计时都要付出代价（计时惩罚在结算时计入，直接影响三星）
+  const P = store.phys;
+  P.fuel = Math.max(0, P.fuel - CRASH_FUEL_LOSS * P.fuelMax);
+  run.penaltyTime += CRASH_TIME_PENALTY;
   addShake(11);
   playCrashSound();
   emitParticles(bike.head.x, bike.head.y, 20, { color: "#ff6b35", spd: 2, life: 25, size: 3, grav: 0.06 });
-  showToast("💥 摔车！", 700);
+  showToast("💥 摔车！燃料 -8% · 计时 +2s", 900);
+}
+
+/**
+ * 障碍物碰撞：车身两轮 vs 障碍物圆。
+ * 只有"贴着地面高速通过"才算撞上——低速可安全碾过，腾空可飞越。
+ * 命中走既有摔车流程（含惩罚）。
+ */
+function hitObstacle() {
+  if (!world.obstacles.length) return;
+  const b = bike;
+  if (Math.abs((b.front.x - b.front.px) * SUBV) < OBST_HIT_V) return;
+  for (const o of world.obstacles) {
+    const oy = o.y - OBST_VIS_H * 0.5;
+    for (const p of [b.rear, b.front]) {
+      if (Math.abs(o.x - p.x) > OBST_R + WHEEL_R) continue;
+      if (Math.hypot(o.x - p.x, oy - p.y) < OBST_R + WHEEL_R * 0.7) {
+        crash();
+        return;
+      }
+    }
+  }
 }
 
 /** 单个固定步的物理推进 */
@@ -141,6 +165,14 @@ export function stepPhysics() {
   const b = bike;
   const L = WHEELBASE;
   const Lr = Math.hypot(L * 0.5, SEAT_H);
+  // 倒立摔车判定的容差基准：车架等级越高（crashMargin 越大）容差越小，
+  // 头必须更贴近地面才算"倒立摔车" → 车架升级更耐摔。
+  // Lv0（crashMargin=4）保持旧值 30（既有倒立摔车判定不变），满级（14）缩到 16；
+  // 下限 8 防止高等级容差过小引发数值抖动。
+  const crashTol = Math.max(8, 30 - (P.crashMargin - 4) * 1.4);
+  // 倒立判据的余量：随 crashMargin 增大而变得更严（更难被判为倒立），方向与容差收紧一致。
+  // Lv0 恰为 -8，与旧实现完全一致。
+  const invMargin = -8 - (P.crashMargin - 4) * 0.3;
   const aDrive = key.right && !run.crashed ? P.DRIVE : 0;
   const aBrake = key.left && !run.crashed ? P.BRAKE : 0;
   const prevGrounded = b.grounded;
@@ -388,7 +420,7 @@ export function stepPhysics() {
     // （若此时强行把车翻正，会让人明明倒立落地却摔不下来，画面也会瞬间镜像跳变）
     if (b.front.x < b.rear.x && b.grounded > 0 && !run.crashed) {
       const hgi2 = groundInfo(b.head.x);
-      const headNear = hgi2.y !== Infinity && b.head.y > hgi2.y - 30;
+      const headNear = hgi2.y !== Infinity && b.head.y > hgi2.y - crashTol;
       if (!headNear) {
         const mx2 = (b.rear.x + b.front.x) / 2;
         const my2 = (b.rear.y + b.front.y) / 2;
@@ -407,8 +439,8 @@ export function stepPhysics() {
     // ---- 摔车判定：倒立且头触地 ----
     enforceHeadSide(); // 判定前再做一次，确保不是求解器穿侧造成的假倒立
     const hgi = groundInfo(b.head.x);
-    if (hgi.y !== Infinity && !run.crashed && b.head.y > hgi.y - 30) {
-      const inverted = b.rear.y < b.head.y - 8 && b.front.y < b.head.y - 8;
+    if (hgi.y !== Infinity && !run.crashed && b.head.y > hgi.y - crashTol) {
+      const inverted = b.rear.y < b.head.y + invMargin && b.front.y < b.head.y + invMargin;
       if (inverted) crash();
     }
   }
@@ -477,5 +509,7 @@ export function stepPhysics() {
   const TWO_PI = Math.PI * 2;
   b.wheelRear = (b.wheelRear + (((b.rear.x - b.rear.px) * SUBV) / WHEEL_R) * 0.06) % TWO_PI;
   b.wheelFront = (b.wheelFront + (((b.front.x - b.front.px) * SUBV) / WHEEL_R) * 0.06) % TWO_PI;
-  if (b.stunned > 0) b.stunned -= DT;
+
+  // ---------------- 障碍物碰撞（须减速碾过或腾空飞越） ----------------
+  if (!run.crashed) hitObstacle();
 }

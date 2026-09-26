@@ -56,6 +56,9 @@ export function deriveHandling(grav, traction, veh, up) {
     DRIVE: Math.min(grav * 0.95, (DRIVE_BASE + 20 * up.engine + 16 * up.tire) * veh.drv * ACCEL_K),
     BRAKE: Math.min(grav * 0.95, (BRAKE_BASE + 16 * up.tire + 10 * up.frame) * veh.grp * traction),
     MAXV: Math.min(MAXV_RAW_CAP, MAXV_BASE + 2.5 * up.engine + 1.5 * up.tire) * SUB * veh.spd * SPD_K,
+    // 倒立摔车判定的容差基准（越大越抗摔）：由车架升级 + 车重推导。
+    // 0 级（up.frame=0, veh.wgt=1）≈ 4，满级（up.frame=100）≈ 14。
+    // 它被 physics/bike.js 用来缩小"头贴近地面才算倒立摔车"的容差 → 车架等级越高越耐摔。
     crashMargin: Math.min(14, 2 + 0.1 * up.frame + veh.wgt * 2),
     fuelMax: veh.tank * (1 + 0.004 * up.frame),
     susAbsorb: Math.max(0.05, 0.25 - 0.002 * sus),
@@ -116,6 +119,48 @@ export const STUN_TIME = 1.1;
 /** 出生点 x */
 export const START_X = 40;
 
+// ---------------- 机制标度：障碍物 / 危险段 / 限时门 / 摔车惩罚 ----------------
+/** 障碍物碰撞半径（px，世界标度） */
+export const OBST_R = 17;
+/** 障碍物视觉高度（px） */
+export const OBST_VIS_H = 30;
+/** 撞击障碍物的速度阈值（px/s）：低于此速度可安全碾过，高于则摔车（须减速或腾空越过） */
+export const OBST_HIT_V = 330;
+/**
+ * 危险段允许的最大速度（px/s）：随关卡难度收紧（ramp 0→1 时 0.95→0.75 倍基准极速）。
+ * 车身中点进入危险段时超此速度必摔，玩家须提前减速。
+ */
+export const hazardSpeed = (ramp) => REF_SPEED * (0.95 - 0.2 * ramp);
+/**
+ * 限时门要求均速（px/s）：直接由本关三星要求（den3）派生并放宽 20%，
+ * 保证"能卡三星的节奏"绝不会被计时门卡死，只有摔车/磨蹭才会超时。
+ */
+export const gateSpeed = (den3) => den3 * 0.8;
+/** 摔车惩罚：燃料损失（占油箱比例） */
+export const CRASH_FUEL_LOSS = 0.08;
+/** 摔车惩罚：本关计时增加（秒） */
+export const CRASH_TIME_PENALTY = 2;
+
+// ---------------- 跳台（airtime 变体专用，确定性滞空源） ----------------
+/**
+ * 跳台抬升速度基准（px/s）。
+ * 注意：贴地钳制会吞掉一部分上冲，因此实际滞空明显小于 2v/g；
+ * 数值是实测标定值（见 tools/autotest.mjs 的"跳台滞空可靠性"断言），不要凭公式改。
+ */
+export const KICK_V = 900;
+/** 触发跳台所需的最低车速（px/s）：太慢只是骑过去 */
+export const KICK_MIN_V = 220;
+/**
+ * 跳台抬离接触带的高度（px）：必须 > CONTACT_TOL，
+ * 否则轮子仍被判定为"在接触带内"，贴地钳制会立刻吸掉上冲（跳台失效）。
+ */
+export const KICK_LIFT = 30;
+/** 跳台发射持续帧数与推力倍率（持续推力比单次冲量更抗贴地钳制） */
+export const KICK_FRAMES = 9;
+export const KICK_BOOST = 1.0;
+/** 每个跳台的达标滞空（秒）：目标线 = 跳台数 × 该值 */
+export const KICK_TARGET = 0.62;
+
 // ---------------- 升级 ----------------
 export const MAX_LV = 100;
 /** 升级到 lv 级所需金币 */
@@ -145,4 +190,56 @@ export const SAVE_KEYS = {
   best: "bike_best",
   ach: "bike_ach",
   ver: "bike_v",
+  // Task 9/10 新增：进度阶梯 / 段位分 / 累计统计（上面 10 个键名一律不动）
+  prog: "bike_prog",
+  rating: "bike_rating",
+  stat: "bike_stat",
 };
+
+// ---------------- 进度阶梯阈值 ----------------
+/** 高级排位赛准入段位分 */
+export const RATING_ADVANCED = 1200;
+/** 登顶段位分（登顶后无限模式可自由选图） */
+export const RATING_PEAK = 2400;
+/** 排位赛下限段位分（永不出现负数） */
+export const RATING_MIN = 0;
+
+// ---------------- 排位赛段位（Task 11） ----------------
+/** 普通排位赛：胜 +25 / 负 20 */
+export const RATING_WIN_GAIN = 25;
+export const RATING_LOSS = 20;
+/** 高级排位赛：胜 +40 / 负 30（收益与风险同步放大） */
+export const RATING_WIN_GAIN_ADVANCED = 40;
+export const RATING_LOSS_ADVANCED = 30;
+
+/**
+ * 段位表：按段位分升序，min 为进入该段位的门槛。
+ * 覆盖 0 → 3000+ 全区间（RATING_PEAK = 2400 恰为"王者"门槛）。
+ */
+export const RANKS = [
+  { min: 0, name: "青铜" },
+  { min: 400, name: "白银" },
+  { min: 800, name: "黄金" },
+  { min: 1200, name: "铂金" },
+  { min: 1600, name: "钻石" },
+  { min: 2000, name: "星耀" },
+  { min: 2400, name: "王者" },
+  { min: 3000, name: "传奇" },
+];
+
+/** 段位分 → 段位名（纯函数：任意输入都返回非空段位名，负数/NaN 视为青铜） */
+export function rankName(rating) {
+  const r = Math.max(0, Number(rating) || 0);
+  let name = RANKS[0].name;
+  for (const k of RANKS) {
+    if (r >= k.min) name = k.name;
+    else break;
+  }
+  return name;
+}
+
+// ---------------- 存档导入/导出标识 ----------------
+/** 存档文件标识（校验导入内容是否属于本游戏） */
+export const SAVE_APP = "dale-bike";
+/** 存档格式版本（当前只支持 1） */
+export const SAVE_FORMAT = 1;
