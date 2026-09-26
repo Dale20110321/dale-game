@@ -1,5 +1,6 @@
 // 地形渲染：地表填充 + 阴影 + 数据驱动的地表纹理（THEMES[i].surface）
 // 纹理绘制函数只做视觉，不含物理依赖，也不含"按主题下标分支"的硬编码。
+import { token } from "../config/ui-tokens.js";
 import { ctx, view } from "../core/canvas.js";
 import { THEMES } from "../config/themes.js";
 import { store } from "../core/store.js";
@@ -241,7 +242,7 @@ export function drawTerrain(cx, cy) {
   ctx.stroke();
 
   // 地表下方阴影
-  ctx.fillStyle = "rgba(0,0,0,.08)";
+  ctx.fillStyle = token("fx-shadow-faint");
   ctx.beginPath();
   ctx.moveTo(0, cy);
   for (let x = 0; x <= W; x += 6) {

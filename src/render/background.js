@@ -2,6 +2,7 @@
 // 只负责把 THEMES[i].bg 描述的图层按顺序画出来，不含任何"按主题下标分支"的硬编码。
 //   bg = { space, celestial, starLayers, aurora, cloudLayers, ridges, haze }
 // 循环里只按 layer.kind 到注册表取绘制函数（函数式分派，不是按 theme 下标）。
+import { token } from "../config/ui-tokens.js";
 import { ctx, view } from "../core/canvas.js";
 import { THEMES } from "../config/themes.js";
 import { store } from "../core/store.js";
@@ -19,8 +20,8 @@ const CELESTIAL_PAINTERS = {
     const x = wrapX(W * c.x - cx * c.parallax, W);
     const y = c.y;
     const halo = ctx.createRadialGradient(x, y, 12, x, y, c.r * 4.2);
-    halo.addColorStop(0, "rgba(255,255,255,.40)");
-    halo.addColorStop(1, "rgba(255,255,255,0)");
+    halo.addColorStop(0, token("fx-halo-white"));
+    halo.addColorStop(1, token("fx-halo-none"));
     ctx.fillStyle = halo;
     ctx.beginPath();
     ctx.arc(x, y, c.r * 4.2, 0, 7);
@@ -37,7 +38,7 @@ const CELESTIAL_PAINTERS = {
     ctx.beginPath();
     ctx.arc(x, y, c.r, 0, 7);
     ctx.fill();
-    ctx.fillStyle = c.accent || "rgba(0,0,0,.15)";
+    ctx.fillStyle = c.accent || token("fx-shadow-soft");
     ctx.beginPath();
     ctx.arc(x - c.r * 0.3, y - c.r * 0.2, c.r * 0.28, 0, 7);
     ctx.fill();
@@ -55,11 +56,11 @@ const CELESTIAL_PAINTERS = {
     ctx.beginPath();
     ctx.arc(ex, ey, c.r, 0, 7);
     ctx.fill();
-    ctx.fillStyle = c.accent || "rgba(120,205,160,.6)";
+    ctx.fillStyle = c.accent || token("fx-cloud-green");
     ctx.beginPath();
     ctx.ellipse(ex - c.r * 0.24, ey - c.r * 0.24, c.r * 0.42, c.r * 0.24, 0.5, 0, 7);
     ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,.22)";
+    ctx.fillStyle = token("fx-cloud-white");
     ctx.beginPath();
     ctx.arc(ex, ey, c.r, 0, 7);
     ctx.fill();
@@ -71,7 +72,7 @@ const CELESTIAL_PAINTERS = {
     ctx.beginPath();
     ctx.arc(x, y, c.r, 0, 7);
     ctx.fill();
-    ctx.strokeStyle = c.accent || "rgba(255,255,255,.5)";
+    ctx.strokeStyle = c.accent || token("fx-ridge-white");
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.ellipse(x, y, c.r * 1.7, c.r * 0.5, -0.4, 0, 7);
@@ -81,8 +82,8 @@ const CELESTIAL_PAINTERS = {
     const x = wrapX(W * c.x - cx * c.parallax, W);
     const y = c.y;
     const halo = ctx.createRadialGradient(x, y, c.r * 0.4, x, y, c.r * 3.2);
-    halo.addColorStop(0, "rgba(255,140,60,.45)");
-    halo.addColorStop(1, "rgba(255,140,60,0)");
+    halo.addColorStop(0, token("fx-halo-warm"));
+    halo.addColorStop(1, token("fx-halo-warm-0"));
     ctx.fillStyle = halo;
     ctx.beginPath();
     ctx.arc(x, y, c.r * 3.2, 0, 7);
@@ -91,7 +92,7 @@ const CELESTIAL_PAINTERS = {
     ctx.beginPath();
     ctx.arc(x, y, c.r, 0, 7);
     ctx.fill();
-    ctx.fillStyle = c.accent || "rgba(255,208,138,.6)";
+    ctx.fillStyle = c.accent || token("fx-halo-sand");
     ctx.beginPath();
     ctx.arc(x - c.r * 0.2, y - c.r * 0.15, c.r * 0.45, 0, 7);
     ctx.fill();
@@ -196,7 +197,7 @@ function drawStarLayer(l, cx, W, H) {
   const rnd = mulberry32(l.seed || 1234);
   const prev = ctx.globalAlpha;
   ctx.globalAlpha = l.alpha != null ? l.alpha : 0.8;
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = token("text-hi");
   for (let i = 0; i < l.count; i++) {
     const rx = rnd();
     const ry = rnd();
@@ -225,7 +226,7 @@ function drawAurora(a, cx, W) {
 
 function drawHaze(hz, W, H) {
   const grad = ctx.createLinearGradient(0, H * 0.45, 0, H);
-  grad.addColorStop(0, "rgba(0,0,0,0)");
+  grad.addColorStop(0, token("fx-none-dark"));
   grad.addColorStop(1, hz.color);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);

@@ -1,5 +1,5 @@
 // 场景绘制总装：背景 → 世界（缩放/震屏）→ HUD
-import { ctx, view } from "../core/canvas.js";
+import { ctx } from "../core/canvas.js";
 import { store } from "../core/store.js";
 import { drawBackground } from "./background.js";
 import { drawTerrain } from "./terrain.js";
@@ -7,7 +7,8 @@ import { drawBoosts, drawCanisters, drawCoins, drawDeco, drawFlag, drawGates, dr
 import { drawParticles } from "./particles.js";
 import { drawBike } from "./bike.js";
 import { shakeOffset } from "./camera.js";
-import { drawBalanceBar, drawDriveIndicator, drawRaceHUD, drawSpeedLines, syncHudDom } from "./hud.js";
+import { drawHud } from "./hud.js";
+import { applyPostFx } from "./postfx.js";
 
 export function drawScene() {
   const cam = store.cam;
@@ -38,18 +39,11 @@ export function drawScene() {
   cam.x = bcx;
   cam.y = bcy;
 
-  if (store.state === "play") {
-    drawBalanceBar();
-    drawDriveIndicator();
-    drawSpeedLines();
-    drawRaceHUD();
+  // 后处理（渐晕 / 色彩分级 / 拖影 / 远景淡化 / 天气）
+  // 放在 HUD 之前：HUD 是界面层叠加，不应被色彩分级与渐晕干扰（也保证机制警告不被遮挡）
+  applyPostFx(store.time);
+
+  if (store.state === "play" || store.state === "pause" || store.state === "ended") {
+    drawHud();
   }
-
-  ctx.fillStyle = "rgba(255,255,255,0.5)";
-  ctx.font = "11px sans-serif";
-  ctx.textAlign = "right";
-  ctx.fillText("缩放 " + Math.round(cam.zoom * 100) + "%  ·  R重启  ·  +/-缩放  ·  P暂停", view.W - 12, view.H - 12);
-  ctx.textAlign = "left";
-
-  syncHudDom();
 }

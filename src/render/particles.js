@@ -1,4 +1,5 @@
 // 粒子特效（渲染层 FX 服务：无游戏逻辑，任何层都可以调用 emitParticles）
+import { token } from "../config/ui-tokens.js";
 import { world } from "../core/store.js";
 import { ctx, view } from "../core/canvas.js";
 
@@ -18,7 +19,7 @@ export function emitParticles(x, y, count, cfg) {
       life: cfg.life || 40,
       maxLife: cfg.life || 40,
       size: cfg.size || 2 + Math.random() * 2,
-      color: cfg.color || "#fff",
+      color: cfg.color || token("text-hi"),
       decay: cfg.decay || 0.97,
       grav: cfg.grav || 0.04,
     });

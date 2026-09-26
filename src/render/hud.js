@@ -1,159 +1,353 @@
-// HUD：DOM 数值同步 + 画布上的指示条 / 速度线 / 竞速条
+// HUD：纯 Canvas 绘制（玻璃卡片 + 仪表化），色值/字体全部来自 src/config/ui-tokens.js
+//
+// 设计要点：
+//  · 全部 HUD 元素的位置由一个纯函数 hudLayout() 决定 → 可被断言（小屏不重叠、不被裁切）
+//  · 左上：玻璃信息卡（关卡名 + 变体徽标 + 里程进度条 + 限时门倒计时 + 姿态平衡 + 缩放提示）
+//  · 左下：燃料量表（带刻度 + 低量脉冲）；右上：速度仪表（弧形量表 + 区间着色 + 数字）
+//  · 底部居中：按键指示；顶部居中：机制警告（危险段超速 / 限时门紧张）——有警告时左列整体下移，绝不遮挡
 import { ctx, view } from "../core/canvas.js";
-import { WHEEL_R, toKmh, toM, SPEEDLINE_V, SPEEDLINE_REF } from "../config/constants.js";
-import { ACHS } from "../config/constants.js";
+import { toKmh, toM, SPEEDLINE_V, SPEEDLINE_REF } from "../config/constants.js";
 import { LEVELS, VARIANT_INFO, variantRule, airTargetOf, levelAt } from "../config/levels.js";
-import { VEHICLES } from "../config/vehicles.js";
 import { store, bike, world } from "../core/store.js";
 import { clamp } from "../core/utils.js";
 import { key } from "../core/input.js";
-import { groundY } from "../physics/terrain.js";
 import { fuelRatio } from "../physics/fuel.js";
+import { token, tokenNum, fontOf } from "../config/ui-tokens.js";
 
-const HUD = {
-  lvl: document.getElementById("lvl"),
-  speed: document.getElementById("speed"),
-  coins: document.getElementById("coins"),
-  prog: document.getElementById("prog"),
-  progLabel: document.getElementById("progLabel"),
-  progBar: document.getElementById("progBar"),
-  lvlDesc: document.getElementById("lvlDesc"),
-  fuel: document.getElementById("fuel"),
-  fuelTxt: document.getElementById("fuelTxt"),
-  fuelWrap: document.querySelector(".fuelwrap"),
-};
+/** 警告带宽（px）：有机制警告时左列下移，避免与警告重叠 */
+const WARN_H = 26;
 
-/** 每个固定步/帧同步 DOM 数值（金币图标全局统一为 🪙） */
-export function syncHudDom() {
-  const run = store.run;
-  const b = bike;
-  const ratio = fuelRatio();
+/**
+ * HUD 布局（纯函数，只读 view 尺寸）——所有元素互不重叠且完全落在视口内。
+ * @param {boolean} hasWarn 是否正在显示机制警告
+ * @returns {{info:{x,y,w,h}, fuel:object, race:object|null, warn:object|null, speed:object, drive:object}}
+ */
+export function hudLayout(hasWarn = false) {
+  const W = view.W;
+  const H = view.H;
+  const compact = W < 520 || H < 480;
+  const pad = tokenNum("space-3", 12);
+  const gap = tokenNum("space-2", 8);
+  const topBand = hasWarn ? WARN_H + gap : 0;
 
-  if (HUD.fuel) HUD.fuel.style.width = (ratio * 100).toFixed(1) + "%";
-  if (HUD.fuelTxt) HUD.fuelTxt.textContent = Math.round(ratio * 100) + "%";
-  if (HUD.fuelWrap) HUD.fuelWrap.classList.toggle("low", ratio < 0.25);
-  if (HUD.coins) HUD.coins.textContent = "🪙 " + store.gold;
+  const infoW = Math.min(compact ? 190 : 260, Math.max(120, W - pad * 2));
+  const infoH = compact ? 74 : 88;
+  const info = { x: pad, y: pad + topBand, w: infoW, h: infoH };
 
-  const kmh = toKmh(Math.abs(b.speed));
-  if (HUD.speed) {
-    HUD.speed.textContent =
-      Math.round(kmh) + " km/h" + (run.airTime > 0.1 ? " ✈ " + Math.round(run.airTime * 10) / 10 + "s" : "");
-  }
+  const fuel = { x: pad, y: info.y + info.h + gap, w: infoW, h: compact ? 16 : 18 };
 
-  const mx = (b.rear.x + b.front.x) / 2;
-  if (store.mode === "free") {
-    if (HUD.lvl) {
-      HUD.lvl.textContent =
-        "♾ 自由模式 · " + Math.round(toM(mx)) + "m" + (store.best > 0 ? " · 最佳" + store.best + "m" : "");
-    }
-    if (HUD.prog) HUD.prog.style.width = "100%";
-    if (HUD.progBar) HUD.progBar.style.opacity = 0.3;
-    if (HUD.progLabel) HUD.progLabel.style.opacity = 0.3;
-  } else {
-    if (HUD.lvl) {
-      let txt =
-        store.mode === "race"
-          ? "🏆 比赛 第" + (store.selLevel + 1) + "关"
-          : "关卡 " + (store.selLevel + 1) + " · " + (levelAt(store.selLevel) || LEVELS[0]).name;
-      const L = levelAt(store.selLevel);
-      // 变体标识（normal 不显示，避免噪音）
-      if (store.mode === "level" && L && L.variant !== "normal") {
-        const vi = VARIANT_INFO[L.variant];
-        if (vi) txt += " · " + vi.icon + vi.name;
-      }
-      // 下一道限时门倒计时（关卡模式）
-      const g = store.mode === "level" ? world.gates[run.gateIdx] : null;
-      if (g) {
-        // 与判定口径一致：扣掉摔车昏迷的有效骑行时间
-        const ride = store.time - run.levelStartTime - run.crashStall;
-        const rem = g.limit - ride;
-        txt += " · ⏱ 第" + (run.gateIdx + 1) + "门 " + Math.max(0, rem).toFixed(1) + "s";
-      }
-      // airtime 变体：显示滞空目标进度
-      if (store.mode === "level" && L && variantRule(L.variant).airTarget > 0) {
-        const tgt = airTargetOf(L);
-        const cur = Math.min(world.airScore, tgt);
-        txt += " · 🕊 " + cur.toFixed(1) + "/" + tgt.toFixed(1) + "s";
-      }
-      HUD.lvl.textContent = txt;
-    }
-    if (HUD.prog) {
-      HUD.prog.style.width = clamp((mx / Math.max(1, store.finishX)) * 100, 0, 100) + "%";
-    }
-    if (HUD.progBar) HUD.progBar.style.opacity = 1;
-    if (HUD.progLabel) HUD.progLabel.style.opacity = 1;
-  }
+  const raceW = Math.min(W * 0.46, 300);
+  const race = { x: (W - raceW) / 2, y: fuel.y + fuel.h + gap, w: raceW, h: 10 };
 
-  if (store.state === "menu" && HUD.lvlDesc) {
-    HUD.lvlDesc.textContent =
-      "🚲 " + VEHICLES[store.currentVehicle].name + " · 🪙 " + store.gold +
-      " · 已解锁 " + (store.unlocked + 1) + "/" + LEVELS.length +
-      " 关 · 🏅 " + store.achGot.length + "/" + ACHS.length +
-      (store.best > 0 ? " · 无限最佳 " + store.best + "m" : "");
-  }
+  const warnW = Math.min(320, Math.max(140, W - pad * 2));
+  const warn = hasWarn ? { x: (W - warnW) / 2, y: pad, w: warnW, h: WARN_H } : null;
+
+  const gr = compact ? 36 : 50;
+  const speed = { x: W - pad - gr * 2, y: H - pad - gr * 2, w: gr * 2, h: gr * 2 };
+
+  const drive = { x: (W - 104) / 2, y: H - pad - 14, w: 104, h: 14 };
+
+  return { info, fuel, race, warn, speed, drive };
 }
 
-/** 车架姿态平衡条 */
-export function drawBalanceBar() {
-  const bw = 120;
-  const bh = 8;
-  const bx = view.W / 2 - bw / 2;
-  const by = 30;
-  ctx.fillStyle = "rgba(0,0,0,0.35)";
+/** 玻璃卡片底座 */
+function glassRect(r, radius) {
   ctx.beginPath();
-  ctx.roundRect(bx - 2, by - 2, bw + 4, bh + 4, 4);
+  ctx.roundRect(r.x, r.y, r.w, r.h, radius === undefined ? tokenNum("radius-card", 14) : radius);
+  ctx.fillStyle = token("glass-fill");
   ctx.fill();
-  const ang = Math.atan2(bike.front.y - bike.rear.y, bike.front.x - bike.rear.x);
-  const norm = clamp(ang * 2.5, -1, 1);
-  const cx = bx + bw / 2 + norm * (bw / 2 - 4);
-  const hue = 120 - Math.abs(norm) * 120;
-  ctx.fillStyle = `hsl(${hue},90%,55%)`;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = token("glass-border");
+  ctx.stroke();
   ctx.beginPath();
-  ctx.roundRect(cx - 4, by - 1, 8, bh + 2, 3);
+  ctx.roundRect(r.x, r.y, r.w, 1, 0.5);
+  ctx.fillStyle = token("glass-highlight");
   ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.4)";
-  ctx.beginPath();
-  ctx.roundRect(bx + bw / 2 - 1, by - 1, 2, bh + 2, 1);
-  ctx.fill();
-  if (store.run.maxWheelieDist > 0.5) {
-    ctx.fillStyle = "rgba(255,255,255,0.7)";
-    ctx.font = "10px sans-serif";
-    ctx.textAlign = "center";
-    // 翘头里程：100px = 1m（旧实现把像素当米显示，差 10 倍）
-    ctx.fillText("🏍 " + Math.round(toM(store.run.maxWheelieDist)) + "m", bx + bw / 2, by - 6);
-    ctx.textAlign = "left";
-  }
 }
 
-/** 左下角按键指示 */
-export function drawDriveIndicator() {
-  const bw = 104;
-  const bh = 10;
-  const bx = view.W / 2 - bw / 2;
-  const by = view.H - 30;
-  ctx.fillStyle = "rgba(0,0,0,0.32)";
-  ctx.beginPath();
-  ctx.roundRect(bx - 3, by - 3, bw + 6, bh + 8, 6);
-  ctx.fill();
-  ctx.font = "bold 11px sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = key.left ? "#ff5252" : "rgba(255,255,255,0.45)";
-  ctx.fillText("◀ A", bx + bw * 0.17, by + bh / 2 + 1);
-  ctx.fillStyle = "rgba(255,255,255,0.75)";
-  ctx.fillText("🚲", bx + bw * 0.5, by + bh / 2 + 1);
-  ctx.fillStyle = key.right ? "#4cff88" : "rgba(255,255,255,0.45)";
-  ctx.fillText("D ▶", bx + bw * 0.82, by + bh / 2 + 1);
+/** 文本（统一走令牌字体，避免裸 font 字符串） */
+function label(text, x, y, level, color, align) {
+  ctx.font = fontOf(level);
+  ctx.fillStyle = color;
+  ctx.textAlign = align || "left";
   ctx.textBaseline = "alphabetic";
+  ctx.fillText(text, x, y);
   ctx.textAlign = "left";
 }
 
-/** 高速速度线（阈值已改为真实标度，旧版 *SUB 导致几乎不可见） */
+/** 小徽标（变体 / 状态） */
+function badgeText(text, x, y, bg, fg) {
+  ctx.font = fontOf("micro");
+  const w = ctx.measureText(text).width + tokenNum("space-3", 12);
+  const h = 15;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, tokenNum("radius-chip", 8));
+  ctx.fillStyle = bg;
+  ctx.fill();
+  label(text, x + tokenNum("space-2", 8) / 2 + 1, y + 11, "micro", fg);
+  return w;
+}
+
+/** 当前生效的机制警告（高优先级，不遮挡车身与前方赛道） */
+export function activeWarning() {
+  if (store.state !== "play") return null;
+  const run = store.run;
+  if (store.mode !== "level" || run.crashed) return null;
+  const mx = (bike.rear.x + bike.front.x) / 2;
+  const spd = Math.abs(bike.speed);
+
+  // 限时门紧张：剩余 < 2.5s 或已超时
+  const g = world.gates[run.gateIdx];
+  if (g) {
+    const ride = store.time - run.levelStartTime - run.crashStall;
+    const rem = g.limit - ride;
+    if (rem < 2.5) return { level: "warn", text: "⏱ 限时门 " + Math.max(0, rem).toFixed(1) + "s" };
+  }
+  // 危险段：进入前 620px 且超速
+  for (const h of world.hazards) {
+    if (mx > h.x1) continue;
+    if (h.x0 - mx > 620) continue;
+    if (mx >= h.x0 && spd > h.vmax) return { level: "danger", text: "⚠️ 危险路段超速！" };
+    if (spd > h.vmax * 0.9) return { level: "warn", text: "⚠️ 前方限速 " + Math.round(toKmh(h.vmax)) + "km/h" };
+  }
+  return null;
+}
+
+const WARN_BG = { danger: "danger", warn: "warn", info: "info", success: "success" };
+
+/** 绘制 HUD（每帧调用） */
+export function drawHud() {
+  if (store.state === "menu") return;
+  const w = activeWarning();
+  const L = hudLayout(!!w);
+
+  drawInfoCard(L.info);
+  drawFuelGauge(L.fuel);
+  if (store.mode === "race" || store.mode === "ranked") drawRaceBar(L.race);
+  drawSpeedGauge(L.speed);
+  drawDriveIndicator(L.drive);
+  if (w) drawWarning(L.warn, w);
+  drawSpeedLines();
+}
+
+function drawInfoCard(r) {
+  glassRect(r);
+  const pad = tokenNum("space-2", 8);
+  const x = r.x + pad;
+  let y = r.y + 20;
+
+  const L = levelAt(store.selLevel) || LEVELS[0];
+  const compact = view.W < 520 || view.H < 480;
+  const title = store.mode === "free"
+    ? "♾ 自由模式"
+    : store.mode === "race" || store.mode === "ranked"
+      ? "🏆 " + (store.mode === "ranked" ? "排位赛" : "比赛") + " 第" + (store.selLevel + 1) + "关"
+      : "关卡 " + (store.selLevel + 1) + (compact ? "" : " · " + L.name);
+  label(title, x, y, "title", token("text-hi"));
+
+  // 变体徽标（normal 不显示，避免噪音）
+  let bx = x;
+  const by = r.y + 24;
+  if (store.mode === "level" && L.variant !== "normal") {
+    const vi = VARIANT_INFO[L.variant];
+    if (vi) bx += badgeText(vi.icon + vi.name, bx, by, token("glass-fill-strong"), token("info")) + 4;
+  }
+  // 竞速/排位赛：显示与对手的关系
+  if ((store.mode === "race" || store.mode === "ranked") && store.raceAI) {
+    const lead = (bike.rear.x + bike.front.x) / 2 - store.raceAI.x;
+    const txt = lead >= 0
+      ? "领先 " + Math.round(toM(lead)) + "m"
+      : "落后 " + Math.round(toM(-lead)) + "m";
+    badgeText(txt, bx, by, token("glass-fill-strong"), lead >= 0 ? token("success") : token("danger"));
+  }
+
+  y = r.y + r.h - 30;
+  // 里程进度条
+  const mx = (bike.rear.x + bike.front.x) / 2;
+  const pct = store.mode === "free"
+    ? 1
+    : clamp(mx / Math.max(1, store.finishX), 0, 1);
+  const barW = r.w - pad * 2;
+  const barY = y;
+  ctx.beginPath();
+  ctx.roundRect(x, barY, barW, 6, 3);
+  ctx.fillStyle = token("track");
+  ctx.fill();
+  ctx.beginPath();
+  ctx.roundRect(x, barY, Math.max(2, barW * pct), 6, 3);
+  ctx.fillStyle = token("accent");
+  ctx.fill();
+
+  // 倒计时 / 目标 chip 行
+  const info = [];
+  if (store.mode === "free") {
+    info.push("里程 " + Math.round(toM(mx)) + "m" + (store.best > 0 ? " · 最佳 " + store.best + "m" : ""));
+  } else {
+    const g = store.mode === "level" ? world.gates[store.run.gateIdx] : null;
+    if (g) {
+      const ride = store.time - store.run.levelStartTime - store.run.crashStall;
+      const rem = Math.max(0, g.limit - ride);
+      info.push("⏱ 第" + (store.run.gateIdx + 1) + "门 " + rem.toFixed(1) + "s");
+    }
+    if (store.mode === "level" && variantRule(L.variant).airTarget > 0) {
+      const tgt = airTargetOf(L);
+      info.push("🕊 " + Math.min(world.airScore, tgt).toFixed(1) + "/" + tgt.toFixed(1) + "s");
+    }
+    if (!info.length) info.push("缩放 " + Math.round(store.cam.zoom * 100) + "% · R 重启 · +/- 缩放");
+  }
+  label(info.join("   "), x, barY - 6, "caption", token("text-lo"));
+
+  // 姿态平衡条（并入信息卡，避免小屏与其它元素打架）
+  drawBalance(x, barY + 14, barW, 5);
+}
+
+function drawBalance(x, y, w, h) {
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, h / 2);
+  ctx.fillStyle = token("track");
+  ctx.fill();
+  const ang = Math.atan2(bike.front.y - bike.rear.y, bike.front.x - bike.rear.x);
+  const norm = clamp(ang * 2.5, -1, 1);
+  const cx = x + w / 2 + norm * (w / 2 - 3);
+  ctx.beginPath();
+  ctx.roundRect(cx - 3, y - 1, 6, h + 2, 2);
+  ctx.fillStyle = Math.abs(norm) > 0.6 ? token("danger") : token("success");
+  ctx.fill();
+  ctx.beginPath();
+  ctx.roundRect(x + w / 2 - 0.5, y - 1, 1, h + 2, 0.5);
+  ctx.fillStyle = token("text-lo");
+  ctx.fill();
+}
+
+function drawFuelGauge(r) {
+  const ratio = fuelRatio();
+  glassRect(r, tokenNum("radius-chip", 8));
+  const pad = tokenNum("space-2", 8) / 2;
+  const inner = { x: r.x + pad, y: r.y + pad, w: r.w - pad * 2, h: r.h - pad * 2 };
+  ctx.beginPath();
+  ctx.roundRect(inner.x, inner.y, inner.w, inner.h, tokenNum("radius-chip", 8) / 2);
+  ctx.fillStyle = token("track");
+  ctx.fill();
+
+  const low = ratio < 0.25;
+  const alpha = low ? 0.55 + 0.45 * Math.abs(Math.sin(store.time * 6)) : 1;
+  ctx.globalAlpha = alpha;
+  ctx.beginPath();
+  ctx.roundRect(inner.x, inner.y, Math.max(1, inner.w * ratio), inner.h, tokenNum("radius-chip", 8) / 2);
+  ctx.fillStyle = ratio < 0.25 ? token("danger") : token("warn");
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // 刻度（每 10%）
+  ctx.beginPath();
+  for (let i = 1; i < 10; i++) {
+    const tx = inner.x + (inner.w * i) / 10;
+    ctx.moveTo(tx, inner.y);
+    ctx.lineTo(tx, inner.y + inner.h * 0.45);
+  }
+  ctx.strokeStyle = token("shadow-text");
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  label("⛽ " + Math.round(ratio * 100) + "%", inner.x + inner.w - 2, inner.y + inner.h - 3, "micro", token("text-hi"), "right");
+}
+
+function drawSpeedGauge(r) {
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+  const rad = r.w / 2 - 4;
+  const kmh = toKmh(Math.abs(bike.speed));
+  const maxK = toKmh(store.phys.MAXV) || 1;
+  const frac = clamp(kmh / maxK, 0, 1);
+
+  // 玻璃底盘
+  ctx.beginPath();
+  ctx.roundRect(r.x, r.y, r.w, r.h, r.w / 2);
+  ctx.fillStyle = token("glass-fill");
+  ctx.fill();
+  ctx.strokeStyle = token("glass-border");
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, rad, Math.PI * 0.75, Math.PI * 2.25);
+  ctx.strokeStyle = token("track");
+  ctx.lineWidth = 7;
+  ctx.lineCap = "round";
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, rad, Math.PI * 0.75, Math.PI * 0.75 + Math.PI * 1.5 * frac);
+  ctx.strokeStyle = frac > 0.85 ? token("danger") : frac > 0.6 ? token("warn") : token("success");
+  ctx.lineWidth = 7;
+  ctx.stroke();
+
+  label(String(Math.round(kmh)), cx, cy + 4, "display", token("text-hi"), "center");
+  label("km/h", cx, cy + 18, "micro", token("text-lo"), "center");
+}
+
+function drawDriveIndicator(r) {
+  glassRect(r, tokenNum("radius-chip", 8));
+  const bh = r.h;
+  label("◀ A", r.x + 16, r.y + bh - 4, "micro", key.left ? token("danger") : token("text-lo"), "center");
+  label("🚲", r.x + r.w / 2, r.y + bh - 4, "micro", token("text-mid"), "center");
+  label("D ▶", r.x + r.w - 16, r.y + bh - 4, "micro", key.right ? token("success") : token("text-lo"), "center");
+}
+
+function drawRaceBar(r) {
+  glassRect(r, tokenNum("radius-chip", 8));
+  const pad = tokenNum("space-2", 8) / 2;
+  const inner = { x: r.x + pad, y: r.y + pad, w: r.w - pad * 2, h: r.h - pad * 2 };
+  ctx.beginPath();
+  ctx.roundRect(inner.x, inner.y, inner.w, inner.h, 3);
+  ctx.fillStyle = token("track");
+  ctx.fill();
+  const total = Math.max(1, store.finishX);
+  const px = clamp((bike.rear.x + bike.front.x) / 2 / total, 0, 1);
+  const ax = clamp(store.raceAI ? store.raceAI.x / total : 0, 0, 1);
+  ctx.beginPath();
+  ctx.roundRect(inner.x, inner.y, inner.w * ax, inner.h, 3);
+  ctx.fillStyle = token("danger");
+  ctx.fill();
+  ctx.beginPath();
+  ctx.roundRect(inner.x, inner.y, inner.w * px, inner.h, 3);
+  ctx.fillStyle = token("success");
+  ctx.fill();
+
+  // AI 小车（世界坐标 → 屏幕）
+  if (store.raceAI) {
+    const sx = store.raceAI.x - store.cam.x;
+    if (sx > -40 && sx < view.W + 40) {
+      const sy = r.y + r.h + 14;
+      ctx.beginPath();
+      ctx.arc(sx - 7, sy, 5, 0, 7);
+      ctx.arc(sx + 7, sy, 5, 0, 7);
+      ctx.fillStyle = token("danger");
+      ctx.fill();
+      label("AI", sx, sy - 8, "micro", token("danger"), "center");
+    }
+  }
+}
+
+function drawWarning(r, w) {
+  const bg = token(WARN_BG[w.level] || "info");
+  ctx.beginPath();
+  ctx.roundRect(r.x, r.y, r.w, r.h, tokenNum("radius-chip", 8));
+  ctx.fillStyle = token("scrim-strong");
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = bg;
+  ctx.stroke();
+  label(w.text, r.x + r.w / 2, r.y + r.h - 8, "caption", bg, "center");
+}
+
+/** 高速速度线（阈值用真实标度） */
 export function drawSpeedLines() {
   const spd = Math.abs(bike.speed);
   if (spd < SPEEDLINE_V || store.run.crashed) return;
   const intens = clamp(spd / SPEEDLINE_REF, 0, 1) * 0.3;
-  ctx.strokeStyle = `rgba(255,255,255,${intens})`;
+  ctx.strokeStyle = token("obj-glass-mid");
+  ctx.globalAlpha = intens;
   ctx.lineWidth = 1.5;
   for (let i = 0; i < 12; i++) {
     const x = Math.random() * view.W;
@@ -164,56 +358,5 @@ export function drawSpeedLines() {
     ctx.lineTo(x - l * Math.sign(bike.speed || 1), y);
     ctx.stroke();
   }
-}
-
-/** 比赛模式：进度条 + AI 小车 */
-export function drawRaceHUD() {
-  if (store.mode !== "race" || !store.raceAI) return;
-  const bw = Math.min(view.W * 0.4, 300);
-  const bh = 10;
-  const bx = view.W / 2 - bw / 2;
-  // 窄屏时下移，避免和右上角的全屏/手柄按钮撞车
-  const by = view.W < 620 ? 56 : 34;
-  ctx.fillStyle = "rgba(0,0,0,0.35)";
-  ctx.beginPath();
-  ctx.roundRect(bx - 2, by - 2, bw + 4, bh + 4, 4);
-  ctx.fill();
-  const total = Math.max(1, store.finishX);
-  const px = clamp((bike.rear.x + bike.front.x) / 2 / total, 0, 1);
-  const ax = clamp(store.raceAI.x / total, 0, 1);
-  ctx.fillStyle = "#e63946";
-  ctx.beginPath();
-  ctx.roundRect(bx, by, bw * ax, bh, 3);
-  ctx.fill();
-  ctx.fillStyle = "#4cff88";
-  ctx.beginPath();
-  ctx.roundRect(bx, by, bw * px, bh, 3);
-  ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.85)";
-  ctx.font = "11px sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText("你(绿) vs AI(红)", view.W / 2, by - 4);
-  ctx.textAlign = "left";
-
-  const gy = groundY(store.raceAI.x);
-  if (gy !== Infinity) {
-    const sx = store.raceAI.x - store.cam.x;
-    const sy = gy - WHEEL_R - store.cam.y;
-    if (sx > -40 && sx < view.W + 40 && isFinite(sy)) {
-      ctx.fillStyle = "#e63946";
-      ctx.beginPath();
-      ctx.arc(sx, sy, 6, 0, 7);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(sx + 14, sy, 6, 0, 7);
-      ctx.fill();
-      ctx.fillStyle = "#b3202f";
-      ctx.fillRect(sx + 5, sy - 15, 10, 5);
-      ctx.fillStyle = "#fff";
-      ctx.font = "9px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText("AI", sx + 7, sy - 20);
-      ctx.textAlign = "left";
-    }
-  }
+  ctx.globalAlpha = 1;
 }

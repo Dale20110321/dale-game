@@ -20,7 +20,9 @@ import {
 import { showToast } from "../core/toast.js";
 import { initAudio } from "../core/audio.js";
 import { hasAch } from "../game/progress.js";
+import { getQuality, setQuality, QUALITY, QUALITY_LABEL } from "../render/postfx.js";
 import { showPanel, showMenu, refreshMenuButtons } from "./menu.js";
+import { card, chip, badge, statRow, emptyState, themeVars } from "./components.js";
 
 let api = {};
 /** 支线墙面板：当前展开的支线下标（-1 = 全部收起）与面板种类（level | race） */
@@ -53,8 +55,21 @@ export function initPanels(a) {
   if (panel) {
     panel.addEventListener("click", onPanelClick);
     panel.addEventListener("change", onPanelChange);
+    // 可访问性（Task 9.1）：带 role=button 的卡片支持 Enter / 空格触发
+    panel.addEventListener("keydown", onPanelKeydown);
   }
   refreshMenuButtons();
+}
+
+/** 键盘激活面板内的伪按钮（真按钮由浏览器原生处理） */
+function onPanelKeydown(e) {
+  if (e.code !== "Enter" && e.code !== "Space") return;
+  const el = e.target && e.target.closest ? e.target.closest('[role="button"][data-act]') : null;
+  if (!el) return;
+  if (e.preventDefault) e.preventDefault();
+  if (el.getAttribute && el.getAttribute("aria-disabled") === "true") return;
+  if (el.classList && el.classList.contains("locked")) return;
+  el.click();
 }
 
 /** 面板内事件委托（按钮统一用 data-act 标注） */
@@ -97,6 +112,11 @@ function onPanelClick(e) {
       return;
     case "free":
       api.startGame("free", undefined, { theme: +el.dataset.theme });
+      return;
+    case "quality":
+      setQuality(el.dataset.q);
+      renderSavePanel();
+      showToast("🎚 画质已切到「" + QUALITY_LABEL[getQuality()] + "」", 800);
       return;
     case "export":
       doExport();
@@ -225,16 +245,20 @@ function branchCard(bi) {
     stars += s;
   }
   const done = cleared >= LEVELS_PER_BRANCH;
-  const main = (th.pal && th.pal[0]) || "#4cff88";
-  return `<div class="branchCard${openBranch === bi ? " open" : ""}${open ? "" : " locked"}" data-act="branch" data-bi="${bi}"
-    style="border-left-color:${main}">
-    <div style="flex:1">
-      <div class="brName">${open ? "" : "🔒 "}${b.name}</div>
-      <div class="brSub">场景「${th.name}」 · ${b.desc}</div>
-      <div class="brStars">★ ${stars}/${LEVELS_PER_BRANCH * 3}</div>
-    </div>
-    <div class="brDone">${cleared}/${LEVELS_PER_BRANCH}${done ? "<br>✅" : ""}</div>
-  </div>`;
+  return card({
+    cls: "branchCard",
+    icon: `<div class="brThumb"></div>`,
+    title: `${open ? "" : "🔒 "}${b.name}`,
+    sub: `场景「${th.name}」 · ${b.desc}`,
+    meta: chip(`★ ${stars}/${LEVELS_PER_BRANCH * 3}`, "gold") +
+      (done ? " " + badge("已通关", "success") : ""),
+    right: `<div class="brDone">${cleared}/${LEVELS_PER_BRANCH}${done ? "<br>✅" : ""}</div>`,
+    interactive: true,
+    selected: openBranch === bi,
+    locked: !open,
+    styleVars: themeVars(th),
+    attrs: `data-act="branch" data-bi="${bi}"`,
+  });
 }
 
 function levelCell(bi, k) {
@@ -244,11 +268,11 @@ function levelCell(bi, k) {
   const locked = !levelUnlocked(bi, k);
   const st = store.stars[gi] || 0;
   const stars = locked ? "🔒 未解锁" : st > 0 ? "★".repeat(st) + "☆".repeat(3 - st) : "☆☆☆";
-  const color = (VEHICLES[store.currentVehicle] || VEHICLES[0]).color;
+  const label = `${BRANCHES[bi].name} 第${k + 1}关 ${v.name} 坡度${Math.round(L.maxSlope)}度 三星时限${Math.round(starTime(L))}秒 ${locked ? "未解锁" : st + "星"}`;
   return `<div class="lvCell${locked ? " locked" : st > 0 ? " done" : ""}" data-act="play" data-gi="${gi}"
-      style="border-color:${color}44">
+      role="button" tabindex="0" aria-label="${label}">
     <div>第${k + 1}关</div>
-    <div class="thm">${v.icon} ${v.name}</div>
+    <div class="thm">${badge(v.icon + " " + v.name, "variant")}</div>
     <div class="thm">坡度 ${Math.round(L.maxSlope)}° · ${Math.round(toM(L.len))}m</div>
     <div class="thm">三星 ≤ ${fmtClock(starTime(L))}</div>
     <div class="stars">${stars}</div>
@@ -313,17 +337,20 @@ export function renderFinalePanel() {
   const total = LEVELS.length;
   const unlocked = done >= total;
   const cleared = store.progress.finaleDone === true;
+  const body = card({
+    cls: "vehCard",
+    icon: unlocked ? "🎯" : "🔒",
+    title: FINALE.name,
+    sub: `${Math.round(toM(FINALE.len))}m · 依次穿越 6 个场景 · 坡度 ${Math.round(FINALE.maxSlope)}° · 机制密度最高`,
+    meta: !unlocked
+      ? "通关全部 " + total + " 关后解锁（当前 " + done + "/" + total + "）"
+      : cleared ? "✅ 已通关，可重复挑战（点击开始）" : "已解锁 · 点击开始",
+    interactive: unlocked,
+    locked: !unlocked,
+    attrs: unlocked ? 'data-act="finaleStart"' : "",
+  });
   showPanel(`<div class="modeTitle">🎯 最终任务</div>
-  <div class="vehCard${unlocked ? "" : " locked"}"${unlocked ? ' data-act="finaleStart"' : ""}>
-    <div style="font-size:26px">${unlocked ? "🎯" : "🔒"}</div>
-    <div style="flex:1">
-      <div class="vname">${FINALE.name}</div>
-      <div class="vdesc">${Math.round(toM(FINALE.len))}m · 依次穿越 6 个场景 · 坡度 ${Math.round(FINALE.maxSlope)}° · 机制密度最高</div>
-      <div class="vstat">${!unlocked
-        ? "通关全部 " + total + " 关后解锁（当前 " + done + "/" + total + "）"
-        : cleared ? "✅ 已通关，可重复挑战（点击开始）" : "已解锁 · 点击开始"}</div>
-    </div>
-  </div>
+  ${body}
   ${unlocked
     ? `<div class="panelNote">通关最终任务 → 收到比赛邀请 → 解锁排位赛</div>`
     : `<div class="panelNote">还需通关 ${total - done} 关（当前 ${done}/${total}）</div>`}
@@ -331,14 +358,16 @@ export function renderFinalePanel() {
 }
 
 function rankedTier(advanced, label, desc, ok, note) {
-  return `<div class="vehCard${ok ? "" : " locked"}"${ok ? ` data-act="ranked" data-adv="${advanced ? 1 : 0}"` : ""}>
-    <div style="font-size:24px">${ok ? (advanced ? "🔥" : "🏆") : "🔒"}</div>
-    <div style="flex:1">
-      <div class="vname">${label}</div>
-      <div class="vdesc">${desc}</div>
-      <div class="vstat">${note}</div>
-    </div>
-  </div>`;
+  return card({
+    cls: "vehCard",
+    icon: ok ? (advanced ? "🔥" : "🏆") : "🔒",
+    title: label,
+    sub: desc,
+    meta: note,
+    interactive: ok,
+    locked: !ok,
+    attrs: ok ? `data-act="ranked" data-adv="${advanced ? 1 : 0}"` : "",
+  });
 }
 
 /** 排位赛：段位分 / 段位名 / 战绩 / 普通与高级两档（高级按 rating ≥ 1200 解锁） */
@@ -374,29 +403,32 @@ export function renderFreePanel() {
   const peak = store.progress.peak === true;
   const themes = peak ? availableFreeThemes(store.stars) : [];
   showPanel(`<div class="modeTitle">♾️ 无限模式</div>
-  <div class="vehCard" data-act="freeRandom">
-    <div style="font-size:26px">🎲</div>
-    <div style="flex:1">
-      <div class="vname">随机地形</div>
-      <div class="vdesc">随里程缓慢加难，无终点；燃料耗尽即结算</div>
-      <div class="vstat">个人最佳 ${store.best} m</div>
-    </div>
-  </div>
+  ${card({
+    cls: "vehCard",
+    icon: "🎲",
+    title: "随机地形",
+    sub: "随里程缓慢加难，无终点；燃料耗尽即结算",
+    meta: "个人最佳 " + store.best + " m",
+    interactive: true,
+    attrs: 'data-act="freeRandom"',
+  })}
   ${peak ? "" : `<div class="panelNote">登顶（段位分 ≥ ${RATING_PEAK}）后可自选已通关场景</div>`}
   ${peak ? (themes.length
     ? `<div class="brHead">已通关场景 · 自选</div>
        <div class="branchWall">${themes.map((t) => {
         const th = THEMES[t] || THEMES[0];
         const b = BRANCHES[t];
-        return `<div class="branchCard" data-act="free" data-theme="${t}">
-          <div class="brIcon">🗺</div>
-          <div style="flex:1">
-            <div class="brName">${th.name}</div>
-            <div class="brSub">${b ? b.name + " · " + b.desc : ""}</div>
-          </div>
-        </div>`;
+        return card({
+          cls: "branchCard",
+          icon: "🗺",
+          title: th.name,
+          sub: b ? b.name + " · " + b.desc : "",
+          interactive: true,
+          styleVars: themeVars(th),
+          attrs: `data-act="free" data-theme="${t}"`,
+        });
       }).join("")}</div>`
-    : `<div class="panelNote">还没有已通关的场景：把任一支线的 6 关全部通关即可解锁对应场景</div>`)
+    : emptyState("还没有已通关的场景：把任一支线的 6 关全部通关即可解锁对应场景"))
     : ""}
   <button class="btn backBtn" data-act="back">返回</button>`);
 }
@@ -409,15 +441,17 @@ export function renderGaragePanel() {
   ${VEHICLES.map((v, i) => {
     const own = store.ownedVehicles.includes(i);
     const sel = i === store.currentVehicle;
-    return `<div class="vehCard ${sel ? "selected" : ""}" data-act="veh" data-veh="${i}">
-      <div style="font-size:26px">${v.icon}</div>
-      <div style="flex:1">
-        <div class="vname">${v.name}</div>
-        <div class="vdesc">${v.desc}</div>
-        <div class="vstat">速度${Math.round(v.spd * 100)}% · 驱动${Math.round(v.drv * 100)}% · 抓地${Math.round(v.grp * 100)}% · 旋转${Math.round(v.air * 100)}% · 油箱${Math.round(v.tank * 100)}%</div>
-      </div>
-      <div>${sel ? "✅ 使用中" : own ? "已拥有" : "🪙 " + v.price}</div>
-    </div>`;
+    return card({
+      cls: "vehCard",
+      icon: v.icon,
+      title: v.name,
+      sub: v.desc,
+      meta: `速度${Math.round(v.spd * 100)}% · 驱动${Math.round(v.drv * 100)}% · 抓地${Math.round(v.grp * 100)}% · 旋转${Math.round(v.air * 100)}% · 油箱${Math.round(v.tank * 100)}%`,
+      right: sel ? "✅ 使用中" : own ? "已拥有" : "🪙 " + v.price,
+      interactive: true,
+      selected: sel,
+      attrs: `data-act="veh" data-veh="${i}"`,
+    });
   }).join("")}
   <div class="panelNote" id="pnNote"></div>
   <button class="btn backBtn" data-act="back">返回</button>`);
@@ -460,7 +494,8 @@ export function renderAchPanel() {
     const got = hasAch(a.id);
     return `<div class="achItm ${got ? "got" : ""}">
       <div class="achIcon">${got ? a.icon : "🔒"}</div>
-      <div><div class="achName">${got ? a.name : "？？？"}</div><div class="achDesc">${a.desc}</div></div>
+      <div class="cardBody"><div class="achName">${got ? a.name : "？？？"}</div><div class="achDesc">${a.desc}</div></div>
+      <div class="cardRight">${badge(got ? "已达成" : "未达成", got ? "success" : "lock")}</div>
     </div>`;
   }).join("")}</div>
   <button class="btn backBtn" data-act="back">返回</button>`);
@@ -520,17 +555,22 @@ export function renderSavePanel() {
        </div>`
     : "";
   showPanel(`<div class="modeTitle">💾 存档 · 进度管理</div>
-  <div class="statGrid">
-    <div class="statItm"><span>已通关</span><b>${cur.cleared}/${LEVELS.length}</b></div>
-    <div class="statItm"><span>总星数</span><b>${cur.stars}/${LEVELS.length * 3}</b></div>
-    <div class="statItm"><span>段位分</span><b>${rating} · ${rankName(rating)}</b></div>
-    <div class="statItm"><span>成就</span><b>${store.achGot.length}/${ACHS.length}</b></div>
-    <div class="statItm"><span>金币</span><b>🪙 ${store.gold}</b></div>
-    <div class="statItm"><span>累计里程</span><b>${fmtKm(st.totalMeters)}</b></div>
-    <div class="statItm"><span>累计时长</span><b>${fmtHours(st.totalSeconds)}</b></div>
-    <div class="statItm"><span>最后游玩</span><b>${fmtDate(st.lastPlayed)}</b></div>
-  </div>
+  ${statRow([
+    { label: "已通关", value: `${cur.cleared}/${LEVELS.length}` },
+    { label: "总星数", value: `${cur.stars}/${LEVELS.length * 3}` },
+    { label: "段位分", value: `${rating} · ${rankName(rating)}` },
+    { label: "成就", value: `${store.achGot.length}/${ACHS.length}` },
+    { label: "金币", value: `🪙 ${store.gold}` },
+    { label: "累计里程", value: fmtKm(st.totalMeters) },
+    { label: "累计时长", value: fmtHours(st.totalSeconds) },
+    { label: "最后游玩", value: fmtDate(st.lastPlayed) },
+  ])}
   ${stor ? "" : `<div class="panelNote">⚠️ 浏览器存储不可用（隐私模式 / 空间已满 / 被禁用）：本次无法保存进度，导出 / 导入 / 重置均不可用</div>`}
+  <div class="brHead">🎚 画面设置 · 画质</div>
+  <div class="tabs" role="tablist">${QUALITY.map((q) =>
+    `<button class="tab" role="tab" data-act="quality" data-q="${q}" aria-selected="${q === getQuality()}" aria-label="画质 ${QUALITY_LABEL[q]}">${QUALITY_LABEL[q]}</button>`
+  ).join("")}</div>
+  <div class="panelNote">低 / 关 会关闭拖影与天气流动；设置保存在浏览器本地（非存档键，导出存档不包含它）</div>
   ${saveView.error ? `<div class="panelNote">${saveView.error}</div>` : ""}
   ${saveView.note ? `<div class="panelNote">${saveView.note}</div>` : ""}
   ${cmp}

@@ -1,9 +1,19 @@
 // 车辆与骑手绘制（分层：远侧肢体 → 背包 → 躯干 → 头 → 近侧肢体）
 // 车架主色使用当前车辆颜色（旧实现写死蓝色，买车看不出区别）
 import { ctx, view } from "../core/canvas.js";
+import { token } from "../config/ui-tokens.js";
 import { WHEEL_R, WHEELBASE, SEAT_H } from "../config/constants.js";
 import { VEHICLES } from "../config/vehicles.js";
 import { store, bike } from "../core/store.js";
+
+/** 两个 #rrggbb 之间线性插值（弹簧变色：两端色相仍来自令牌） */
+function mixHex(a, b, t) {
+  const p = (h) => [1, 3, 5].map((i) => parseInt(h.substr(i, 2), 16));
+  const [r1, g1, b1] = p(a);
+  const [r2, g2, b2] = p(b);
+  const m = (x, y) => Math.round(x + (y - x) * Math.max(0, Math.min(1, t)));
+  return `rgb(${m(r1, r2)},${m(g1, g2)},${m(b1, b2)})`;
+}
 
 export function drawBike() {
   const P = bike;
@@ -36,9 +46,8 @@ export function drawBike() {
   ctx.stroke();
 
   // 减震弹簧
-  ctx.strokeStyle = `rgba(255,${Math.round(210 - Math.abs(sq2) * 160)},${Math.round(
-    60 - Math.abs(sq2) * 40
-  )},${0.35 + Math.abs(sq2) * 0.65})`;
+  ctx.strokeStyle = mixHex(token("warn"), token("danger"), Math.abs(sq2));
+  ctx.globalAlpha = 0.35 + Math.abs(sq2) * 0.65;
   ctx.lineWidth = 2;
   for (const [ax, ay, bx, by] of [
     [-hw * 0.2, -hr * 0.72 + sq2 * 3, 0, -mdy],
@@ -59,32 +68,33 @@ export function drawBike() {
     }
     ctx.stroke();
   }
+  ctx.globalAlpha = 1;
 
   // 坐垫 / 车把
-  ctx.fillStyle = "#222";
+  ctx.fillStyle = token("obj-bike-tire");
   ctx.fillRect(-hw - 2, -hr * 0.8 - 4, 10, 4);
-  ctx.strokeStyle = "#333";
+  ctx.strokeStyle = token("obj-bike-carbon");
   ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.moveTo(hw * 0.5, -hr * 0.75);
   ctx.lineTo(hw * 0.62, -hr * 1.0);
   ctx.stroke();
-  ctx.fillStyle = "#e88c1f";
+  ctx.fillStyle = token("obj-rider-suit");
   ctx.fillRect(hw * 0.42, -hr * 1.0, 12, 3);
 
   // 车轮
   for (const [off, spin] of [[-hw, P.wheelRear], [hw, P.wheelFront]]) {
-    ctx.strokeStyle = "#2a2a2a";
+    ctx.strokeStyle = token("obj-bike-rim");
     ctx.lineWidth = 4;
     ctx.beginPath();
     ctx.arc(off, 0, WHEEL_R, 0, 7);
     ctx.stroke();
-    ctx.strokeStyle = "#c0392b";
+    ctx.strokeStyle = token("obj-bike-hub");
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.arc(off, 0, WHEEL_R - 1.5, 0, 7);
     ctx.stroke();
-    ctx.strokeStyle = "#666";
+    ctx.strokeStyle = token("obj-bike-metal");
     ctx.lineWidth = 2;
     ctx.beginPath();
     const r = WHEEL_R - 3;
@@ -95,14 +105,14 @@ export function drawBike() {
       ctx.lineTo(off + Math.cos(a) * r, Math.sin(a) * r);
     }
     ctx.stroke();
-    ctx.fillStyle = "#555";
+    ctx.fillStyle = token("obj-bike-steel");
     ctx.beginPath();
     ctx.arc(off, 0, 2.6, 0, 7);
     ctx.fill();
   }
 
   const glyphY = -hr * 0.72 + 3 * (bike.squash || 0);
-  ctx.strokeStyle = "#f4a259";
+  ctx.strokeStyle = token("obj-rider-skin-2");
   ctx.lineWidth = 4;
   ctx.lineCap = "round";
   ctx.beginPath();
@@ -113,10 +123,10 @@ export function drawBike() {
   // ---------------- 骑手 ----------------
   const susY = sq2 * 3.5;
   // 骑行服：远侧肢体用"更暗的同色"而不是半透明，避免看起来像残影
-  const suitCol = "#2c3742";
-  const suitDark = "#161c22";
-  const suitFar = "#1d242b";
-  const suitFarDark = "#0d1116";
+  const suitCol = token("obj-platform");
+  const suitDark = token("obj-bike-dark");
+  const suitFar = token("obj-platform-dark");
+  const suitFarDark = token("obj-suit-far-dark");
   const bbX = -hw * 0.32;
   const bbY = -2.5 + susY;
   const cr = 5.8;
@@ -157,7 +167,7 @@ export function drawBike() {
     const kx = (hipX + fx) / 2 + 3.4;
     const ky = (hipY + fy) / 2 - 1.8;
     limb(hipX, hipY, kx, ky, fx, fy, w1, w2, col, dark);
-    ctx.fillStyle = "#1b1b1b";
+    ctx.fillStyle = token("obj-bike-frame");
     ctx.fillRect(fx - 2.6, fy - 0.8, 5.2, 1.7);
     ctx.fillStyle = dark;
     ctx.beginPath();
@@ -179,14 +189,14 @@ export function drawBike() {
   arm(2.5, suitFar, suitFarDark);
 
   // 水袋背包
-  ctx.fillStyle = "#212b34";
+  ctx.fillStyle = token("obj-helmet");
   ctx.strokeStyle = suitDark;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.ellipse((hipX + shX) / 2 - 2.4, (hipY + shY) / 2 + 1, 2.9, 4, -0.72, 0, 7);
   ctx.fill();
   ctx.stroke();
-  ctx.fillStyle = "#8ad2ff";
+  ctx.fillStyle = token("obj-goggle");
   ctx.beginPath();
   ctx.arc((hipX + shX) / 2 - 2.6, (hipY + shY) / 2 - 0.6, 0.8, 0, 7);
   ctx.fill();
@@ -211,28 +221,28 @@ export function drawBike() {
   ctx.stroke();
 
   // 脖子与头
-  ctx.strokeStyle = "#e8a97e";
+  ctx.strokeStyle = token("obj-rider-skin");
   ctx.lineWidth = 2.6;
   ctx.lineCap = "round";
   ctx.beginPath();
   ctx.moveTo(shX + 1.2, shY - 0.6);
   ctx.lineTo(hdX - 1.2, hdY + 2.8);
   ctx.stroke();
-  ctx.fillStyle = "#ffcba5";
-  ctx.strokeStyle = "#c98a5f";
+  ctx.fillStyle = token("obj-rider-skin-hi");
+  ctx.strokeStyle = token("obj-rider-skin-sh");
   ctx.lineWidth = 0.8;
   ctx.beginPath();
   ctx.arc(hdX, hdY, 3.4, 0, 7);
   ctx.fill();
   ctx.stroke();
-  ctx.fillStyle = "#3b2a20";
+  ctx.fillStyle = token("obj-hair");
   ctx.beginPath();
   ctx.arc(hdX + 2, hdY + 0.4, 0.75, 0, 7);
   ctx.fill();
 
   // 头盔：圆顶 + 前檐（去掉尖角/斜线，避免"头顶尖尖的"）
-  ctx.fillStyle = "#e63946";
-  ctx.strokeStyle = "#1b1b1b";
+  ctx.fillStyle = token("danger");
+  ctx.strokeStyle = token("obj-bike-frame");
   ctx.lineWidth = 0.9;
   ctx.beginPath();
   ctx.arc(hdX - 0.2, hdY - 0.7, 4.4, Math.PI, Math.PI * 2);
@@ -245,13 +255,13 @@ export function drawBike() {
   ctx.fill();
   ctx.stroke();
   // 通风槽（贴着盔面的短弧，不做斜线）
-  ctx.strokeStyle = "rgba(255,255,255,0.6)";
+  ctx.strokeStyle = token("obj-glass-mid");
   ctx.lineWidth = 0.8;
   ctx.beginPath();
   ctx.arc(hdX - 0.2, hdY - 0.7, 2.5, Math.PI * 1.12, Math.PI * 1.8);
   ctx.stroke();
   // 下巴带
-  ctx.strokeStyle = "#333";
+  ctx.strokeStyle = token("obj-bike-carbon");
   ctx.lineWidth = 0.9;
   ctx.beginPath();
   ctx.moveTo(hdX + 1.1, hdY + 1.5);
@@ -259,13 +269,13 @@ export function drawBike() {
   ctx.stroke();
 
   // 近侧曲柄与肢体
-  ctx.strokeStyle = "#4a4a4a";
+  ctx.strokeStyle = token("obj-bike-gray");
   ctx.lineWidth = 1.4;
   ctx.beginPath();
   ctx.moveTo(bbX, bbY);
   ctx.lineTo(bbX + Math.cos(pda) * cr, bbY + Math.sin(pda) * cr);
   ctx.stroke();
-  ctx.fillStyle = "#333";
+  ctx.fillStyle = token("obj-bike-carbon");
   ctx.beginPath();
   ctx.arc(bbX, bbY, 1.8, 0, 7);
   ctx.fill();

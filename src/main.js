@@ -17,7 +17,8 @@ import { applyUpgrades, resetBike } from "./physics/bike.js";
 import { buildLevel } from "./game/world.js";
 import { updateCamera } from "./render/camera.js";
 import { drawScene } from "./render/scene.js";
-import { hideOverlay, showMenu, togglePause } from "./ui/menu.js";
+import { initPostFx } from "./render/postfx.js";
+import { hideOverlay, showMenu, togglePause, showResultCard } from "./ui/menu.js";
 import { initPanels } from "./ui/panels.js";
 import { initShop, toggleShop } from "./ui/shop.js";
 import { initDonate } from "./ui/donate.js";
@@ -32,11 +33,13 @@ loadAchList();
 loadProgress();
 // 自动保存接线：探测存储可用性 + 每 30s 兜底写盘 + 切后台写盘（Task 9.6）
 initAutoSave();
+// 后处理接线（Task 7）：读持久化画质档位（缺省时按设备给默认档）
+initPostFx();
 // 降级提示（非阻塞，只提示一次）：localStorage 被禁用 / 配额满时告知无法保存
 if (!isStorageAvailable()) showToast("⚠️ 本次无法保存进度（浏览器存储不可用）", 2400);
 
 // 装配：游戏逻辑 ←→ 界面（单向注入）
-initGame({ hideOverlay, toMenu: showMenu });
+initGame({ hideOverlay, toMenu: showMenu, presentResult: showResultCard });
 initPanels({ startGame, applyVehicle: applyUpgrades });
 initShop();
 initDonate();

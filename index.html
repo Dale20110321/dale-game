@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>自行车越野 · 真实物理版</title>
 <meta name="description" content="原生 JavaScript + Canvas 的物理越野自行车游戏：闯关 / 比赛 / 无限模式，三质点刚体物理、燃料、特技与成就。">
+<link rel="stylesheet" href="styles/tokens.css">
 <link rel="stylesheet" href="styles/main.css">
 </head>
 <body>
@@ -18,36 +19,45 @@
   <button id="fullBtn" class="tbtn tfull" aria-label="全屏">⛶</button>
   <button id="touchBtn" class="tbtn ttoggle" aria-label="方向键开关">🎮</button>
 
-  <div id="hud">
-    <div class="lvl" id="lvl">关卡 1</div>
-    <div class="spd" id="speed">0 km/h</div>
-    <div class="coins" id="coins">🪙 0</div>
-    <div class="fuelwrap"><i id="fuel"></i><b id="fuelTxt">100%</b></div>
-    <div class="prog" id="progLabel">进度</div>
-    <div class="bar" id="progBar"><i id="prog"></i></div>
-  </div>
-
   <div id="comboTag"></div>
   <div id="toast"></div>
 
   <div id="overlay">
-    <h1 id="ovTitle">🚲 越野自行车</h1>
-    <div class="sub" id="ovSub">物理引擎越野：闯关 · 比赛 · 特技 · 燃料 · 多主题</div>
-    <div class="keys" id="ovKeys">→/D 加速（空中顺时针转体） &nbsp;←/A 刹车（空中逆时针转体） &nbsp;P/Esc 暂停 &nbsp;R 重开 &nbsp;M 静音</div>
-    <div class="menuBtns">
-      <button class="btn" id="btnLevels">🏁 闯关模式</button>
-      <button class="btn" id="btnRace">🏆 比赛模式</button>
-      <button class="btn" id="btnFree">♾️ 无限模式</button>
-      <button class="btn" id="btnFinale">🎯 最终任务</button>
-      <button class="btn" id="btnRanked">🏆 排位赛</button>
-      <button class="btn ghost" id="btnGarage">🏍️ 车库</button>
-      <button class="btn ghost" id="btnAch">🏅 成就</button>
-      <button class="btn ghost" id="btnShop">🔧 升级车间</button>
-      <button class="btn ghost" id="btnSave">💾 存档</button>
-      <button class="btn ghost" id="btnDonate">☕ 你喜欢这个游戏吗</button>
+    <div id="menuBg" aria-hidden="true"><i class="glow"></i><i class="glow g2"></i></div>
+    <div class="hero">
+      <h1 id="ovTitle">🚲 越野自行车</h1>
+      <div class="sub" id="ovSub">物理引擎越野：支线任务 · 最终任务 · 排位赛 · 无限模式</div>
+      <div class="heroSummary" id="heroSummary" aria-label="当前状态摘要"></div>
+      <div class="keys" id="ovKeys">→/D 加速（空中顺时针转体） &nbsp;←/A 刹车（空中逆时针转体） &nbsp;P/Esc 暂停 &nbsp;R 重开 &nbsp;M 静音</div>
+    </div>
+    <div class="menuGroups" id="menuGroups">
+      <div class="menuGroup" data-group="main" aria-label="主玩法">
+        <div class="grpHead">主玩法</div>
+        <div class="grpBtns">
+          <button class="btn lg" id="btnLevels" data-entry="levels">🏁 闯关</button>
+          <button class="btn ghost" id="btnRace" data-entry="race">🏆 比赛模式</button>
+          <button class="btn ghost" id="btnFinale" data-entry="finale">🎯 最终任务</button>
+          <button class="btn ghost" id="btnRanked" data-entry="ranked">🏆 排位赛</button>
+          <button class="btn ghost" id="btnFree" data-entry="free">♾️ 无限模式</button>
+        </div>
+      </div>
+      <div class="menuGroup" data-group="progress" aria-label="养成与进度">
+        <div class="grpHead">养成与进度</div>
+        <div class="grpBtns">
+          <button class="btn ghost" id="btnGarage" data-entry="garage">🏍️ 车库</button>
+          <button class="btn ghost" id="btnShop" data-entry="shop">🔧 升级车间</button>
+          <button class="btn ghost" id="btnAch" data-entry="ach">🏅 成就</button>
+          <button class="btn ghost" id="btnSave" data-entry="save">💾 存档</button>
+        </div>
+      </div>
+      <div class="menuGroup" data-group="support" aria-label="支持">
+        <div class="grpHead">支持</div>
+        <div class="grpBtns">
+          <button class="btn" id="btnDonate" data-entry="donate">☕ 你喜欢这个游戏吗</button>
+        </div>
+      </div>
     </div>
     <div id="modePanel" class="hidden"></div>
-    <div class="lvlDesc" id="lvlDesc"></div>
   </div>
 
   <div id="shop" class="hidden">

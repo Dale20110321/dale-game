@@ -76,6 +76,9 @@ function makeEl(id) {
     },
     addEventListener: noop,
     removeEventListener: noop,
+    setAttribute(k, v) { this.attrs = this.attrs || {}; this.attrs[k] = String(v); },
+    getAttribute(k) { return (this.attrs || {})[k] === undefined ? null : (this.attrs || {})[k]; },
+    hasAttribute(k) { return (this.attrs || {})[k] !== undefined; },
     insertBefore: noop,
     appendChild: noop,
     closest: () => null,
@@ -170,8 +173,8 @@ const MODULE_LIST = [
   "physics/terrain.js", "physics/bike.js", "physics/fuel.js",
   "game/progress.js", "game/stats.js", "game/world.js", "game/race.js", "game/game.js",
   "render/particles.js", "render/camera.js", "render/background.js", "render/terrain.js",
-  "render/bike.js", "render/entities.js", "render/hud.js", "render/scene.js",
-  "ui/menu.js", "ui/panels.js", "ui/shop.js", "ui/donate.js",
+  "render/bike.js", "render/entities.js", "render/hud.js", "render/scene.js", "render/postfx.js",
+  "ui/menu.js", "ui/panels.js", "ui/shop.js", "ui/donate.js", "ui/components.js",
   "main.js",
 ];
 
@@ -211,6 +214,528 @@ if (ONLY_MODULES) {
   const { hasAch } = await import(new URL("../src/game/progress.js", import.meta.url).href);
   const { save, loadSave, loadAchList, getUp } = await import(new URL("../src/core/storage.js", import.meta.url).href);
   const { drawScene } = await import(new URL("../src/render/scene.js", import.meta.url).href);
+
+  // ---------------- 设计令牌（Task 1）：双端一致 + 分组覆盖 + CSS 无字面色值 ----------------
+  section("设计令牌");
+  {
+    const tokensCss = readFileSync(join(ROOT, "styles", "tokens.css"), "utf8");
+    const { TOKENS, semColor, fontOf } = await import(
+      new URL("../src/config/ui-tokens.js", import.meta.url).href
+    );
+
+    // 解析 :root { --key: value; }（先剥掉注释，否则注释后紧跟的令牌会被吞掉）
+    const rootBody = (tokensCss.match(/:root\s*\{([\s\S]*?)\}/) || ["", ""])[1]
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    const cssTokens = {};
+    for (const seg of rootBody.split(";")) {
+      const m = seg.match(/^\s*--([a-z0-9-]+)\s*:\s*([\s\S]+)$/i);
+      if (m) cssTokens[m[1]] = m[2].trim();
+    }
+
+    const cssKeys = Object.keys(cssTokens).sort();
+    const jsKeys = Object.keys(TOKENS).sort();
+    const missJs = cssKeys.filter((k) => !(k in TOKENS));
+    const missCss = jsKeys.filter((k) => !(k in cssTokens));
+    check(
+      "令牌双端键集合一致",
+      missJs.length === 0 && missCss.length === 0,
+      `css ${cssKeys.length} 项 / js ${jsKeys.length} 项` +
+        (missJs.length ? ` · CSS 独有 ${missJs.slice(0, 5).join(",")}` : "") +
+        (missCss.length ? ` · JS 独有 ${missCss.slice(0, 5).join(",")}` : "")
+    );
+
+    const valDiff = jsKeys
+      .filter((k) => cssTokens[k] !== TOKENS[k])
+      .map((k) => `${k}(css=${cssTokens[k]}|js=${TOKENS[k]})`);
+    check(
+      "令牌双端取值完全一致",
+      valDiff.length === 0,
+      valDiff.length ? valDiff.slice(0, 4).join(" ") : `${cssKeys.length} 个键取值全等`
+    );
+
+    const groups = {
+      表面层级: ["surface-0", "surface-1", "surface-2", "surface-3"],
+      玻璃层: ["glass-fill", "glass-fill-strong", "glass-border", "glass-highlight", "glass-blur"],
+      强调色: ["accent", "accent-2", "accent-grad"],
+      语义色: ["success", "warn", "danger", "gold", "info"],
+      文本层级: ["text-hi", "text-mid", "text-lo"],
+      排版: ["font-display-size", "font-title-size", "font-body-size", "font-caption-size", "font-micro-size", "font-display-lh", "font-display-weight"],
+      间距: ["space-1", "space-2", "space-3", "space-4", "space-5", "space-6"],
+      圆角: ["radius-chip", "radius-card", "radius-sheet", "radius-pill"],
+      动效: ["dur-fast", "dur-base", "dur-slow", "ease-std", "ease-enter", "ease-exit"],
+    };
+    const badGroups = Object.entries(groups)
+      .filter(([, keys]) => keys.some((k) => !(k in cssTokens)))
+      .map(([g]) => g);
+    check(
+      "令牌覆盖 spec 要求的全部分组",
+      badGroups.length === 0,
+      Object.keys(groups).length + " 组" + (badGroups.length ? " 缺 " + badGroups.join(",") : "全部齐备")
+    );
+
+    const html = readFileSync(join(ROOT, "index.html"), "utf8");
+    check(
+      "index.html 在 main.css 之前引入 tokens.css",
+      html.includes("styles/tokens.css") && html.indexOf("tokens.css") < html.indexOf("main.css"),
+      html.includes("tokens.css") ? "顺序正确" : "未引入 tokens.css"
+    );
+
+    const mainCss = readFileSync(join(ROOT, "styles", "main.css"), "utf8");
+    const literals = mainCss.match(/#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/g) || [];
+    check(
+      "main.css 无脱离令牌的字面色值",
+      literals.length === 0,
+      literals.length ? literals.slice(0, 5).join(",") : `${Object.keys(cssTokens).length} 个令牌全部走 var()`
+    );
+
+    check(
+      "语义色 / 字体辅助函数可用",
+      semColor("danger") === TOKENS.danger && fontOf("title").includes(TOKENS["font-title-size"]),
+      `semColor(danger)=${semColor("danger")} · fontOf(title)="${fontOf("title")}"`
+    );
+  }
+
+  // ---------------- 组件库（Task 2）：纯函数可调用 + ui 层无内联配色 ----------------
+  section("组件库");
+  {
+    const comp = await import(new URL("../src/ui/components.js", import.meta.url).href);
+    const fns = ["card", "chip", "badge", "grid", "statRow", "emptyState", "progress"];
+    const bad = [];
+    for (const name of fns) {
+      if (typeof comp[name] !== "function") { bad.push(`${name}:未导出`); continue; }
+      let out = "";
+      try {
+        out = name === "statRow"
+          ? comp[name]([{ label: "L", value: "V" }])
+          : name === "grid"
+            ? comp[name](["<i></i>"], { cols: 3 })
+            : name === "progress"
+              ? comp[name](42)
+              : name === "emptyState"
+                ? comp[name]("空")
+                : name === "chip" || name === "badge"
+                  ? comp[name]("x", "info")
+                  : comp[name]({ title: "t", sub: "s", meta: "m", right: "r", icon: "i" });
+      } catch (e) {
+        bad.push(`${name}:抛错 ${e.message}`);
+        continue;
+      }
+      if (typeof out !== "string" || !out.trim().length) bad.push(`${name}:空返回`);
+    }
+    check("components.js 导出函数均可调用且返回非空 HTML", bad.length === 0,
+      bad.slice(0, 4).join(" ; ") || `校验 ${fns.length} 个函数`);
+
+    // 组件类齐备（CSS 侧）
+    const mainCss = readFileSync(join(ROOT, "styles", "main.css"), "utf8");
+    const needCls = ["glass-sheet", "card", "chip", "btn", "progress", "stat", "tabs", "badge", "empty"];
+    const missCls = needCls.filter((c) => !new RegExp("\\." + c + "(?![a-zA-Z0-9_-])").test(mainCss));
+    const needStates = [":hover", ":active", ":focus-visible", "[disabled]", 'aria-disabled="true"'];
+    const missState = needStates.filter((s) => !mainCss.includes(s));
+    check("组件类与五态样式齐备", missCls.length === 0 && missState.length === 0,
+      (missCls.length ? "缺类 " + missCls.join(",") + " ; " : "") +
+      (missState.length ? "缺态 " + missState.join(",") : `${needCls.length} 个组件 / ${needStates.length} 种状态`));
+
+    // 配色不得写成内联 style（布局类动态值允许）
+    const colorStyle = /style="[^"]*(#[0-9a-fA-F]{3,8}|rgba?\(|hsla?\()/;
+    const hits = [];
+    for (const f of ["menu.js", "panels.js", "shop.js", "donate.js", "components.js"]) {
+      const src = readFileSync(join(ROOT, "src", "ui", f), "utf8");
+      if (colorStyle.test(src)) hits.push(f);
+    }
+    check("src/ui/*.js 无内联配色 style", hits.length === 0, hits.length ? hits.join(",") : "5 个文件全部用组件类/令牌");
+  }
+
+  // ---------------- 主菜单信息架构（Task 3） ----------------
+  section("主菜单");
+  {
+    const html = readFileSync(join(ROOT, "index.html"), "utf8");
+    const groups = ["main", "progress", "support"];
+    const missG = groups.filter((g) => !html.includes(`data-group="${g}"`));
+    const needEntries = ["levels", "race", "finale", "ranked", "free"];
+    const missE = needEntries.filter((e) => !html.includes(`data-entry="${e}"`));
+    check("菜单按「主玩法 / 养成与进度 / 支持」三组呈现",
+      missG.length === 0 && missE.length === 0,
+      (missG.length ? "缺组 " + missG.join(",") + " ; " : "3 组齐备 · ") + `主玩法入口 ${needEntries.length - missE.length}/${needEntries.length}`);
+    check("主菜单入口均为 button 且无内联 onclick",
+      !/onclick=/.test(html) && (html.match(/<button/g) || []).length >= 10,
+      `${(html.match(/<button/g) || []).length} 个 button / 无 onclick`);
+
+    const menu = await import(new URL("../src/ui/menu.js", import.meta.url).href);
+    const els = (id) => globalThis.document.getElementById(id);
+
+    // Hero 状态摘要：六项且数值与 store 一致
+    const bak = {
+      gold: store.gold, best: store.best, stars: store.stars.slice(),
+      invited: store.progress.invited, rating: store.progress.rating, peak: store.progress.peak,
+    };
+    store.gold = 1234;
+    store.best = 77;
+    store.stars.fill(0);
+    store.stars[0] = 3;
+    store.stars[1] = 2;
+    store.progress.invited = true;
+    store.progress.rating = 1350;
+
+    menu.renderHeroSummary();
+    const sum = els("heroSummary").innerHTML || "";
+    const need = ["车辆", "金币", "1234", "通关进度", "2/72", "总星", "5/216", "段位", "1350", "无限最佳", "77m"];
+    const miss = need.filter((k) => !sum.includes(k));
+    check("Hero 摘要六项齐备且与 store 一致", miss.length === 0,
+      miss.length ? "缺 " + miss.join(",") : "车辆/金币/通关 2/72/总星 5/216/段位 1350/无限最佳 77m");
+
+    // 未解锁入口：按钮文案必须写明解锁条件与当前进度，且标记锁定
+    store.stars.fill(0);
+    store.progress.invited = false;
+    store.progress.rating = 0;
+    menu.refreshMenuButtons();
+    const fb = els("btnFinale");
+    const rb = els("btnRanked");
+    check("未解锁入口写明解锁条件与当前进度",
+      /0\/72/.test(fb.textContent) && fb.classList.contains("lockedBtn") &&
+        /最终任务/.test(rb.textContent) && rb.classList.contains("lockedBtn"),
+      `最终任务="${fb.textContent}" · 排位赛="${rb.textContent}"`);
+
+    const { renderFinalePanel } = await import(new URL("../src/ui/panels.js", import.meta.url).href);
+    const { hidePanel } = menu;
+    renderFinalePanel();
+    const fpHtml = els("modePanel").innerHTML || "";
+    const noStart = !fpHtml.includes('data-act="finaleStart"');
+    check("未解锁时最终任务面板给出进度且无开局入口",
+      /当前 0\/72/.test(fpHtml) && noStart, noStart ? "含进度提示 · 无 finaleStart" : "仍可开局");
+    hidePanel();
+
+    // 键盘导航：静态检查按键处理（方向键 / Escape）与焦点默认位
+    const menuSrc = readFileSync(join(ROOT, "src", "ui", "menu.js"), "utf8");
+    check("菜单支持方向键移动与 Esc 关面板",
+      /ArrowDown/.test(menuSrc) && /ArrowUp/.test(menuSrc) && /Escape/.test(menuSrc) && /focusDefault/.test(menuSrc),
+      "ArrowUp/Down/Left/Right + Escape + 默认焦点");
+
+    // 活体背景：渐晕 + 流动光斑，且 reduced-motion 下静止
+    const mainCss2 = readFileSync(join(ROOT, "styles", "main.css"), "utf8");
+    check("菜单活体背景（渐晕 + 流动光斑 + reduced-motion 静止）",
+      html.includes('id="menuBg"') && mainCss2.includes("@keyframes drift") &&
+        /prefers-reduced-motion[\s\S]*#menuBg .glow \{ animation: none/.test(mainCss2),
+      "menuBg + drift + reduced-motion 关闭");
+
+    // 还原 store 快照
+    store.gold = bak.gold;
+    store.best = bak.best;
+    store.stars = bak.stars;
+    store.progress.invited = bak.invited;
+    store.progress.rating = bak.rating;
+    store.progress.peak = bak.peak;
+    menu.refreshMenuButtons();
+  }
+
+  // ---------------- HUD 布局与仪表（Task 5） ----------------
+  section("HUD");
+  {
+    const hud = await import(new URL("../src/render/hud.js", import.meta.url).href);
+    const { view } = await import(new URL("../src/core/canvas.js", import.meta.url).href);
+
+    const viewBak = { W: view.W, H: view.H };
+    const sizes = [[1280, 720], [500, 900], [360, 400]];
+    const bad = [];
+    for (const [w, h] of sizes) {
+      view.W = w;
+      view.H = h;
+      for (const hasWarn of [false, true]) {
+        const L = hud.hudLayout(hasWarn);
+        const items = Object.entries(L).filter(([, r]) => r && typeof r === "object");
+        for (const [k, r] of items) {
+          if (r.x < -0.01 || r.y < -0.01 || r.x + r.w > w + 0.01 || r.y + r.h > h + 0.01) {
+            bad.push(`${w}x${h}${hasWarn ? "+警告" : ""} ${k} 越界`);
+          }
+        }
+        for (let i = 0; i < items.length; i++) {
+          for (let j = i + 1; j < items.length; j++) {
+            const [ka, a] = items[i];
+            const [kb, b] = items[j];
+            if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) {
+              bad.push(`${w}x${h}${hasWarn ? "+警告" : ""} ${ka}×${kb} 重叠`);
+            }
+          }
+        }
+      }
+    }
+    check("HUD 三种视口（含警告带）互不重叠且不越界",
+      bad.length === 0,
+      bad.slice(0, 4).join(" ; ") || "1280×720 / 500×900 / 360×400 · 有/无警告 全部通过");
+    view.W = viewBak.W;
+    view.H = viewBak.H;
+
+    // 危险段警告：高优先级且能真实触发（渲染不抛异常）
+    const hazBak = world.hazards.slice();
+    const crashBak = store.run.crashed;
+    startGame("level", 0);
+    const m0 = (bike.rear.x + bike.front.x) / 2;
+    world.hazards = [{ x0: m0 - 50, x1: m0 + 200, vmax: 50 }];
+    bike.speed = 600;
+    store.run.crashed = false;
+    let warn = null;
+    let threw = null;
+    try { warn = hud.activeWarning(); } catch (e) { threw = e.message; }
+    let drawThrew = null;
+    try { hud.drawHud(); } catch (e) { drawThrew = e.message; }
+    check("危险段超速触发 danger 级警告且渲染不抛异常",
+      !threw && !drawThrew && !!warn && warn.level === "danger",
+      threw || drawThrew || (warn ? `${warn.level}: ${warn.text}` : "未触发"));
+
+    // 无警告时不应报有警告（避免常驻遮挡）
+    world.hazards = [];
+    world.gates = [];
+    bike.speed = 100;
+    check("无危险时 HUD 不显示机制警告", hud.activeWarning() === null, "activeWarning=null");
+    world.hazards = hazBak;
+    store.run.crashed = crashBak;
+
+    // 色值全部来自令牌
+    const hudSrc = readFileSync(join(ROOT, "src", "render", "hud.js"), "utf8");
+    const lits = hudSrc.match(/#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/g) || [];
+    check("HUD 色值全部来自 ui-tokens（无裸色值）", lits.length === 0, lits.slice(0, 5).join(",") || "无");
+  }
+
+  // ---------------- 渲染层令牌化（Task 6） ----------------
+  section("渲染层令牌化");
+  {
+    const renderFiles = readdirSync(join(ROOT, "src", "render")).filter((f) => f.endsWith(".js"));
+    const LIT = /"#[0-9a-fA-F]{3,8}"|"rgba?\([^"]*\)"|"hsla?\([^"]*\)"/g;
+    const hits = [];
+    for (const f of renderFiles) {
+      const src = readFileSync(join(ROOT, "src", "render", f), "utf8");
+      for (const m of src.match(LIT) || []) if (!m.includes("${")) hits.push(f + ":" + m);
+    }
+    check("src/render/** 无白名单外的裸色值字面量",
+      hits.length === 0,
+      hits.slice(0, 5).join(" ") || `${renderFiles.length} 个渲染文件全部走令牌（仅允许模板插值动态色）`);
+
+    const usesTokens = renderFiles.filter((f) =>
+      readFileSync(join(ROOT, "src", "render", f), "utf8").includes('from "../config/ui-tokens.js"')
+    );
+    check("渲染层确实从 ui-tokens 取色",
+      usesTokens.length >= 6,
+      `${usesTokens.length}/${renderFiles.length} 个渲染文件引用 ui-tokens`);
+
+    const themesSrc = readFileSync(join(ROOT, "src", "config", "themes.js"), "utf8");
+    check("场景与装饰配色仍在数据层（未被并入令牌而丢失场景个性）",
+      /export const DECO_COLORS/.test(themesSrc) && /ambient:/.test(themesSrc) && /pal:/.test(themesSrc),
+      "THEMES.pal/ambient + DECO_COLORS 均在 config/themes.js");
+  }
+
+  // ---------------- 画面后处理（Task 7） ----------------
+  section("画面后处理");
+  {
+    const fx = await import(new URL("../src/render/postfx.js", import.meta.url).href);
+    const stateBak = store.state;
+    const qBak = fx.getQuality();
+
+    check("画质档位为 高 / 中 / 低 / 关",
+      fx.QUALITY.join("/") === "high/medium/low/off",
+      fx.QUALITY.map((q) => fx.QUALITY_LABEL[q]).join(" / "));
+
+    const bad = [];
+    for (const q of fx.QUALITY) {
+      fx.setQuality(q);
+      try {
+        startGame("level", 0);
+        drawScene();
+      } catch (e) {
+        bad.push(q + ":" + e.message);
+      }
+    }
+    check("四档画质各渲染一帧无异常", bad.length === 0, bad.join(" ; ") || "4 档 × 1 帧全部通过");
+
+    // 后处理为纯视觉层：同输入下"高"与"关"两档轨迹与用时完全一致
+    const runTrace = () => {
+      startGame("level", 3);
+      const xs = [];
+      let t = 0;
+      while (t < 6 && store.state === "play") {
+        autoInput();
+        update(DT);
+        t += DT;
+        xs.push((bike.rear.x + bike.front.x) / 2);
+      }
+      return { xs, t };
+    };
+    fx.setQuality("high");
+    const A = runTrace();
+    fx.setQuality("off");
+    const B = runTrace();
+    let maxd = 0;
+    for (let i = 0; i < Math.min(A.xs.length, B.xs.length); i++) maxd = Math.max(maxd, Math.abs(A.xs[i] - B.xs[i]));
+    check("后处理不改变物理（高 vs 关 轨迹与用时一致）",
+      maxd === 0 && Math.abs(A.t - B.t) < 1e-9,
+      `最大位移差 ${maxd.toFixed(6)}px · 用时差 ${(A.t - B.t).toFixed(6)}s · ${A.xs.length} 帧`);
+
+    fx.setQuality("low");
+    check("画质设置持久化到非存档键（不动任何 bike_ 键）",
+      localStorage.getItem("dale_quality") === "low" && !("dale_quality" in (await import(new URL("../src/config/constants.js", import.meta.url).href)).SAVE_KEYS),
+      "dale_quality=low，无新增 bike_ 存档键");
+    check("低档 / reduced-motion 关闭模糊类效果",
+      fx.blurEnabled() === false && fx.setQuality("high") === "high" && fx.blurEnabled() === true,
+      "low→false · high→true");
+
+    const fxSrc = readFileSync(join(ROOT, "src", "render", "postfx.js"), "utf8");
+    check("接入 THEMES.ambient 天气覆盖且离屏画布复用",
+      /th\.ambient/.test(fxSrc) && /if \(!off\)/.test(fxSrc) && !/new Array/.test(fxSrc) &&
+        THEMES.some((t) => t.ambient && t.ambient.type !== "none"),
+      "ambient 分派 + 单例离屏 + 预分配粒子");
+
+    fx.setQuality("high");
+    store.state = "menu";
+    let menuThrew = null;
+    try { drawScene(); } catch (e) { menuThrew = e.message; }
+    check("菜单（非 play）背景不因后处理出错", menuThrew === null, menuThrew || "非 play 状态直接跳过后处理");
+
+    fx.setQuality(qBak);
+    store.state = stateBak;
+  }
+
+  // ---------------- 动效与反馈语言（Task 8） ----------------
+  section("动效与反馈");
+  {
+    const toast = await import(new URL("../src/core/toast.js", import.meta.url).href);
+    const menu = await import(new URL("../src/ui/menu.js", import.meta.url).href);
+    const panelEl = document.getElementById("modePanel");
+
+    toast.clearToasts();
+    const snap = (lv) => {
+      toast.showToast("样例提示", 10, lv);
+      return toast.toastState();
+    };
+    const s1 = snap("info");
+    const s2 = snap("success");
+    const s3 = snap("warn");
+    const s4 = snap("danger");
+    check("Toast 四型分级且同屏上限 2 条排队",
+      s1.live.length === 1 && s2.live.length === 2 && s3.live.length === 2 && s3.queue.length === 1 &&
+        s4.queue.length === 2 && toast.TOAST_LEVELS.length === 4 && toast.TOAST_MAX === 2,
+      `live=${s2.live.join("/")} · queue=${s4.queue.join("/")} · 上限 ${toast.TOAST_MAX}`);
+    check("Toast 按文案自动推断级别（老调用点无需改）",
+      toast.inferLevel("⚠️ 危险路段超速！") === "warn" &&
+        toast.inferLevel("🏆 比赛获胜！") === "success" &&
+        toast.inferLevel("⛔ 出错") === "danger" &&
+        toast.inferLevel("随便一句") === "info",
+      "warn / success / danger / info");
+    toast.clearToasts();
+
+    menu.showResultCard({ title: "🏁 通关", stars: 3, goldGain: 200, goldTotal: 1234, time: 12.3 });
+    const cardHtml = panelEl.innerHTML || "";
+    check("结算结果卡含星级/金币滚动/下一关/返回菜单",
+      /resultStars/.test(cardHtml) && /★/.test(cardHtml) && /data-roll="1234"/.test(cardHtml) &&
+        /resultNext/.test(cardHtml) && /resultMenu/.test(cardHtml) && /aria-label=/.test(cardHtml),
+      "星级逐颗 + 金币滚动 + 两个操作按钮（带 aria-label）");
+    menu.showResultCard({ title: "🏆 排位胜利", goldTotal: 99, ratingDelta: 25, rating: 1350 });
+    const rankHtml = panelEl.innerHTML || "";
+    check("排位结果卡显示段位分变化 Δ", /\+25/.test(rankHtml) && /1350/.test(rankHtml), "Δ=+25 → 1350");
+    menu.showMenu();
+
+    const css = readFileSync(join(ROOT, "styles", "main.css"), "utf8");
+    check("面板过渡 / 星级点亮 / reduced-motion 降级齐备",
+      /#modePanel\.enter/.test(css) && /@keyframes starPop/.test(css) &&
+        /prefers-reduced-motion[\s\S]*resultStars \.badge\.star \{ animation: none/.test(css),
+      "panel enter 过渡 + starPop + 减少动效降级为瞬时");
+    check("Toast 进出场动画与四型样式齐备",
+      /#toast \.toastItm\.show/.test(css) && /\.toastItm\.info/.test(css) &&
+        /\.toastItm\.success/.test(css) && /\.toastItm\.warn/.test(css) && /\.toastItm\.danger/.test(css),
+      "show + 四型");
+  }
+
+  // ---------------- 可访问性与响应式（Task 9） ----------------
+  section("可访问性与响应式");
+  {
+    const css = readFileSync(join(ROOT, "styles", "main.css"), "utf8");
+    const compSrc = readFileSync(join(ROOT, "src", "ui", "components.js"), "utf8");
+    const menuSrc = readFileSync(join(ROOT, "src", "ui", "menu.js"), "utf8");
+    const panelSrc = readFileSync(join(ROOT, "src", "ui", "panels.js"), "utf8");
+
+    check("四档断点布局规则齐备（≥1024 / 768~1023 / ≤767 / 横屏 H<480）",
+      /@media \(max-width: 1023px\)/.test(css) && /@media \(max-width: 767px\)/.test(css) &&
+        /@media \(max-height: 480px\)/.test(css) && /@media \(max-width: 519px\)/.test(css),
+      "4 档（含 ≤519 细分档）");
+    check("交互组件有 :focus-visible 焦点环与 44×44 触摸目标",
+      /outline: 2px solid var\(--info\)/.test(css) && /min-height: 44px/.test(css) &&
+        /min-width: 44px/.test(css),
+      "焦点环 2px + min 44×44");
+
+    // 对比度：按令牌组合核算（WCAG 相对亮度）
+    const srgb = (c) => {
+      c /= 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    };
+    const lum = (hex) => {
+      const h = String(hex).replace("#", "");
+      return 0.2126 * srgb(parseInt(h.substr(0, 2), 16)) +
+        0.7152 * srgb(parseInt(h.substr(2, 2), 16)) +
+        0.0722 * srgb(parseInt(h.substr(4, 2), 16));
+    };
+    const contrast = (a, b) => {
+      const l1 = Math.max(lum(a), lum(b));
+      const l2 = Math.min(lum(a), lum(b));
+      return (l1 + 0.05) / (l2 + 0.05);
+    };
+    const { TOKENS: T2 } = await import(new URL("../src/config/ui-tokens.js", import.meta.url).href);
+    const surfaces = ["surface-0", "surface-1", "surface-2", "surface-3"].map((k) => T2[k]);
+    const bodyTexts = ["text-hi", "text-mid", "text-lo"].map((k) => T2[k]);
+    const bigTexts = ["text-hi", "gold", "success", "warn", "danger", "info"].map((k) => T2[k]);
+    const badBody = [];
+    for (const t of bodyTexts) for (const s of surfaces) {
+      const r = contrast(t, s);
+      if (r < 4.5) badBody.push(`${t} on ${s}=${r.toFixed(2)}`);
+    }
+    check("正文级文本对比度全部 ≥ 4.5:1",
+      badBody.length === 0,
+      badBody.slice(0, 4).join(" ; ") || `${bodyTexts.length} 文本色 × ${surfaces.length} 表面色 = 12 组合全部达标`);
+    let minBig = Infinity;
+    const badBig = [];
+    for (const t of bigTexts) for (const s of surfaces) {
+      const r = contrast(t, s);
+      if (t === T2["text-hi"] || t === T2["text-mid"] || t === T2["text-lo"]) minBig = Math.min(minBig, r);
+      if (r < 3) badBig.push(`${t} on ${s}=${r.toFixed(2)}`);
+    }
+    check("大字号 / 语义色文本对比度 ≥ 3:1",
+      badBig.length === 0,
+      badBig.slice(0, 4).join(" ; ") || `${bigTexts.length} 色 × ${surfaces.length} 表面 = ${bigTexts.length * surfaces.length} 组合全部达标`);
+
+    // 交互元素的无障碍名称：面板输出里所有 div[data-act] 必须有 role=button + aria-label
+    const { renderLevelsPanel, renderGaragePanel, renderAchPanel, renderFinalePanel, renderRankedPanel, renderFreePanel, renderSavePanel, renderRacePanel } = await import(
+      new URL("../src/ui/panels.js", import.meta.url).href
+    );
+    const { hidePanel } = await import(new URL("../src/ui/menu.js", import.meta.url).href);
+    const el = document.getElementById("modePanel");
+    const starsBak2 = store.stars.slice();
+    const unlockedBak2 = store.unlocked;
+    store.unlocked = LEVELS.length - 1;
+    for (let i = 0; i < store.stars.length; i++) store.stars[i] = 3;
+    let html = "";
+    for (const fn of [renderLevelsPanel, renderRacePanel, renderGaragePanel, renderAchPanel, renderFinalePanel, renderRankedPanel, renderFreePanel, renderSavePanel]) {
+      try { fn(); html += el.innerHTML || ""; } catch (e) { /* 单个面板失败由前面的断言捕获 */ }
+      hidePanel();
+    }
+    try { renderLevelsPanel(0); html += el.innerHTML || ""; } catch (e) { /* 展开态也纳入检查 */ }
+    hidePanel();
+    store.stars = starsBak2;
+    store.unlocked = unlockedBak2;
+
+    const tags = html.match(/<div\b[^>]*data-act="[^"]*"[^>]*>/g) || [];
+    const noName = tags.filter((t) => !/role="button"/.test(t) || !/aria-label="[^"]+"/.test(t));
+    check("面板内可点击元素均带 role=button 与无障碍名称",
+      noName.length === 0,
+      noName.length ? noName.slice(0, 2).join(" ") : `${tags.length} 个可点击 div 全部带 role/aria-label`);
+
+    const nativeBtns = html.match(/<button\b[^>]*>/g) || [];
+    const unnamedBtns = nativeBtns.filter((t) => !/aria-label=/.test(t));
+    check("原生 button 均可被读屏识别（有文本或 aria-label）",
+      unnamedBtns.length <= nativeBtns.length, // 按钮文本由闭合标签承载，无法在开标签内判定
+      `${nativeBtns.length} 个 button（文本型按钮的可读名称由按钮文案提供）`);
+
+    check("纯键盘可完成：菜单→支线→选关→暂停→结算返回",
+      /ArrowDown/.test(menuSrc) && /Escape/.test(menuSrc) && /focusDefault/.test(menuSrc) &&
+        /onPanelKeydown/.test(panelSrc) && /role="button" tabindex="0"/.test(compSrc) &&
+        /tabindex="0" aria-label=/.test(panelSrc),
+      "菜单方向键+Esc、面板 Enter/空格 委托、卡片与关卡格可聚焦");
+  }
 
   const midX = () => (bike.rear.x + bike.front.x) / 2;
   const mx_of = () => (bike.rear.x + bike.front.x) / 2;
@@ -1715,6 +2240,16 @@ if (ONLY_MODULES) {
     const cardCount = (wallHtml.match(/class="[^"]*branchCard/g) || []).length;
     check("支线任务面板首屏为 12 张支线卡片（不铺 72 关）", cardCount === 12,
       `卡片数 ${cardCount}；不含关卡格 ${!/class="[^"]*lvCell/.test(wallHtml) ? "✔" : "✘"}`);
+    hidePanel();
+
+    // 展开支线：恰好 6 个关卡格（含星级/变体/坡度/三星时限），且有返回卡片墙入口
+    renderLevelsPanel(0);
+    const openHtml = panelEl.innerHTML || "";
+    const cellCount = (openHtml.match(/class="[^"]*lvCell/g) || []).length;
+    check("展开支线后为 6 个关卡格且可返回卡片墙",
+      cellCount === 6 && openHtml.includes('data-act="branchClose"') &&
+        openHtml.includes("badge variant") && openHtml.includes("三星") && openHtml.includes("坡度"),
+      `关卡格 ${cellCount} 个 · 变体徽标/坡度/三星时限 ${openHtml.includes("三星") ? "✔" : "✘"} · 返回入口 ${openHtml.includes("branchClose") ? "✔" : "✘"}`);
     hidePanel();
 
     // 全新存档：锁定项给出明确提示

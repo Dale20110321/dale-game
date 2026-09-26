@@ -268,17 +268,36 @@ function finishLevel() {
     }
   }
   run.clearing = true;
+  // 结算结果卡（Task 8.3）：由 presenter 注入到 ui 层渲染（game 不 import ui）
+  const result = {
+    title: "🏁 本局结束",
+    stars: undefined,
+    goldGain: 0,
+    goldTotal: 0,
+    time: undefined,
+    nextLabel: "下一关 →",
+  };
   if (store.mode === "race") {
     const won = !(store.raceAI && store.raceAI.finish);
+    result.nextLabel = "继续 →";
     if (won) {
       addGold(300);
-      showToast("🏆 比赛获胜！🪙+300");
+      showToast("🏆 比赛获胜！🪙+300", 900, "success");
+      result.title = "🏆 比赛获胜！";
+      result.goldGain = 300;
     } else {
-      showToast("🏁 抵达终点（对手更快）");
+      showToast("🏁 抵达终点（对手更快）", 900, "warn");
+      result.title = "🏁 抵达终点（对手更快）";
     }
   } else if (store.mode === "ranked") {
     // 排位赛：胜负直接决定段位分变化（结算提示由 settleRanked 内部输出）
-    settleRanked(!(store.raceAI && store.raceAI.finish));
+    const won = !(store.raceAI && store.raceAI.finish);
+    const before = store.progress.rating;
+    const after = settleRanked(won);
+    result.title = won ? "🏆 排位胜利" : "🏳 排位失利";
+    result.ratingDelta = after - before;
+    result.rating = after;
+    result.nextLabel = "继续 →";
   } else if (store.mode === "level") {
     // 计时惩罚（摔车）计入本关用时，直接影响三星时限
     const elapsed = store.time - run.levelStartTime + run.penaltyTime;
@@ -291,7 +310,12 @@ function finishLevel() {
       store.unlocked = store.selLevel + 1;
     }
     addGold(200); // 内部会 save()，一并写入解锁与星级
-    showToast("🏁 通关 " + "★".repeat(s) + "！🪙+200");
+    showToast("🏁 通关 " + "★".repeat(s) + "！🪙+200", 900, "success");
+    result.title = "🏁 通关";
+    result.stars = s;
+    result.goldGain = 200;
+    result.time = elapsed;
+    result.nextLabel = store.selLevel < LEVELS.length - 1 ? "下一关 →" : "🎯 最终任务";
     if (!run.runCrashed) checkAch("noc");
     if (run.totalCoins > 0 && run.coinGot >= run.totalCoins) checkAch("coinall");
     if (store.stars.length >= LEVELS.length && store.stars.every((v) => v >= 3)) checkAch("allstar");
@@ -304,7 +328,10 @@ function finishLevel() {
     meters: toM(store.finishX),
     seconds: Math.max(0, store.time - run.levelStartTime),
   });
-  setTimeout(runGuard(() => nextLevel()), 800);
+  result.goldTotal = store.gold;
+  // 有结果卡渲染器时交给它（玩家自选下一关/返回）；否则回退到定时自动推进
+  if (typeof presenter.presentResult === "function") presenter.presentResult(result);
+  else setTimeout(runGuard(() => nextLevel()), 800);
 }
 
 /** 带原因的摔车：只有在"本次真的摔了"时覆盖提示文案 */

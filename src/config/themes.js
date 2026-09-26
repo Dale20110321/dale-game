@@ -335,3 +335,34 @@ export const THEMES = [
     ambient: { type: "snow", color: "#bfe0ff", rate: 0.6, spd: 0.5 },
   },
 ];
+
+// ---------------- 装饰物配色（数据） ----------------
+// drawDecoItem 按 kind 取色：数组下标 = 该分支中配色的首次使用顺序。
+// 放在数据层（而不是渲染层写死）以便：新增场景只改数据、渲染层零裸色值、配色可整体替换。
+export const DECO_COLORS = {
+  tree: ["#5b3a1e", "#2f7a35", "rgba(255,255,255,.12)"],
+  bush: ["#37703a"],
+  snowman: ["#f7fbff", "#c9dcec", "#e8622a"],
+  icespike: ["rgba(190,220,245,.85)"],
+  rock: ["#8a8f98", "#a9aeb6"],
+  cactus: ["#3d7a44"],
+  crater: ["rgba(28,32,42,.35)"],
+  moonrock: ["#7e848d", "#9aa1aa"],
+  flower: ["#2f7a35", "#e8557a", "#ffd166"],
+  snowtree: ["#6b4a30", "#2f6b4a", "rgba(255,255,255,.8)"],
+  pebble: ["rgba(0,0,0,.12)", "#b09a78"],
+  fern: ["#2f8a4a", "rgba(0,0,0,.12)"],
+  stump: ["#6b4a2a", "#8a6a44", "rgba(60,40,20,.5)"],
+  lavarock: ["#2a201e", "#ff7a2a"],
+  obsidian: ["#141018", "rgba(180,150,220,.35)"],
+  iceberg: ["rgba(0,0,0,.12)", "#cfe9f7", "rgba(255,255,255,.6)"],
+  crystal: ["rgba(140,200,255,.25)", "#a8ddff", "rgba(255,255,255,.6)"],
+  mesarock: ["#8a4526", "#c26a3a", "rgba(0,0,0,.15)"],
+  reed: ["#6f8a3a", "#a9863a"],
+  ruin: ["#6a6e76", "rgba(0,0,0,.18)"],
+  rubble: ["rgba(0,0,0,.12)", "#7a7f88", "#9aa0aa"],
+  pillar: ["#8a9098", "#aab0bc", "rgba(0,0,0,.18)"],
+  cloudpuff: ["rgba(255,255,255,.9)", "rgba(180,210,235,.5)"],
+  pine: ["#4a3520", "#1f4a34"],
+  __default: ["#8a8f98"],
+};
