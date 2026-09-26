@@ -80,13 +80,6 @@ export const AIR_ROT_RELEASE = 0.05;
  * 又会跟玩家按下的空中转体对抗，导致空翻翻不到一圈、倒立落地永远摔不下来）。
  */
 export const AIR_HEAD_DAMP = 1.0;
-/** 驱动/刹车反扭矩系数：油门翘头、刹车栽头 */
-export const PITCH_TORQUE = 0.22;
-
-// ---------------- 坡顶腾空 ----------------
-export const LAUNCH_K = 0.55;
-export const LAUNCH_MAX = 20;
-
 // ---------------- 刚体质量与几何 ----------------
 export const M_R = 1.0;
 export const M_F = 1.0;
@@ -97,6 +90,99 @@ export const COM_UP = (M_H * SEAT_H) / M_TOT;
 export const I_BODY =
   (M_R + M_F) * ((WHEELBASE * WHEELBASE) / 4 + COM_UP * COM_UP) +
   M_H * (SEAT_H - COM_UP) * (SEAT_H - COM_UP);
+
+// ---------------- 刚体 / 悬挂 / 摩擦 / 扭矩（第 3 期 Task 1.1 / 1.3） ----------------
+// 全部物理常量集中在这一个文件；标度换算也只允许在这里发生。
+
+/** 约束求解：残差收敛阈值（px）与迭代上限（收敛判据驱动，不是写死 6 次） */
+export const SOLVER_TOL = 0.05;
+export const SOLVER_ITERS = 10;
+/** 单侧接触的允许压入深度（px） */
+export const PEN_TOL = 2;
+/** 数值异常兜底速度上限（px/s）：只用于异常，断言其在整个测试中永不触发 */
+export const NUM_CAP_V = 6000;
+
+/** 轮上扭矩峰值基准（游戏单位 px·px/s²） */
+export const TORQUE_PEAK_BASE = 8300;
+/** 扭矩峰值转速基准（车轮角速度 rad/s） */
+export const TORQUE_RPM_BASE = 18;
+/** 扭矩衰减区间：ω > rpm×LO 后线性衰减，ω = rpm×HI 归零 */
+export const TORQUE_FADE_LO = 1.6;
+export const TORQUE_FADE_HI = 3.2;
+/** 车轮转动惯量基准（决定加速时轮子"吃掉"多少扭矩） */
+export const WHEEL_I_BASE = 40;
+
+/** 悬挂：刚度 / 阻尼 / 行程基准（由车辆 + 减震升级缩放） */
+export const SUSP_K_BASE = 780;
+export const SUSP_C_BASE = 130;
+export const SUSP_TRAVEL_BASE = 16;
+/** 减震升级：每级 +2% 刚度 / +3% 阻尼 / +0.08px 行程 */
+export const SUSP_K_UP = 0.02;
+export const SUSP_C_UP = 0.03;
+export const SUSP_TRAVEL_UP = 0.08;
+
+/** 摩擦：基准摩擦系数（× 场景 traction × 车辆 grp × 轮胎升级） */
+export const FRICTION_BASE = 1.15;
+export const FRICTION_TIRE_UP = 0.006;
+
+/** 刹车扭矩基准（远大于驱动扭矩：刹车本来就比加速猛） */
+export const BRAKE_TORQUE_BASE = 12000;
+
+/** 空气阻力系数（∝ v²）与滚动阻力系数（∝ 法向力） */
+export const AIR_DRAG_K = 0.0016;
+export const ROLL_RES_K = 0.05;
+
+const c01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+/**
+ * 由车辆数据推导三质点刚体（质量 / 质心高度 / 转动惯量）。
+ * ★ 这里真实引用 M_R / M_F / M_H / M_TOT / COM_UP / I_BODY（不再是死代码），
+ *   并把车辆差异（质量、惯量）带进求解器。
+ */
+export function deriveRigidBody(veh) {
+  const p = (veh && veh.phys) || {};
+  const k = p.mass || (veh && veh.wgt) || 1;
+  const inertia = p.inertia || 1;
+  return {
+    mass: k,
+    mR: M_R * k,
+    mF: M_F * k,
+    mH: M_H * k,
+    mTot: M_TOT * k,
+    comUp: COM_UP,
+    iBody: I_BODY * k * inertia,
+  };
+}
+
+/** 由车辆 + 减震升级推导悬挂（刚度 / 阻尼 / 行程上限） */
+export function deriveSuspension(veh, up) {
+  const p = (veh && veh.phys) || {};
+  const s = (up && up.susp) || 0;
+  return {
+    k: SUSP_K_BASE * (p.suspK || 1) * (1 + SUSP_K_UP * s),
+    c: SUSP_C_BASE * (p.suspC || 1) * (1 + SUSP_C_UP * s),
+    travel: (p.travel || SUSP_TRAVEL_BASE) + SUSP_TRAVEL_UP * s,
+  };
+}
+
+/** 由场景抓地 + 车辆 + 轮胎升级推导摩擦系数 μ */
+export function deriveFriction(traction, veh, up) {
+  const t = (up && up.tire) || 0;
+  return FRICTION_BASE * (traction || 1) * ((veh && veh.grp) || 1) * (1 + FRICTION_TIRE_UP * t);
+}
+
+/** 轮上扭矩曲线：ω 超过峰值转速后线性衰减（高转没劲），throttle 为 0~1 */
+export function torqueAt(veh, omega, throttle) {
+  const p = (veh && veh.phys) || {};
+  const peak = TORQUE_PEAK_BASE * (p.torque || 1);
+  const w0 = TORQUE_RPM_BASE * (p.rpm || 1);
+  const w = Math.abs(omega || 0);
+  let f = 1;
+  if (w > w0 * TORQUE_FADE_LO) {
+    f = c01(1 - (w - w0 * TORQUE_FADE_LO) / (w0 * (TORQUE_FADE_HI - TORQUE_FADE_LO)));
+  }
+  return peak * f * c01(throttle || 0);
+}
 
 // ---------------- 落地反馈与视觉特效阈值（一律真实 px/s） ----------------
 /** 落地冲击归一化基准：竖向速度达到此值 = 压到底 */

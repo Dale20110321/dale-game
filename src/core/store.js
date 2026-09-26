@@ -82,6 +82,13 @@ export const store = {
     crashMargin: 4,
     fuel: 1,
     fuelMax: 1,
+    // ---- 第 3 期（Task 1）：由车辆/升级/场景派生的物理量 ----
+    /** 三质点刚体：{ mass, mR, mF, mH, mTot, comUp, iBody }（applyUpgrades 写入） */
+    rb: null,
+    /** 悬挂：{ k, c, travel } */
+    susp: null,
+    /** 摩擦系数 μ（场景 traction × 车辆 grp × 轮胎升级） */
+    mu: 1,
   },
 
   // 单局运行态
@@ -134,10 +141,24 @@ export const bike = {
   lastAng: 0,
   angVel: 0,
   rotAcc: 0,
-  rearAir: false, // 后轮"腾空中"：坡顶起飞后走弹道，真正压到地面才收回
-  frontAir: false,
   // 骑手在"前轮→后轮连线"的哪一侧（刚体属性，旋转不变；用于防止约束求解把骑手甩到轮轴下方）
   headUp: -1,
+
+  // ---- 第 3 期新增物理状态量（Task 1.2）----
+  // 车轮"真状态"：角速度/角加速度（rad/s, rad/s²）。wheelRear/Front 降级为视觉角度（由它派生）。
+  wheelRot: { rear: 0, front: 0 },
+  wheelAcc: { rear: 0, front: 0 },
+  // 悬挂：t = 行程（px，0=完全伸出，>=travel 到底），v = 行程速度（px/s）
+  susp: { rear: { t: 0, v: 0 }, front: { t: 0, v: 0 } },
+  // 滑移率：(ωR − v)/max(|v|, 小量)；>0 空转、<0 锁死抱死拖动
+  slip: { rear: 0, front: 0 },
+  // 法向接触力（游戏单位）：摩擦上限 = fn × μ 的依据
+  fn: { rear: 0, front: 0 },
+  // 求解器诊断量（Task 2.2）：迭代次数与残差 → "是否收敛"可被断言
+  solverIters: 0,
+  solverResid: 0,
+  // 穿透量（px）：行程到底后仍压入地面的深度，断言其 ≤ 容差
+  penetration: 0,
 };
 
 /** 世界实体（关卡模式与无限模式共用） */

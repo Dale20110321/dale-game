@@ -12,16 +12,18 @@
 import {
   SUB, SUB_DT, SUBV,
   WHEEL_R, WHEELBASE, SEAT_H,
-  AIR_ROT_MAX, AIR_ROT_ACC, AIR_ROT_RELEASE, AIR_HEAD_DAMP, PITCH_TORQUE,
-  LAUNCH_K, LAUNCH_MAX, LAND_REF, VSPD_CAP, DOWNHILL_K, CONTACT_TOL, STUN_TIME,
+  AIR_ROT_MAX, AIR_ROT_ACC, AIR_ROT_RELEASE, AIR_HEAD_DAMP,
+  LAND_REF, VSPD_CAP, DOWNHILL_K, CONTACT_TOL, STUN_TIME,
+  SUSP_K_BASE, SUSP_C_BASE, SUSP_TRAVEL_BASE, SOLVER_TOL, SOLVER_ITERS,
+  ROLL_RES_K, FRICTION_BASE, BRAKE_TORQUE_BASE, WHEEL_I_BASE, torqueAt,
   OBST_R, OBST_VIS_H, OBST_HIT_V, CRASH_FUEL_LOSS, CRASH_TIME_PENALTY,
-  deriveHandling,
+  deriveHandling, deriveRigidBody, deriveSuspension, deriveFriction,
 } from "../config/constants.js";
 import { VEHICLES } from "../config/vehicles.js";
 import { store, bike, world } from "../core/store.js";
 import { clamp, lerp, wrapAngle } from "../core/utils.js";
 import { getUp } from "../core/storage.js";
-import { groundInfo, groundY } from "./terrain.js";
+import { groundInfo, groundY, groundNormal } from "./terrain.js";
 import { physEvents } from "./events.js";
 import { key } from "../core/input.js";
 
@@ -30,6 +32,14 @@ export function applyUpgrades() {
   const v = VEHICLES[store.currentVehicle];
   const up = getUp();
   Object.assign(store.phys, deriveHandling(store.phys.GRAV, store.phys.TRACTION, v, up));
+  // ---- 第 3 期 Task 1：质量/惯量/悬挂/摩擦也数据化 ----
+  // 质量与惯量真参数（求解器按逆质量加权）、悬挂（刚度/阻尼/行程）、摩擦系数 μ。
+  // 此处真实引用 M_R/M_F/M_H/M_TOT/COM_UP/I_BODY，使其不再是死代码。
+  store.phys.rb = deriveRigidBody(v);
+  store.phys.susp = deriveSuspension(v, up);
+  store.phys.mu = deriveFriction(store.phys.TRACTION, v, up);
+  store.phys.wheelI = WHEEL_I_BASE * store.phys.rb.mass; // 轮转动惯量（∝ 整车质量）
+  bike.rb = store.phys.rb;
 }
 
 /** 出生 / 重生：把车摆到地形上（保持速度为零） */
@@ -56,8 +66,6 @@ export function resetBike(x) {
   b.squashVel = 0;
   b.angVel = 0;
   b.rotAcc = 0;
-  b.rearAir = false;
-  b.frontAir = false;
   b.lastAng = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
   // 记录骑手在轮轴线的哪一侧（本侧由刚体几何决定，任何旋转都不会改变）
   const ux = b.front.x - b.rear.x;
@@ -65,6 +73,14 @@ export function resetBike(x) {
   const d = Math.hypot(ux, uy) || 1e-4;
   const cross = (ux / d) * (b.head.y - b.rear.y) - (uy / d) * (b.head.x - b.rear.x);
   b.headUp = Math.sign(cross) || -1;
+  // 第 3 期新增状态量一并归零（保证"同初始状态 + 同输入 → 完全可复现"）
+  b.wheelRot.rear = 0; b.wheelRot.front = 0;
+  b.wheelAcc.rear = 0; b.wheelAcc.front = 0;
+  b.susp.rear.t = 0; b.susp.rear.v = 0;
+  b.susp.front.t = 0; b.susp.front.v = 0;
+  b.slip.rear = 0; b.slip.front = 0;
+  b.fn.rear = 0; b.fn.front = 0;
+  b.rb = store.phys.rb;
 }
 
 /**
@@ -158,6 +174,84 @@ function hitObstacle() {
   }
 }
 
+// ============================================================
+//  第 3 期：质量加权约束求解 + 单侧接触 + 力作用在接地点
+// ============================================================
+
+/** 三质点质量加权质心（力/力矩推导的基准） */
+function bodyCom(b, rb) {
+  const m = rb.mR + rb.mF + rb.mH;
+  return {
+    x: (b.rear.x * rb.mR + b.front.x * rb.mF + b.head.x * rb.mH) / m,
+    y: (b.rear.y * rb.mR + b.front.y * rb.mF + b.head.y * rb.mH) / m,
+  };
+}
+
+/**
+ * 在「真实接地点」施加力（Task 3.3）：
+ *   · 线性部分 a = F / M（三点同加速度）
+ *   · 角部分   α = (r × F) / I，各点再叠加 α × r_i
+ * 因为力作用在接地点而不是质心，**力矩是自然产生的** ——
+ * 油门翘头（后接地点在质心后下方）、刹车栽头（前接地点在质心前下方）都是算出来的，
+ * 不再需要任何"假力矩系数"。
+ * @param {number} sq 子步时长平方（Verlet：Δp = a·dt²）
+ */
+function applyForceAt(b, rb, fx, fy, px, py, sq) {
+  const com = bodyCom(b, rb);
+  const invM = 1 / rb.mTot;
+  const rx = px - com.x;
+  const ry = py - com.y;
+  const alpha = (rx * fy - ry * fx) / rb.iBody; // 2D 叉积 / 转动惯量
+  for (const p of [b.rear, b.front, b.head]) {
+    const drx = p.x - com.x;
+    const dry = p.y - com.y;
+    p.x += (fx * invM - alpha * dry) * sq;
+    p.y += (fy * invM + alpha * drx) * sq;
+  }
+}
+
+/**
+ * 质量加权距离约束（Task 2.1 / 2.3）：修正量按**逆质量**分配（重的一端动得少），
+ * 而不是三点等量推动。返回剩余误差，供收敛判据使用。
+ */
+function solveDistance(a, b, L0, wa, wb) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const d = Math.hypot(dx, dy) || 1e-6;
+  const e = d - L0;
+  if (e === 0) return 0;
+  const nx = dx / d;
+  const ny = dy / d;
+  const ws = wa + wb;
+  const ka = (wa / ws) * e;
+  const kb = (wb / ws) * e;
+  a.x += nx * ka; a.y += ny * ka; a.px += nx * ka; a.py += ny * ka;
+  b.x -= nx * kb; b.y -= ny * kb; b.px -= nx * kb; b.py -= ny * kb;
+  return Math.abs(e);
+}
+
+/** 质点速度（px/s） */
+function nodeVX(p, sub) { return (p.x - p.px) / sub; }
+function nodeVY(p, sub) { return (p.y - p.py) / sub; }
+
+/**
+ * 在「真实接地点」施加**冲量**（Task 4.2）：Δv = J/M + Δω × r。
+ * 与 applyForceAt 同理，但用于摩擦约束的一次性速度修正。
+ */
+function applyImpulseAt(b, rb, jx, jy, px, py, sub) {
+  const com = bodyCom(b, rb);
+  const invM = 1 / rb.mTot;
+  const rx = px - com.x;
+  const ry = py - com.y;
+  const alpha = (rx * jy - ry * jx) / rb.iBody;
+  for (const p of [b.rear, b.front, b.head]) {
+    const drx = p.x - com.x;
+    const dry = p.y - com.y;
+    p.x += (jx * invM - alpha * dry) * sub;
+    p.y += (jy * invM + alpha * drx) * sub;
+  }
+}
+
 /** 单个固定步的物理推进 */
 export function stepPhysics() {
   const P = store.phys;
@@ -165,27 +259,28 @@ export function stepPhysics() {
   const b = bike;
   const L = WHEELBASE;
   const Lr = Math.hypot(L * 0.5, SEAT_H);
-  // 倒立摔车判定的容差基准：车架等级越高（crashMargin 越大）容差越小，
-  // 头必须更贴近地面才算"倒立摔车" → 车架升级更耐摔。
-  // Lv0（crashMargin=4）保持旧值 30（既有倒立摔车判定不变），满级（14）缩到 16；
-  // 下限 8 防止高等级容差过小引发数值抖动。
+  const rb = b.rb || P.rb;
+  const wR = 1 / rb.mR;
+  const wF = 1 / rb.mF;
+  const wH = 1 / rb.mH;
+  const SUS = P.susp || { k: SUSP_K_BASE, c: SUSP_C_BASE, travel: SUSP_TRAVEL_BASE };
+  const mu = P.mu || FRICTION_BASE;
+  // 倒立摔车容差（车架等级越高越耐摔）——与第 1 期一致
   const crashTol = Math.max(8, 30 - (P.crashMargin - 4) * 1.4);
-  // 倒立判据的余量：随 crashMargin 增大而变得更严（更难被判为倒立），方向与容差收紧一致。
-  // Lv0 恰为 -8，与旧实现完全一致。
   const invMargin = -8 - (P.crashMargin - 4) * 0.3;
-  const aDrive = key.right && !run.crashed ? P.DRIVE : 0;
-  const aBrake = key.left && !run.crashed ? P.BRAKE : 0;
+  const drvK = key.right && !run.crashed ? 1 : 0;
+  const brkK = key.left && !run.crashed ? 1 : 0;
   const prevGrounded = b.grounded;
   const airCtrl = !run.crashed && b.grounded === 0;
   if (b.grounded > 0) b.angVel = 0; // 落地清零角速度
+  b.penetration = 0;
 
   for (let s = 0; s < SUB; s++) {
     const sub = SUB_DT;
     const sq = sub * sub;
-    const pts = [b.rear, b.front, b.head];
 
-    // Verlet 积分
-    for (const p of pts) {
+    // ---- 1) Verlet 积分 ----
+    for (const p of [b.rear, b.front, b.head]) {
       const vx = p.x - p.px;
       const vy = p.y - p.py;
       p.px = p.x;
@@ -193,25 +288,10 @@ export function stepPhysics() {
       p.x += vx;
       p.y += vy;
     }
-    for (const p of pts) p.y += P.GRAV * sq;
+    // 重力（等价于在质心施加 mTot·g）
+    for (const p of [b.rear, b.front, b.head]) p.y += P.GRAV * sq;
 
-    // ---- 驱动 / 刹车：整车推力 + 反扭矩（重量转移） ----
-    if (aDrive || aBrake) {
-      let a = aDrive;
-      if (aBrake) {
-        // 刹车是"阻力"而非"倒车推力"：方向始终与当前速度相反，且不会把车推向反向
-        const vNow = (b.rear.x - b.rear.px) / sub;
-        const bmag = Math.min(aBrake, Math.abs(vNow) / sub);
-        a -= Math.sign(vNow) * bmag;
-      }
-      b.rear.x += a * sq * 1.05;
-      b.front.x += a * sq * 0.95;
-      const mx = (b.rear.x + b.front.x) / 2;
-      const my = (b.rear.y + b.front.y) / 2;
-      rotateBikeAround(mx, my, -a * PITCH_TORQUE * sq, false);
-    }
-
-    // ---- 空中转体：按右=顺时针（前空翻），按左=逆时针（后空翻） ----
+    // ---- 2) 空中转体（玩家角冲量；守恒模型见 Task 7）----
     if (airCtrl) {
       const inp = (key.right ? 1 : 0) - (key.left ? 1 : 0);
       const vehAir = VEHICLES[store.currentVehicle].air;
@@ -231,130 +311,110 @@ export function stepPhysics() {
       }
     }
 
-    // ---- 刚性约束：贴地轮 y 锚定，离地轮全自由度 ----
-    // 位置修正必须同步写回 px/py（= 保持速度不变），否则会被 Verlet 当成速度突变
-    // 接地高度每轮迭代重新采样（迭代本身会移动轮子）
-    for (let it = 0; it < 6; it++) {
-      const FS = groundInfo(b.front.x).y - WHEEL_R;
-      const RS = groundInfo(b.rear.x).y - WHEEL_R;
-      b.frontGr = b.front.y > FS - CONTACT_TOL;
-      b.rearGr = b.rear.y > RS - CONTACT_TOL;
-
-      const dR = [0, 0], dF = [0, 0], dH = [0, 0];
-      let dx = b.front.x - b.rear.x;
-      let dy = b.front.y - b.rear.y;
-      let d = Math.hypot(dx, dy) || 1e-4;
-      let diff = (d - L) / d;
-
-      if (b.rearGr && b.frontGr) {
-        if (Math.abs(dy) < 25) {
-          const err = diff * dx * 0.5;
-          dR[0] += err;
-          dF[0] -= err;
-        } else {
-          dR[0] += dx * diff * 0.5; dR[1] += dy * diff * 0.5;
-          dF[0] -= dx * diff * 0.5; dF[1] -= dy * diff * 0.5;
-        }
-      } else if (b.rearGr) {
-        dF[0] -= dx * diff; dF[1] -= dy * diff;
-      } else if (b.frontGr) {
-        dR[0] += dx * diff; dR[1] += dy * diff;
-      } else {
-        dR[0] += dx * diff * 0.5; dR[1] += dy * diff * 0.5;
-        dF[0] -= dx * diff * 0.5; dF[1] -= dy * diff * 0.5;
-      }
-
-      // head-rear
-      dx = b.head.x - b.rear.x; dy = b.head.y - b.rear.y;
-      d = Math.hypot(dx, dy) || 1e-4; diff = (d - Lr) / d;
-      if (b.rearGr) {
-        dH[0] -= dx * diff; dH[1] -= dy * diff;
-      } else {
-        dR[0] += dx * diff * 0.5; dR[1] += dy * diff * 0.5;
-        dH[0] -= dx * diff * 0.5; dH[1] -= dy * diff * 0.5;
-      }
-
-      // head-front
-      dx = b.head.x - b.front.x; dy = b.head.y - b.front.y;
-      d = Math.hypot(dx, dy) || 1e-4; diff = (d - Lr) / d;
-      if (b.frontGr) {
-        dH[0] -= dx * diff; dH[1] -= dy * diff;
-      } else {
-        dF[0] += dx * diff * 0.5; dF[1] += dy * diff * 0.5;
-        dH[0] -= dx * diff * 0.5; dH[1] -= dy * diff * 0.5;
-      }
-
-      b.rear.x += dR[0]; b.rear.y += dR[1]; b.rear.px += dR[0]; b.rear.py += dR[1];
-      b.front.x += dF[0]; b.front.y += dF[1]; b.front.px += dF[0]; b.front.py += dF[1];
-      b.head.x += dH[0]; b.head.y += dH[1]; b.head.px += dH[0]; b.head.py += dH[1];
+    // ---- 3) 刚体内部约束：质量加权 + 收敛判据驱动（Task 2）----
+    // 地面**不再**作为约束的锚点（那是旧的"双向接触"）；地面只通过第 4 步的接触力作用，
+    // 因此"起飞/离地"是约束非活跃的自然结果，不需要任何启发式判据。
+    let iters = 0;
+    let resid = 0;
+    for (let it = 0; it < SOLVER_ITERS; it++) {
+      resid = Math.max(
+        solveDistance(b.rear, b.front, L, wR, wF),
+        solveDistance(b.rear, b.head, Lr, wR, wH),
+        solveDistance(b.front, b.head, Lr, wF, wH)
+      );
+      iters = it + 1;
+      if (resid < SOLVER_TOL) break;
     }
-    // 刚体保护：骑手不得被求解器甩到轮轴下方（否则会误判"倒立"而假摔车）
-    enforceHeadSide();
+    b.solverIters = iters;
+    b.solverResid = resid;
 
-    // ---- 逐轮压回贴地 / 坡顶腾空 ----
+    // ---- 4) 单侧地面接触（Task 3.2 / 3.3）：只能推、不能拉 ----
+    // 法向力 = 悬挂弹簧-阻尼的压缩反力，沿**解析法线**、作用在**接地点**；
+    // 离地时恒为 0 → 坡顶自然腾空，且不存在"粘地"。
     b.grounded = 0;
-    for (const [p, flag] of [[b.rear, "rearGr"], [b.front, "frontGr"]]) {
-      const srf = groundInfo(p.x).y - WHEEL_R;
-      b[flag] = p.y > srf - CONTACT_TOL;
-      if (p.y > srf - 60) {
-        const airKey = flag === "rearGr" ? "rearAir" : "frontAir";
-        const vxs = (p.x - p.px) / sub;
-        const gC = groundInfo(p.x);
-        const curv = (groundInfo(p.x + 10).y - 2 * gC.y + groundInfo(p.x - 10).y) / 100; // >0 = 上凸坡顶
+    for (const wk of ["rear", "front"]) {
+      const node = wk === "rear" ? b.rear : b.front;
+      const sus = b.susp[wk];
+      const IW = P.wheelI || WHEEL_I_BASE;
+      const wPrev = b.wheelRot[wk];
+      let w = wPrev;
 
-        // 坡顶腾空：轮子要贴坡顶走需要向下向心加速度 a=v²κ，超过重力+悬挂上限则离地
-        if (!b[airKey] && p.y <= srf + 1 && vxs * vxs * curv > P.GRAV * LAUNCH_K) {
-          // 只在小圆丘式坡顶起飞：前方是断层/大落差时不飞（否则会变成不自然的大跳台）
-          const span = Math.max(90, Math.abs(vxs) * 0.3);
-          if (groundInfo(p.x + span).y - WHEEL_R - srf < LAUNCH_MAX * 2.2) {
-            b[airKey] = true;
-            // 悬挂回弹吸掉多余上冲：把竖直上冲限制在"刚好跳起 LAUNCH_MAX"的量级
-            const vup = Math.sqrt(2 * P.GRAV * LAUNCH_MAX);
-            if ((p.y - p.py) / sub < -vup) p.py = p.y + vup * sub;
-          }
-        }
-
-        if (b[airKey]) {
-          if (p.y >= srf) {
-            b[airKey] = false; // 真正压到地面才算落地
-          } else {
-            // 悬挂拉伸回拉：离地超过 LAUNCH_MAX 才用连续加速度把轮子带回地面附近，绝不瞬移
-            const gapNow = srf - p.y;
-            if (gapNow > LAUNCH_MAX) {
-              const pull = Math.min(P.GRAV, 40 * (gapNow - LAUNCH_MAX));
-              p.py -= pull * sub * sub;
-            }
-            b[flag] = false;
-            continue;
-          }
-        }
-
-        const ginfo = groundInfo(p.x);
-        if (ginfo.y !== Infinity) {
-          p.x += ((P.GRAV * ginfo.m) / Math.hypot(1, ginfo.m)) * 0.11 * sq;
-          if (ginfo.m < -1.0) p.px += (p.x - p.px) * 0.01;
-        }
-
-        const depth = p.y - srf;
-        if (depth > 8) {
-          p.y = Math.max(srf, p.y - P.susClimb);
-          const vy = p.y - p.py;
-          if (vy < 0) p.py = p.y;
-          else if (vy > 0) p.py = p.y - vy * P.susAbsorb;
-        } else if (depth < -8) {
-          p.y = Math.min(srf, p.y + P.susClimb);
-          const vy = p.y - p.py;
-          if (vy > 0) p.py = p.y - vy * P.susAbsorb;
-        } else {
-          const vy = p.y - p.py;
-          if (vy > 0) p.py = p.y - vy * P.susAbsorb;
-          p.y = srf;
-        }
-        b.grounded++;
+      // ---- 轮上扭矩（Task 4.2；空中也转：油门空转，落地时带着轮速）----
+      if (wk === "rear" && drvK) {
+        w += (torqueAt(VEHICLES[store.currentVehicle], w, drvK) / IW) * sub;
       }
-    }
+      if (brkK) {
+        // 刹车：反向扭矩，且不使轮反转（否则下一步会变成倒转轮）
+        const Jb = Math.min(BRAKE_TORQUE_BASE * brkK * sub, Math.abs(w) * IW);
+        w -= Math.sign(w) * (Jb / IW);
+      }
 
-    // ---- 落地防栽头：两轮贴地时骑手重心回摆 ----
+      const g = groundInfo(node.x);
+      const tPrev = sus.t;
+      if (!isFinite(g.y)) {
+        sus.t = Math.max(0, tPrev - tPrev * 0.3);
+        sus.v = (sus.t - tPrev) / sub;
+        b.fn[wk] = 0;
+        b.slip[wk] = 0;
+        b.wheelRot[wk] = w;
+        b.wheelAcc[wk] = (w - wPrev) / sub;
+        continue;
+      }
+      const pen = node.y + WHEEL_R - g.y; // >0：轮胎压入地面（竖直侵入深度）
+      if (pen > -CONTACT_TOL) b.grounded++;
+      if (pen <= 0) {
+        // 单侧约束：可自由离地，只做悬挂回弹，不产生向下拉力
+        sus.t = Math.max(0, tPrev - Math.max(0, tPrev) * 0.3);
+        sus.v = (sus.t - tPrev) / sub;
+        b.fn[wk] = 0;
+        b.slip[wk] = 0;
+        b.wheelRot[wk] = w;
+        b.wheelAcc[wk] = (w - wPrev) / sub;
+        continue;
+      }
+
+      const tr = Math.min(pen, SUS.travel);
+      const tRate = (tr - tPrev) / sub;
+      sus.t = tr;
+      sus.v = tRate;
+      let Fn = Math.max(0, SUS.k * tr + SUS.c * Math.max(0, tRate));
+      if (pen > SUS.travel) {
+        // 行程到底：硬限位（防穿模）；超出部分记为穿透量，断言其 ≤ 容差
+        Fn += (pen - SUS.travel) * SUS.k * 2.5;
+        b.penetration = Math.max(b.penetration, pen - SUS.travel);
+      }
+      b.fn[wk] = Fn;
+
+      const n = groundNormal(node.x);
+      const cxp = node.x;
+      const cyp = node.y + WHEEL_R; // 接地点（轮心下方 R）
+      applyForceAt(b, rb, n.x * Fn, n.y * Fn, cxp, cyp, sq);
+
+      // ---- 摩擦：接触点相对滑动 = 轮缘速度 − 车身切向速度 ----
+      // 冲量把滑动拉回 0（滚动无滑），但受库仓上限 μ×Fn×dt 限制：
+      // 需求超过上限 → 打滑（空转）；低于上限 → 静摩擦传递驱动力。
+      const tx = -n.y;
+      const ty = n.x; // 单位切向（n=(0,-1) → t=(1,0)）
+      const vt = nodeVX(node, sub) * tx + nodeVY(node, sub) * ty;
+      const slipV = w * WHEEL_R - vt;
+      const mEff = 1 / (1 / rb.mTot + (WHEEL_R * WHEEL_R) / IW);
+      let J = mEff * slipV;
+      const Jmax = mu * Fn * sub;
+      if (Math.abs(J) > Jmax) J = Math.sign(J) * Jmax;
+      b.slip[wk] = clamp(slipV / Math.max(20, Math.abs(w) * WHEEL_R), -1, 1);
+      applyImpulseAt(b, rb, tx * J, ty * J, cxp, cyp, sub);
+
+      // 车轮被反作用冲量减速；滚动阻力（∝ 法向力）也在轮上耗散
+      w -= (J * WHEEL_R) / IW;
+      const rr = (ROLL_RES_K * Fn * WHEEL_R * sub) / IW;
+      w -= Math.sign(w) * Math.min(rr, Math.abs(w));
+      b.wheelRot[wk] = w;
+      b.wheelAcc[wk] = (w - wPrev) / sub;
+    }
+    b.rearGr = b.fn.rear > 0;
+    b.frontGr = b.fn.front > 0;
+
+    // ---- 5) 落地防栽头：两轮贴地时骑手重心回摆 ----
     if (b.grounded >= 2 && !run.crashed) {
       const a2 = Math.atan2(b.front.y - b.rear.y, L);
       const mx2 = (b.rear.x + b.front.x) / 2;
@@ -363,7 +423,7 @@ export function stepPhysics() {
       b.head.y += (my2 - SEAT_H * Math.cos(a2) - b.head.y) * 0.35;
     }
 
-    // ---- 车架旋转限制：贴地时角度突变过限则绕后轮回拨（空中不限制，允许翻转） ----
+    // ---- 6) 贴地车架旋转限幅（防倒立卡死；空中不限制，允许翻转）----
     const angN = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
     const dA = wrapAngle(angN - b.lastAng);
     if (b.grounded > 0) {
@@ -371,11 +431,13 @@ export function stepPhysics() {
       if (Math.abs(dA) > MAXDA) {
         const back = angN - Math.sign(dA) * (Math.abs(dA) - MAXDA) * 0.85;
         const rot = back - angN;
-        const c = Math.cos(rot), s = Math.sin(rot);
+        const c = Math.cos(rot);
+        const sn = Math.sin(rot);
         for (const p of [b.front, b.head]) {
-          const dx = p.x - b.rear.x, dy = p.y - b.rear.y;
-          const nx = b.rear.x + dx * c - dy * s;
-          const ny = b.rear.y + dx * s + dy * c;
+          const dx = p.x - b.rear.x;
+          const dy = p.y - b.rear.y;
+          const nx = b.rear.x + dx * c - dy * sn;
+          const ny = b.rear.y + dx * sn + dy * c;
           p.px += nx - p.x; p.py += ny - p.y;
           p.x = nx; p.y = ny;
         }
@@ -387,37 +449,40 @@ export function stepPhysics() {
       b.lastAng = angN;
     }
 
-    // ---- 旋转阻尼：贴地时衰减骑手切向速度（吸收震动）；空中不阻尼，保持刚体旋转 ----
+    // ---- 7) 骑手切向阻尼（贴地吸收震动；空中保持刚体旋转）----
     const mxh = (b.rear.x + b.front.x) / 2;
     const myh = (b.rear.y + b.front.y) / 2;
-    const dxh = b.head.x - mxh, dyh = b.head.y - myh;
+    const dxh = b.head.x - mxh;
+    const dyh = b.head.y - myh;
     const disth = Math.hypot(dxh, dyh) || 1e-4;
-    const txx = -dyh / disth, tyy = dxh / disth;
-    const hvx = b.head.x - b.head.px, hvy = b.head.y - b.head.py;
-    const vt = hvx * txx + hvy * tyy;
-    const vr = vt * (b.grounded > 0 ? P.susRot : AIR_HEAD_DAMP);
+    const txx = -dyh / disth;
+    const tyy = dxh / disth;
+    const hvx = b.head.x - b.head.px;
+    const hvy = b.head.y - b.head.py;
+    const vth = hvx * txx + hvy * tyy;
+    const vrh = vth * (b.grounded > 0 ? P.susRot : AIR_HEAD_DAMP);
+    b.head.px = b.head.x - (hvx - (vth - vrh) * txx);
+    b.head.py = b.head.y - (hvy - (vth - vrh) * tyy);
 
-    // ---- 贴地车架 >66° 强力回平（空中不干预，玩家自己控姿态） ----
+    // ---- 8) 贴地 >66° 回平 / 强制前向（防倒立卡死）----
     if (!run.crashed && b.grounded > 0) {
       const angF = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
       if (Math.abs(angF) > 1.15) {
         const rot = -angF * 0.22;
-        const c = Math.cos(rot), s = Math.sin(rot);
+        const c = Math.cos(rot);
+        const sn = Math.sin(rot);
         const mx2 = (b.rear.x + b.front.x) / 2;
         const my2 = (b.rear.y + b.front.y) / 2;
         for (const p of [b.rear, b.front, b.head]) {
-          const dx = p.x - mx2, dy = p.y - my2;
-          const nx = mx2 + dx * c - dy * s;
-          const ny = my2 + dx * s + dy * c;
+          const dx = p.x - mx2;
+          const dy = p.y - my2;
+          const nx = mx2 + dx * c - dy * sn;
+          const ny = my2 + dx * sn + dy * c;
           p.px += nx - p.x; p.py += ny - p.y;
           p.x = nx; p.y = ny;
         }
       }
     }
-
-    // ---- 贴地强制车架前向（防倒立卡死） ----
-    // 例外：若头已贴近地面，说明这是真正的"倒立落地"，留给下面的摔车判定处理。
-    // （若此时强行把车翻正，会让人明明倒立落地却摔不下来，画面也会瞬间镜像跳变）
     if (b.front.x < b.rear.x && b.grounded > 0 && !run.crashed) {
       const hgi2 = groundInfo(b.head.x);
       const headNear = hgi2.y !== Infinity && b.head.y > hgi2.y - crashTol;
@@ -425,19 +490,18 @@ export function stepPhysics() {
         const mx2 = (b.rear.x + b.front.x) / 2;
         const my2 = (b.rear.y + b.front.y) / 2;
         for (const p of [b.rear, b.front, b.head]) {
-          const dxx = p.x - mx2, dyy = p.y - my2;
-          const nx = mx2 - dxx, ny = my2 - dyy;
+          const dxx = p.x - mx2;
+          const dyy = p.y - my2;
+          const nx = mx2 - dxx;
+          const ny = my2 - dyy;
           p.px += nx - p.x; p.py += ny - p.y;
           p.x = nx; p.y = ny;
         }
       }
     }
 
-    b.head.px = b.head.x - (hvx - (vt - vr) * txx);
-    b.head.py = b.head.y - (hvy - (vt - vr) * tyy);
-
-    // ---- 摔车判定：倒立且头触地 ----
-    enforceHeadSide(); // 判定前再做一次，确保不是求解器穿侧造成的假倒立
+    // ---- 9) 摔车判定：倒立且头触地 ----
+    enforceHeadSide();
     const hgi = groundInfo(b.head.x);
     if (hgi.y !== Infinity && !run.crashed && b.head.y > hgi.y - crashTol) {
       const inverted = b.rear.y < b.head.y + invMargin && b.front.y < b.head.y + invMargin;
@@ -452,16 +516,10 @@ export function stepPhysics() {
     b.squash = -0.3;
     const midX = (b.rear.x + b.front.x) / 2;
     const gi = groundInfo(midX);
-    // 震屏 / 粒子 / 落地结算均通过事件派发（Task 8）
-    physEvents().onLand({
-      x: midX,
-      y: (b.rear.y + b.front.y) / 2,
-      gy: gi.y,
-      vimp,
-    });
+    physEvents().onLand({ x: midX, y: (b.rear.y + b.front.y) / 2, gy: gi.y, vimp });
   }
 
-  // ---------------- 悬挂弹簧（画面下沉） ----------------
+  // ---------------- 悬挂弹簧（画面下沉；Task 5 改为由行程派生） ----------------
   b.squash += b.squashVel;
   b.squashVel -= b.squash * 0.15;
   b.squashVel *= 0.84;
@@ -471,14 +529,14 @@ export function stepPhysics() {
   }
 
   // ---------------- 引擎刹车（受抓地影响；下坡滑行不制动） ----------------
-  if (!aDrive && !aBrake && b.grounded > 0 && groundInfo(b.front.x).m <= 0.03) {
+  if (!drvK && !brkK && b.grounded > 0 && groundInfo(b.front.x).m <= 0.03) {
     const dec = 0.024 * P.TRACTION;
     b.rear.px += (b.rear.x - b.rear.px) * dec;
     b.front.px += (b.front.x - b.front.px) * dec;
     b.head.px += (b.head.x - b.head.px) * dec;
   }
 
-  // ---------------- 竖向速度安全上限 ----------------
+  // ---------------- 竖向速度安全上限（仅数值兜底） ----------------
   const cvy = (b.front.y - b.front.py) * SUBV;
   if (Math.abs(cvy) > VSPD_CAP) {
     const lim = VSPD_CAP * Math.sign(cvy);
@@ -487,12 +545,12 @@ export function stepPhysics() {
     b.head.py = b.head.y - lim * SUB_DT;
   }
 
-  // ---------------- 速度上限：平路 MAXV，下坡允许超速到 DOWNHILL_K×MAXV ----------------
+  // ---------------- 速度上限（Task 6 将以空气阻力替代这两处钳制） ----------------
   let vh = (b.front.x - b.front.px) * SUBV;
   const gmG = groundInfo(b.front.x);
   const hasGround = gmG.y !== Infinity;
   if (hasGround && gmG.m < 0) {
-    // 上坡降速：坡度越陡，可维持的车速上限越低（功率恒定，爬坡必然掉速）
+    // 上坡降速：坡度越陡可维持的车速上限越低（功率恒定，爬坡必然掉速）
     const vT = Math.max(60, P.MAXV / (1 + -gmG.m * 1.3));
     if (vh > vT) vh = vT + (vh - vT) * 0.1;
   }
@@ -506,10 +564,10 @@ export function stepPhysics() {
   }
 
   b.speed = lerp(b.speed, (b.front.x - b.front.px) * SUBV, 0.12);
-  // 车轮视觉转速：ω = v / R（再乘 0.06 做视觉降速，避免高速糊成一片）
+  // 车轮视觉角度由**真实轮角速度**派生（含打滑空转；0.06 为视觉降速）
   const TWO_PI = Math.PI * 2;
-  b.wheelRear = (b.wheelRear + (((b.rear.x - b.rear.px) * SUBV) / WHEEL_R) * 0.06) % TWO_PI;
-  b.wheelFront = (b.wheelFront + (((b.front.x - b.front.px) * SUBV) / WHEEL_R) * 0.06) % TWO_PI;
+  b.wheelRear = (b.wheelRear + b.wheelRot.rear * SUB_DT * 0.06) % TWO_PI;
+  b.wheelFront = (b.wheelFront + b.wheelRot.front * SUB_DT * 0.06) % TWO_PI;
 
   // ---------------- 障碍物碰撞（须减速碾过或腾空飞越） ----------------
   if (!run.crashed) hitObstacle();

@@ -5,9 +5,9 @@
 > 铁律：标度换算只在 `constants.js`；零依赖零构建；`index.html` ≤200 行；无 `theme === <数字>` 硬编码。
 
 ## Task 1: 物理状态与数据模型重构（质量 / 惯量 / 车轮 / 悬挂）
-- [ ] SubTask 1.1: 在 `src/config/vehicles.js` 为每辆车补数据化物理参数：整车质量、转动惯量系数、悬挂刚度/阻尼/行程、扭矩曲线峰值与转速区间（替代 `drv/spd/grp/wgt/air/tank` 的纯倍率语义，或在其基础上补充质量惯量字段）
-- [ ] SubTask 1.2: 在 `src/core/store.js` 的 `bike` 上补状态量：两轮角速度与角加速度、两轮悬挂行程与行程速度、轮上扭矩、滑移率；`store.phys` 补派生量（法向力、摩擦上限、阻力）
-- [ ] SubTask 1.3: 在 `src/config/constants.js` 集中物理常量：重力、质量/惯量推导（复用 `M_R/M_F/M_H/M_TOT/COM_UP/I_BODY`）、悬挂刚度与阻尼映射、摩擦系数映射（场景 traction × 车辆 grp × 轮胎升级）、空气阻力系数、滚动阻力系数、扭矩曲线、求解收敛阈值与迭代上限、穿透容差、数值兜底上限
+- [x] SubTask 1.1: 在 `src/config/vehicles.js` 为每辆车补数据化物理参数：整车质量、转动惯量系数、悬挂刚度/阻尼/行程、扭矩曲线峰值与转速区间（替代 `drv/spd/grp/wgt/air/tank` 的纯倍率语义，或在其基础上补充质量惯量字段）
+- [x] SubTask 1.2: 在 `src/core/store.js` 的 `bike` 上补状态量：两轮角速度与角加速度、两轮悬挂行程与行程速度、轮上扭矩、滑移率；`store.phys` 补派生量（法向力、摩擦上限、阻力）
+- [x] SubTask 1.3: 在 `src/config/constants.js` 集中物理常量：重力、质量/惯量推导（复用 `M_R/M_F/M_H/M_TOT/COM_UP/I_BODY`）、悬挂刚度与阻尼映射、摩擦系数映射（场景 traction × 车辆 grp × 轮胎升级）、空气阻力系数、滚动阻力系数、扭矩曲线、求解收敛阈值与迭代上限、穿透容差、数值兜底上限
 - [ ] SubTask 1.4: 删除补丁常量 `LAUNCH_K` / `LAUNCH_MAX` / `VSPD_CAP` / `DOWNHILL_K` / `AIR_HEAD_DAMP`（保留数值兜底项并重命名以表达"仅异常兜底"语义），同步清理 `store.phys` 中的 `crashMargin` 之外的失效字段
 - [ ] SubTask 1.5: `tools/autotest.mjs` 新增断言：`M_R/M_F/M_H/M_TOT/COM_UP/I_BODY` 均在物理层被真实引用（非死代码）；被删补丁常量在全仓库不再出现
 
@@ -18,7 +18,7 @@
 - [ ] SubTask 2.4: `tools/autotest.mjs` 新增断言：约束残差在若干步内收敛到阈值内；质量差异导致相同约束下修正量不同（逆质量分配生效）
 
 ## Task 3: 单侧地面接触 + 解析地形法线
-- [ ] SubTask 3.1: `src/physics/terrain.js` 暴露解析接口：`groundY(x)`、`groundSlope(x)`、`groundNormal(x)`、`groundCurvature(x)`，供物理与渲染共用
+- [x] SubTask 3.1: `src/physics/terrain.js` 暴露解析接口：`groundY(x)`、`groundSlope(x)`、`groundNormal(x)`、`groundCurvature(x)`，供物理与渲染共用
 - [ ] SubTask 3.2: 接触改为**单侧约束**（只能推不能拉）：车轮可承压、可自由离地；删除 `rearAir` / `frontAir` 腾空状态机
 - [ ] SubTask 3.3: 接触点使用解析法线（不再只用竖直方向），并支持多点接触（同轮接触地面与障碍物时取合力）
 - [ ] SubTask 3.4: 删除 `LAUNCH_K` 曲率起飞判据与"上冲速度截断到 `LAUNCH_MAX`"的实现，改为让起飞由约束自然产生
@@ -93,3 +93,43 @@
 - Task 9 依赖 Task 2~7（护栏针对新内核）
 - Task 10 依赖 Task 2~9（标定必须在稳定内核上）
 - Task 11 依赖 Task 1~10 全部完成
+
+---
+
+# 进度日志（WIP）
+
+## 2026-09-26 · 内核替换第一组：从"双向锚定 + 补丁"换成"质量加权 + 单侧接触 + 轮上扭矩"
+
+**已完成实现（代码已在分支上，行为已质变）**
+- Task 1.1–1.3、3.1（见上一个提交）：质量/惯量/悬挂/扭矩数据化，解析地形接口
+- **Task 2.1–2.3**：`solveDistance()` 按**逆质量**分配修正量（重端少动），迭代改为**收敛判据驱动**
+  （`SOLVER_TOL` / `SOLVER_ITERS`），并把 `solverIters` / `solverResid` 暴露为可断言量
+- **Task 3.2**：地面改为**单侧接触**（只推不拉）。删除 `rearAir` / `frontAir` 状态机
+  （`world.js` 的跳台改为纯速度冲量），旧代码里的"贴地锚定"整段移除
+- **Task 3.3**：接触力沿**解析法线** `groundNormal(x)`，并用新写的 `applyForceAt()`
+  作用在**真实接地点** —— 线性 `F/M` + 角 `(r×F)/I`，于是**翘头/栽头是算出来的**
+- **Task 3.4**：删除 `LAUNCH_K` / `LAUNCH_MAX` 曲率起飞判据与上冲截断（全仓库已无引用）
+- **Task 4.1–4.2（部分）**：两轮真正有角速度/角加速度状态；动力链完整
+  「油门 → `torqueAt()` 扭矩 → 轮角速度 → 接触点相对滑动 → 摩擦冲量（库仑上限 μ×Fn）→ 推动整车」；
+  超出上限即打滑，`slip` 作为状态量暴露；车轮视觉角度改由真实轮角速度派生
+
+**已验证**
+- 车能骑：第 1 关 5 秒内加速到 490px/s（≈MAXV=520），证明驱动力链条正确
+- 单侧接触生效：腾空成为常态（诊断里空中占比 18–44%），坡顶自然离地，无需任何判据
+- 全仓库无 `LAUNCH_K` / `LAUNCH_MAX` / `PITCH_TORQUE` / `rearAir` / `frontAir` 残留
+
+**已知未完成（必须做，否则不能合并）**
+- **Task 10 重标定（最大一块）**：72 关参考骑手回归从 72/72 掉到 **2/72**。
+  这是 spec 预期的"物理变真 → 旧标定失效"。主因：① 单向接触后车辆大量腾空（旧标定基于"贴地"）；
+  ② 陡坡上法向力下降 → 摩擦上限下降 → 爬坡能力下降；③ 参考骑手的刹车策略假设贴地可控。
+  **修法只能是调机制密度 / 骑手策略 / `den3` / 油耗标定，不得放宽物理。**
+- **airtime 变体失效**：自然腾空就能累到 7.12s，目标形同虚设 → 目标线需按新物理重算
+- **倒立摔车判定**：`crashMargin`（车架等级）不再产生差异（两档都摔）→ Task 7/9 处理
+- **掉出地图**未触发重生（诊断见 `rear.y=1730` vs `ground=304`）→ 需复查 `belowWorld` / `pitRewind`
+- **无限模式燃料耗尽**未结算（`state=play`）→ 需复查 `handleFuelEmpty` 与腾空状态的关系
+- **断言缺口**：Task 2.4 / 3.5 / 4.3–4.6 / 9.x 的断言尚未新增（本轮只做了实现）
+- Task 1.4 剩余项：`VSPD_CAP` / `DOWNHILL_K` / `MAXV` 钳制与 `AIR_HEAD_DAMP` 尚未删除
+  —— 它们的替代物分别是 Task 6（空阻/滚阻）与 Task 7（角动量守恒），必须成对替换
+
+**当前回归**：514 项检查 / 83 项失败（全部由上述未完成项导致），`--levels` 2/72。
+分支 `physics-rework` **WIP，禁止合并到 main**。

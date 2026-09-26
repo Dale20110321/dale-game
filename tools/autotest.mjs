@@ -894,6 +894,107 @@ if (ONLY_MODULES) {
       "initPhysicsEvents(null) 后 crash() 不抛错");
   }
 
+  // ---------------- 物理数据模型与地形解析接口（Task 1.1-1.3 / 3.1） ----------------
+  section("物理数据模型");
+  {
+    const { VEHICLES } = await import(new URL("../src/config/vehicles.js", import.meta.url).href);
+    const C = await import(new URL("../src/config/constants.js", import.meta.url).href);
+    const { applyUpgrades } = await import(new URL("../src/physics/bike.js", import.meta.url).href);
+    const terrain = await import(new URL("../src/physics/terrain.js", import.meta.url).href);
+
+    // 1) 每辆车都有完整物理数据
+    const needKeys = ["mass", "inertia", "suspK", "suspC", "travel", "torque", "rpm"];
+    const badV = [];
+    for (const v of VEHICLES) {
+      if (!v.phys) { badV.push(v.id + ":无 phys"); continue; }
+      for (const k of needKeys) if (typeof v.phys[k] !== "number") badV.push(v.id + ":" + k);
+    }
+    check("每辆车都有质量/惯量/悬挂/扭矩数据（Task 1.1）",
+      badV.length === 0,
+      badV.length ? badV.join(" ; ") : `${VEHICLES.length} 辆车 × ${needKeys.length} 项`);
+
+    check("车辆质量与惯量确实不同（不是同一套倍率）",
+      new Set(VEHICLES.map((v) => v.phys.mass)).size === VEHICLES.length &&
+        new Set(VEHICLES.map((v) => v.phys.inertia)).size === VEHICLES.length,
+      VEHICLES.map((v) => `${v.name} m=${v.phys.mass} I=${v.phys.inertia}`).join(" / "));
+
+    const badAir = VEHICLES.filter((v) => Math.abs(v.air * v.phys.inertia - 1) > 0.05).map((v) => v.id);
+    check("空中旋转倍率与转动惯量自洽（air ≈ 1/inertia）",
+      badAir.length === 0,
+      badAir.length ? "不自洽: " + badAir.join(",") : VEHICLES.map((v) => (v.air * v.phys.inertia).toFixed(2)).join("/"));
+
+    // 2) 死代码清零：常量确实被 deriveRigidBody 引用
+    const rbSrc = C.deriveRigidBody.toString();
+    const used = ["M_R", "M_F", "M_H", "M_TOT", "COM_UP", "I_BODY"].filter((k) =>
+      new RegExp("\\b" + k + "\\b").test(rbSrc)
+    );
+    check("M_R/M_F/M_H/M_TOT/COM_UP/I_BODY 被真实引用（不再是死代码）",
+      used.length === 6,
+      `deriveRigidBody 引用 ${used.length}/6`);
+
+    // 3) 派生量随车辆/升级变化，且已被 applyUpgrades 写入 store.phys
+    const vehBak = store.currentVehicle;
+    startGame("level", 0);
+    const rb0 = store.phys.rb;
+    const susp0 = store.phys.susp;
+    check("applyUpgrades 写入刚体/悬挂/摩擦派生量（Task 1.2/1.3）",
+      !!rb0 && rb0.mTot > 0 && rb0.iBody > 0 && !!susp0 && susp0.k > 0 && susp0.travel > 0 && store.phys.mu > 0,
+      rb0 ? `mTot=${rb0.mTot.toFixed(2)} iBody=${rb0.iBody.toFixed(1)} μ=${store.phys.mu.toFixed(2)} 悬挂 k=${susp0.k.toFixed(0)} travel=${susp0.travel.toFixed(1)}` : "无派生量");
+
+    store.currentVehicle = 2; // 越野车（最重）
+    applyUpgrades();
+    check("换车后质量/惯量/悬挂随之变化",
+      store.phys.rb.mTot > rb0.mTot && store.phys.susp.travel !== susp0.travel,
+      `mTot ${rb0.mTot.toFixed(2)} → ${store.phys.rb.mTot.toFixed(2)} · travel ${susp0.travel} → ${store.phys.susp.travel}`);
+
+    // 扭矩曲线：低转满扭、高转衰减
+    const sport = VEHICLES[1];
+    const tLo = C.torqueAt(sport, 5, 1);
+    const tHi = C.torqueAt(sport, C.TORQUE_RPM_BASE * sport.phys.rpm * 3.2, 1);
+    check("扭矩曲线：低转给出峰值扭矩、高转衰减到 0",
+      tLo > 0 && tHi === 0 && C.torqueAt(sport, 5, 0) === 0,
+      `ω=5 → ${tLo.toFixed(0)} · 高转 → ${tHi.toFixed(0)} · 松油门 → 0`);
+
+    store.currentVehicle = vehBak;
+    applyUpgrades();
+
+    // 4) 地形解析接口（Task 3.1）
+    startGame("level", 3);
+    const X = 1234;
+    const m = terrain.groundSlope(X);
+    const n = terrain.groundNormal(X);
+    const c = terrain.groundCurvature(X);
+    const gi = terrain.groundInfo(X);
+    check("地形解析接口：法线是单位向量且与切向正交",
+      Math.abs(Math.hypot(n.x, n.y) - 1) < 1e-9 && Math.abs(n.x * 1 + n.y * m) < 1e-9 && n.y < 0,
+      `m=${m.toFixed(3)} n=(${n.x.toFixed(3)},${n.y.toFixed(3)}) |n|=${Math.hypot(n.x, n.y).toFixed(6)} n·(1,m)=${(n.x + n.y * m).toExponential(2)}`);
+    check("平地法线竖直向上 (0,-1)",
+      (() => { const nn = terrain.groundNormal(40); return Math.abs(nn.x) < 1e-6 && Math.abs(nn.y + 1) < 1e-6; })(),
+      "n(40)=" + JSON.stringify(terrain.groundNormal(40)));
+    check("groundInfo 与解析接口一致（单一事实来源）",
+      gi.y === terrain.groundY(X) && Math.abs(gi.m - m) < 1e-12,
+      `y=${gi.y.toFixed(1)} m=${gi.m.toFixed(6)}`);
+
+    // 曲率：坡顶为正、凹谷为负
+    let topX = 0, topC = -Infinity, valX = 0, valC = Infinity;
+    for (let x = 300; x < store.finishX - 300; x += 7) {
+      const cc = terrain.groundCurvature(x);
+      if (cc > topC) { topC = cc; topX = x; }
+      if (cc < valC) { valC = cc; valX = x; }
+    }
+    check("曲率符号正确：上凸坡顶 > 0、凹谷 < 0",
+      topC > 0 && valC < 0 && typeof c === "number",
+      `坡顶 x=${topX} c=${topC.toFixed(5)} · 凹谷 x=${valX} c=${valC.toFixed(5)}`);
+    check("坡顶处坡度接近 0（曲率与坡度语义一致）",
+      Math.abs(terrain.groundSlope(topX)) < 0.4,
+      `|m(topX)|=${Math.abs(terrain.groundSlope(topX)).toFixed(3)}`);
+
+    // 帧率无关的固定步长常量仍在
+    check("求解收敛常量已集中定义（收敛判据/迭代上限/穿透容差/兜底）",
+      C.SOLVER_TOL > 0 && C.SOLVER_ITERS >= 4 && C.PEN_TOL > 0 && C.NUM_CAP_V > 0,
+      `tol=${C.SOLVER_TOL} iters=${C.SOLVER_ITERS} pen=${C.PEN_TOL} cap=${C.NUM_CAP_V}`);
+  }
+
   const midX = () => (bike.rear.x + bike.front.x) / 2;
   const mx_of = () => (bike.rear.x + bike.front.x) / 2;
 

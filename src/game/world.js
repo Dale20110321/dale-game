@@ -420,8 +420,6 @@ export function updateJumps() {
     if (j.boost > 0) {
       j.boost--;
       for (const p of [b.rear, b.front, b.head]) p.py += KICK_V * SUB_DT * KICK_BOOST;
-      b.rearAir = true;
-      b.frontAir = true;
       continue;
     }
     if (j.used || store.run.crashed) continue;
@@ -437,8 +435,6 @@ export function updateJumps() {
       p.y -= KICK_LIFT;
       p.py -= KICK_LIFT;
     }
-    b.rearAir = true;
-    b.frontAir = true;
     emitParticles(j.x, j.y - 6, 14, { color: "#7ce7ff", spd: 2.2, life: 26, size: 3, grav: -0.02 });
     addShakeLocal(2.5);
     showToast("🛫 起飞台！", 600);
