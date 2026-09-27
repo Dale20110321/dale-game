@@ -116,6 +116,7 @@ export function save() {
   lsSet(SAVE_KEYS.owned, JSON.stringify(store.ownedVehicles));
   lsSet(SAVE_KEYS.mute, store.muted ? "1" : "0");
   lsSet(SAVE_KEYS.best, store.best);
+  lsSet(SAVE_KEYS.ultra, JSON.stringify(store.ultra || {}));
   saveProgress();
 }
 
@@ -377,6 +378,9 @@ export function loadSave() {
     store.muted = lsGet(SAVE_KEYS.mute) === "1";
     store.best = parseInt(lsGet(SAVE_KEYS.best) || "0", 10) || 0;
 
+    const ultraRaw = jsonOr(lsGet(SAVE_KEYS.ultra) || "{}", {});
+    store.ultra = (ultraRaw && typeof ultraRaw === "object" && !Array.isArray(ultraRaw)) ? ultraRaw : {};
+
     const ver = parseInt(lsGet(SAVE_KEYS.ver) || "0", 10) || 0;
 
     // 版本 1 → 2：历史货币换算（只执行一次，保留原有逻辑）
@@ -404,6 +408,24 @@ export function loadSave() {
       if (migrated) store.progress.branchCleared = deriveBranchCleared();
       lsSet(SAVE_KEYS.ver, String(CUR_VER));
       save(); // 内部委托 saveProgress()，一并落盘进度阶梯
+    }
+
+    // 特殊模式体验包（localStorage 键 bike_trial=1）：每次加载都把
+    // "满级竞速车/越野车 + 两个特殊模式 + 200 万金币"备好，供直接体验终极模式。
+    // 玩家游玩/覆盖存档无妨——下次进入自动恢复；删除该键即回归"满级+100 万"正常规则。
+    if (lsGet("bike_trial") === "1") {
+      store.ownedVehicles = [0, 1, 2];
+      if (store.gold < 2000000) store.gold = 2000000;
+      for (const id of ["sport", "mud"]) {
+        if (!store.upgrades[id]) store.upgrades[id] = { engine: 0, tire: 0, frame: 0, susp: 0 };
+        store.upgrades[id].engine = MAX_LV;
+        store.upgrades[id].tire = MAX_LV;
+        store.upgrades[id].frame = MAX_LV;
+        store.upgrades[id].susp = MAX_LV;
+      }
+      store.ultra.sport = true;
+      store.ultra.mud = true;
+      if (!store.ownedVehicles.includes(store.currentVehicle)) store.currentVehicle = 1;
     }
   } catch (e) {
     /* 存档损坏时用默认值继续 */
@@ -563,6 +585,7 @@ export function resetSave() {
   store.ownedVehicles = [0];
   store.currentVehicle = 0;
   store.upgrades = {};
+  store.ultra = {};
   store.muted = false;
   store.achGot = [];
   store.progress = {

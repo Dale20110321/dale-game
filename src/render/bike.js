@@ -241,7 +241,7 @@ export function drawBike() {
   ctx.fill();
 
   // 头盔：圆顶 + 前檐（去掉尖角/斜线，避免"头顶尖尖的"）
-  ctx.fillStyle = token("danger");
+  ctx.fillStyle = token("obj-helmet");
   ctx.strokeStyle = token("obj-bike-frame");
   ctx.lineWidth = 0.9;
   ctx.beginPath();

@@ -90,8 +90,6 @@
   --obj-canister: #8a9098;
   --obj-canister-top: #a9aeb6;
   --obj-boost: #4cff88;
-  --obj-obstacle: #8a6a44;
-  --obj-obstacle-dark: #5b3a1e;
   --obj-hazard: #e63946;
   --obj-hazard-soft: rgba(255,72,60,0.16);
   --obj-gate: #7ce7ff;
@@ -174,6 +172,10 @@
   --fx-shadow-soft: rgba(0,0,0,0.15);
   --fx-shadow-faint: rgba(0,0,0,0.08);
   --fx-none-dark: rgba(0,0,0,0);
-  --obj-obstacle-fallback: #8a8f98;
-  --obj-obstacle-fallback-2: #a9aeb6;
+  --fx-vignette-edge: rgba(0,0,0,0.03);
+  --fx-fade-top: rgba(255,255,255,0.015);
+  --fx-fade-hi-top: rgba(255,255,255,0.05);
+  --fx-sun-warm: rgba(255,248,222,0.32);
+  --fx-sun-none: rgba(255,248,222,0);
+  --fx-fog-mist: rgba(236,245,255,0.15);
 }

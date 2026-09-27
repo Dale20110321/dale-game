@@ -1,21 +1,47 @@
-// 世界实体绘制：装饰物 / 金币 / 油罐 / 加速带 / 机制实体（障碍/危险段/限时门）/ 终点旗
+// 世界实体绘制：装饰物 / 金币 / 油罐 / 加速带 / 机制实体（危险段/跳台/限时门）/ 终点旗
 import { token } from "../config/ui-tokens.js";
 import { ctx, view } from "../core/canvas.js";
 import { store, world } from "../core/store.js";
 import { groundY } from "../physics/terrain.js";
-import { THEMES, DECO_COLORS } from "../config/themes.js";
-import { OBST_VIS_H, toKmh } from "../config/constants.js";
+import { DECO_COLORS } from "../config/themes.js";
+import { toKmh } from "../config/constants.js";
+import { getQuality } from "./postfx.js";
 
-/** 按主题绘制装饰物（纯视觉） */
+/** 按主题绘制装饰物（纯视觉）；中/高画质给装饰加上地面投影 */
 export function drawDeco(cx, cy) {
+  const q = getQuality();
+  const shade = q === "medium" || q === "high";
   for (const t of world.decoTree) {
     const sx = t.x - cx;
     if (sx < -60 || sx > view.W + 60) continue;
+    if (shade) {
+      ctx.fillStyle = token("obj-shadow");
+      ctx.beginPath();
+      ctx.ellipse(sx + 2, t.y - cy + 3, 13 * t.s, 4.2 * t.s, 0, 0, 7);
+      ctx.fill();
+      if (q === "high") {
+        // 高画质：内层更实的第二道影子（边缘柔、中心深，接近真实投影）
+        ctx.beginPath();
+        ctx.ellipse(sx + 1, t.y - cy + 2, 8 * t.s, 2.4 * t.s, 0, 0, 7);
+        ctx.fill();
+      }
+    }
     drawDecoItem(sx, t.y - cy, t.kind, t.s, t.ph);
   }
   for (const r of world.decoRock) {
     const sx = r.x - cx;
     if (sx < -60 || sx > view.W + 60) continue;
+    if (shade) {
+      ctx.fillStyle = token("obj-shadow");
+      ctx.beginPath();
+      ctx.ellipse(sx + 2, r.y - cy + 3, 12 * r.s, 3.8 * r.s, 0, 0, 7);
+      ctx.fill();
+      if (q === "high") {
+        ctx.beginPath();
+        ctx.ellipse(sx + 1, r.y - cy + 1.5, 7 * r.s, 2 * r.s, 0, 0, 7);
+        ctx.fill();
+      }
+    }
     drawDecoItem(sx, r.y - cy, r.kind, r.s, r.ph);
   }
 }
@@ -509,40 +535,100 @@ export function drawFlag(cx, cy, finishX) {
   ctx.textAlign = "left";
 }
 
-/** 跳台：斜坡 + 箭头（airtime 变体的起飞点） */
+/**
+ * 跳台：双段"缓助跑坡 + 上翘起飞唇"台形（airtime 变体的起飞点）。
+ *   · 助跑坡从地面缓升，末端上翘成 kicker lip，贴近真实 BMX 跳台轮廓
+ *   · 底座深色收边、坡面高光、表面抓痕纹理、起飞箭头（呼吸）三件套
+ */
 export function drawJumps(cx, cy) {
   for (const j of world.jumps) {
     const sx = j.x - cx;
-    if (sx < -70 || sx > view.W + 70) continue;
+    if (sx < -90 || sx > view.W + 90) continue;
     const y = j.y - cy;
     if (!isFinite(y)) continue;
     ctx.save();
     ctx.translate(sx, y);
-    // 台体
+
+    // 台体轮廓：缓坡 (-46,-6)→(-12,-14) → 上翘唇 (-12,-14)→(24,-30) → 顶缘 (24,-30)→(30,-30)
     ctx.fillStyle = token("obj-jump-base");
     ctx.beginPath();
-    ctx.moveTo(-26, 0);
-    ctx.lineTo(22, -22);
-    ctx.lineTo(26, -22);
-    ctx.lineTo(26, 0);
+    ctx.moveTo(-46, 0);
+    ctx.lineTo(-46, -6);
+    ctx.lineTo(-12, -14);
+    ctx.lineTo(24, -30);
+    ctx.lineTo(30, -30);
+    ctx.lineTo(30, 0);
     ctx.closePath();
     ctx.fill();
-    // 台面（高光）
+    // 起跳唇侧阴影（让上翘段有厚度感）
+    ctx.fillStyle = token("fx-shadow-faint");
+    ctx.beginPath();
+    ctx.moveTo(24, -30);
+    ctx.lineTo(30, -30);
+    ctx.lineTo(30, -14);
+    ctx.lineTo(24, -14);
+    ctx.closePath();
+    ctx.fill();
+
+    // 坡面高光（缓坡 + 上翘唇两段）
     ctx.strokeStyle = j.used ? token("obj-jump-rim-used") : token("obj-jump-rim");
-    ctx.lineWidth = 3.5;
+    ctx.lineWidth = 3;
     ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.moveTo(-26, 0);
-    ctx.lineTo(24, -22);
+    ctx.moveTo(-46, -6);
+    ctx.lineTo(-12, -14);
+    ctx.lineTo(24, -30);
     ctx.stroke();
+
+    // 表面抓痕纹理（垂直于坡向的短线，强化台面材质感）
+    ctx.lineWidth = 1.4;
+    for (let i = 0; i < 3; i++) {
+      const t = 0.18 + i * 0.3; // 沿坡 0.18 / 0.48 / 0.78
+      const gx = -46 + (-12 - -46) * t;
+      const gy = -6 + (-14 - -6) * t;
+      const dx = -12 - -46, dy = -14 - -6;
+      const L = Math.hypot(dx, dy) || 1;
+      const px = -dy / L, py = dx / L; // 坡面法向（屏幕向上）
+      // 分段法：仅当 t 落在第一段（缓坡）或第二段（上翘）中间
+      if (t < 0.55) {
+        ctx.strokeStyle = token("obj-jump-rim-used");
+        ctx.beginPath();
+        ctx.moveTo(gx + px * 2, gy + py * 2);
+        ctx.lineTo(gx - px * 2, gy - py * 2);
+        ctx.stroke();
+      }
+    }
+    // 上翘唇上的抓痕（第二段）
+    const a2 = [0.3, 0.65];
+    for (const t of a2) {
+      const gx = -12 + (24 - -12) * t;
+      const gy = -14 + (-30 - -14) * t;
+      const dx = 24 - -12, dy = -30 - -14;
+      const L = Math.hypot(dx, dy) || 1;
+      const px = -dy / L, py = dx / L;
+      ctx.strokeStyle = token("obj-jump-rim-used");
+      ctx.beginPath();
+      ctx.moveTo(gx + px * 1.6, gy + py * 1.6);
+      ctx.lineTo(gx - px * 1.6, gy - py * 1.6);
+      ctx.stroke();
+    }
+
+    // 顶缘高光（lip 亮边）
+    ctx.strokeStyle = j.used ? token("obj-jump-rim-used") : token("obj-jump-glow");
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(24, -30);
+    ctx.lineTo(30, -30);
+    ctx.stroke();
+
+    // 起飞箭头（呼吸跳动，未使用过时显示）
     if (!j.used) {
-      // 起飞箭头（呼吸跳动）
       const bob = Math.sin(store.time * 4 + j.x * 0.01) * 3;
       ctx.fillStyle = token("obj-jump-glow");
       ctx.beginPath();
-      ctx.moveTo(-6, -34 + bob);
-      ctx.lineTo(6, -34 + bob);
-      ctx.lineTo(0, -46 + bob);
+      ctx.moveTo(-6, -40 + bob);
+      ctx.lineTo(6, -40 + bob);
+      ctx.lineTo(0, -52 + bob);
       ctx.closePath();
       ctx.fill();
     }
@@ -550,7 +636,7 @@ export function drawJumps(cx, cy) {
   }
 }
 
-// ---------------- 机制实体：障碍物 / 危险段 / 限时门 ----------------
+// ---------------- 机制实体：危险段 / 跳台 / 限时门 ----------------
 
 /** 危险段：地表警示带 + 斜纹 + 限速牌（必须可提前预判） */
 export function drawHazards(cx, cy) {
@@ -610,112 +696,6 @@ export function drawHazards(cx, cy) {
     ctx.font = "10px sans-serif";
     ctx.fillText("限速 km/h", px + 62, py - 77);
     ctx.textAlign = "left";
-  }
-}
-
-/** 障碍物：按场景主题外观绘制（高速撞上会摔车，须减速碾过或腾空飞越） */
-export function drawObstacles(cx, cy) {
-  const T = THEMES[store.phys.theme] || THEMES[0];
-  const o = T.obstacle || { c1: token("obj-obstacle-fallback"), c2: token("obj-obstacle-fallback-2"), shape: "rock" };
-  for (const obs of world.obstacles) {
-    const sx = obs.x - cx;
-    if (sx < -60 || sx > view.W + 60) continue;
-    const sy = obs.y - cy;
-    if (!isFinite(sy)) continue;
-    ctx.save();
-    ctx.translate(sx, sy);
-    drawObstacleShape(o);
-    ctx.restore();
-  }
-}
-
-function drawObstacleShape(o) {
-  const h = OBST_VIS_H;
-  ctx.fillStyle = token("obj-shadow");
-  ctx.beginPath();
-  ctx.ellipse(0, 0, h * 0.75, 4, 0, 0, 7);
-  ctx.fill();
-  switch (o.shape) {
-    case "log":
-      ctx.fillStyle = o.c1;
-      ctx.beginPath();
-      ctx.roundRect(-h * 0.72, -h * 0.55, h * 1.44, h * 0.58, 5);
-      ctx.fill();
-      ctx.fillStyle = o.c2;
-      ctx.beginPath();
-      ctx.ellipse(-h * 0.72, -h * 0.26, h * 0.16, h * 0.29, 0, 0, 7);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.ellipse(h * 0.72, -h * 0.26, h * 0.16, h * 0.29, 0, 0, 7);
-      ctx.fill();
-      break;
-    case "crystal":
-      ctx.fillStyle = o.c1;
-      ctx.beginPath();
-      ctx.moveTo(0, -h * 1.35);
-      ctx.lineTo(h * 0.55, -h * 0.35);
-      ctx.lineTo(0, 0);
-      ctx.lineTo(-h * 0.55, -h * 0.35);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = o.c2;
-      ctx.beginPath();
-      ctx.moveTo(0, -h * 1.35);
-      ctx.lineTo(h * 0.55, -h * 0.35);
-      ctx.lineTo(0, -h * 0.42);
-      ctx.closePath();
-      ctx.fill();
-      break;
-    case "crate":
-      ctx.fillStyle = o.c1;
-      ctx.fillRect(-h * 0.6, -h, h * 1.2, h);
-      ctx.strokeStyle = o.c2;
-      ctx.lineWidth = 2.5;
-      ctx.strokeRect(-h * 0.6, -h, h * 1.2, h);
-      ctx.beginPath();
-      ctx.moveTo(-h * 0.6, -h);
-      ctx.lineTo(h * 0.6, 0);
-      ctx.moveTo(h * 0.6, -h);
-      ctx.lineTo(-h * 0.6, 0);
-      ctx.stroke();
-      break;
-    case "lavaRock":
-      ctx.fillStyle = o.c1;
-      ctx.beginPath();
-      ctx.moveTo(-h * 0.72, 0);
-      ctx.lineTo(-h * 0.5, -h * 0.9);
-      ctx.lineTo(h * 0.2, -h * 1.05);
-      ctx.lineTo(h * 0.72, -h * 0.28);
-      ctx.lineTo(h * 0.42, 0);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = o.c2;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(-h * 0.3, -h * 0.16);
-      ctx.lineTo(-h * 0.06, -h * 0.6);
-      ctx.lineTo(h * 0.24, -h * 0.34);
-      ctx.stroke();
-      break;
-    default:
-      // rock
-      ctx.fillStyle = o.c1;
-      ctx.beginPath();
-      ctx.moveTo(-h * 0.7, 0);
-      ctx.lineTo(-h * 0.46, -h * 0.78);
-      ctx.lineTo(h * 0.18, -h);
-      ctx.lineTo(h * 0.7, -h * 0.4);
-      ctx.lineTo(h * 0.5, 0);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = o.c2;
-      ctx.beginPath();
-      ctx.moveTo(-h * 0.46, -h * 0.78);
-      ctx.lineTo(h * 0.18, -h);
-      ctx.lineTo(h * 0.06, -h * 0.5);
-      ctx.closePath();
-      ctx.fill();
-      break;
   }
 }
 

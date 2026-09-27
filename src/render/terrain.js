@@ -5,6 +5,8 @@ import { ctx, view } from "../core/canvas.js";
 import { THEMES } from "../config/themes.js";
 import { store } from "../core/store.js";
 import { groundY } from "../physics/terrain.js";
+import { clamp } from "../core/utils.js";
+import { getQuality } from "./postfx.js";
 
 /** 遍历可见地表采样点，回调 (screenX, screenGY, worldX) */
 function eachGround(cx, cy, step, fn) {
@@ -215,7 +217,7 @@ export function drawTerrain(cx, cy) {
   ctx.beginPath();
   ctx.moveTo(0, cy);
   let lastG = cy;
-  for (let x = 0; x <= W; x += 6) {
+  for (let x = 0; x <= W; x += 8) {
     const wx = x + cx;
     const gy = groundY(wx);
     if (gy === Infinity) ctx.lineTo(x, lastG);
@@ -234,7 +236,7 @@ export function drawTerrain(cx, cy) {
   ctx.strokeStyle = pal[1];
   ctx.lineWidth = 8;
   ctx.beginPath();
-  for (let x = 0; x <= W; x += 6) {
+  for (let x = 0; x <= W; x += 8) {
     const gy = groundY(x + cx);
     if (gy === Infinity) continue;
     ctx.lineTo(x, gy - cy - 8);
@@ -245,7 +247,7 @@ export function drawTerrain(cx, cy) {
   ctx.fillStyle = token("fx-shadow-faint");
   ctx.beginPath();
   ctx.moveTo(0, cy);
-  for (let x = 0; x <= W; x += 6) {
+  for (let x = 0; x <= W; x += 8) {
     const gy = groundY(x + cx);
     if (gy === Infinity) ctx.lineTo(x, lastG);
     else ctx.lineTo(x, Math.min(gy + 40, cy + H) - cy);
@@ -257,4 +259,48 @@ export function drawTerrain(cx, cy) {
   // 数据驱动的地表纹理
   const sp = T.surface && SURFACE_PAINTERS[T.surface.type];
   if (sp) sp(T.surface, cx, cy);
+
+  // —— 坡面阳光明暗（中档轻、高档强）——
+  // 太阳从左上洒下：下坡面（朝右）受光偏亮、上坡背光面变暗，塑造起伏立体感。
+  // 亮部用中性白光叠（不做黄染），整体明暗对比让"高画质"有真实日光感。
+  const q = getQuality();
+  if (q !== "low") {
+    const isHi = q === "high";
+    const kDark = isHi ? 0.5 : 0.18; // 背光暗度
+    const kLit = isHi ? 0.34 : 0.13; // 受光亮度
+    const st = isHi ? 16 : 24;
+    ctx.save();
+    for (let x = 0; x <= W; x += st) {
+      const wx = x + cx;
+      const yL = groundY(wx - 10);
+      const yR = groundY(wx + 10);
+      if (yL === Infinity || yR === Infinity) continue;
+      const m = (yR - yL) / 20;
+      const gy = groundY(wx) - cy;
+      if (m < 0.05) {
+        const a = Math.min(kDark, (0.05 - m) * kDark * 3);
+        if (a > 0.02) {
+          ctx.fillStyle = "rgba(10,14,20," + a.toFixed(3) + ")";
+          ctx.fillRect(x, gy, st + 4, H - gy);
+        }
+      } else if (m > 0.42) {
+        const a = Math.min(kLit, (m - 0.42) * kLit * 3);
+        if (a > 0.02) {
+          ctx.fillStyle = "rgba(255,250,235," + a.toFixed(3) + ")";
+          ctx.fillRect(x, gy, st + 4, H - gy);
+        }
+      }
+    }
+    // "阳光曝光"：整片受光地面的暖白提亮（中档弱、高档明显）——一档一档肉眼可辨
+    {
+      const a = isHi ? 0.1 : 0.045;
+      for (let x = 0; x <= W; x += 20) {
+        const gy = groundY(x + cx);
+        if (gy === Infinity) continue;
+        ctx.fillStyle = "rgba(255,249,232," + a.toFixed(3) + ")";
+        ctx.fillRect(x, gy - cy, 24, H - (gy - cy));
+      }
+    }
+    ctx.restore();
+  }
 }

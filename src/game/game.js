@@ -5,7 +5,7 @@ import {
   RATING_MIN, RATING_WIN_GAIN, RATING_LOSS,
   RATING_WIN_GAIN_ADVANCED, RATING_LOSS_ADVANCED, rankName,
 } from "../config/constants.js";
-import { LEVELS, levelAt, segmentThemeAt, variantRule, airTargetOf } from "../config/levels.js";
+import { LEVELS, levelAt, segmentThemeAt, variantRule } from "../config/levels.js";
 import { THEMES } from "../config/themes.js";
 import { store, bike, world } from "../core/store.js";
 import { key } from "../core/input.js";
@@ -282,24 +282,6 @@ function handleFuelEmpty() {
 function finishLevel() {
   const run = store.run;
   const L = levelAt(store.selLevel);
-  // airtime 变体：先验"累计滞空 + 连招"是否达标，未达标不判通过并提示差距
-  if (store.mode === "level" && L) {
-    const target = airTargetOf(L);
-    if (target > 0 && world.airScore < target) {
-      run.clearing = true;
-      run.failed = true;
-      showToast(
-        "🕊 滞空不足！需 " + target.toFixed(1) + "s · 当前 " + world.airScore.toFixed(1) +
-          "s（差 " + (target - world.airScore).toFixed(1) + "s）",
-        2200
-      );
-      setTimeout(runGuard(() => {
-        store.state = "menu";
-        presenter.toMenu();
-      }), 2200);
-      return;
-    }
-  }
   run.clearing = true;
   // 结算结果卡（Task 8.3）：由 presenter 注入到 ui 层渲染（game 不 import ui）
   const result = {
@@ -457,7 +439,7 @@ export function update(dt) {
 
   updateCoins();
   updateCanisters();
-  updateBoosts();
+  updateBoosts(dt);
   updateJumps();
   if (!fuelOk) handleFuelEmpty();
 

@@ -15,21 +15,21 @@
 //      全文件不存在任何直接改写车速/竖向速度的钳制（只有数值异常兜底 NUM_CAP_V）。
 //    · 空中姿态：玩家按键施加**角冲量**，松键后角速度保持（角动量守恒），落地由地面吸收。
 //
-//  标度：本文件所有速度换算必须用 SUBV（真实 px/s），不要写裸 *SUB。
+//  标度：速度一律用 SUBV 换算成真实 px/s，不要写裸 *SUB（仅 config/constants.js 例外）。
 //  分层：本文件不 import render/ 与 ui/；摔车/落地等表现通过 ./events.js 的注入回调派发。
 // ============================================================
 import {
-  SUB, SUB_DT, SUBV, DT,
+  SUB, SUB_DT, DT,
   WHEEL_R, WHEELBASE, SEAT_H,
   AIR_ROT_MAX, AIR_ROT_ACC,
   LAND_REF, CONTACT_BAND, CONTACT_BIAS, BIAS_MAX_V, STUN_TIME,
   SOLVER_TOL, SOLVER_ITERS, PEN_TOL, FN_MAX_K, NUM_CAP_V, HEAD_R,
   ROLL_RES_K, AIR_DRAG_K, wheelInertia, torqueAt,
-  OBST_R, OBST_VIS_H, OBST_HIT_V, CRASH_FUEL_LOSS, CRASH_TIME_PENALTY,
+  CRASH_FUEL_LOSS, CRASH_TIME_PENALTY,
   deriveHandling, deriveRigidBody, deriveSuspension, deriveFriction,
 } from "../config/constants.js";
 import { VEHICLES } from "../config/vehicles.js";
-import { store, bike, world } from "../core/store.js";
+import { store, bike } from "../core/store.js";
 import { clamp, lerp, wrapAngle } from "../core/utils.js";
 import { getUp } from "../core/storage.js";
 import { groundInfo, groundY, groundNormal } from "./terrain.js";
@@ -48,6 +48,40 @@ let numCapHits = 0;
 /** 读取兜底累计触发次数（正常游玩与全部测试中都应为 0） */
 export const capHitCount = () => numCapHits;
 
+/** 竞速车「极速模式」的速度倍率（×10） */
+const ULTRA_SPEED_N = 10;
+
+/** 当前车辆的专属特殊模式是否已解锁 */
+export function isUltraActive() {
+  return store.ultra[VEHICLES[store.currentVehicle].id] === true;
+}
+
+/** 越野车「贴地模式」是否生效（已解锁并选用越野车） */
+export function isUltraStable() {
+  return isUltraActive() && VEHICLES[store.currentVehicle].id === "mud";
+}
+
+/** 贴地模式：把车轮/轮轴垂直钉到各自下方地表，头保持在轴中线 SEAT_H 上方（水平滑行，永不腾空） */
+function pinToGround() {
+  const b = bike;
+  for (const wk of WHEELS) {
+    const W = b[wk];
+    const g = groundInfo(W.x);
+    if (!isFinite(g.y)) continue;
+    const n = groundNormal(W.x);
+    // 法线朝屏幕上方（n.y < 0）→ 轮心在地表上方 WHEEL_R：g.y + n.y*WHEEL_R
+    // （旧写法 g.y - n.y*WHEEL_R 把轮心钉进地表之下，造成"陷地 + 无摩擦走不动"）
+    const wheelY = g.y + n.y * WHEEL_R;
+    W.y = wheelY; W.py = wheelY; W._vy = 0;
+    const A = wk === "rear" ? b.axleR : b.axleF;
+    A.y = wheelY; A.py = wheelY; A._vy = 0;
+  }
+  const midY = (b.axleR.y + b.axleF.y) * 0.5;
+  b.head.y = midY - SEAT_H;
+  b.head.py = midY - SEAT_H;
+  b.head._vy = 0;
+}
+
 /** 按当前车辆 + 升级等级重算驾驶参数（公式统一放在 config/constants.js 的 derive* 里） */
 export function applyUpgrades() {
   const v = VEHICLES[store.currentVehicle];
@@ -61,6 +95,24 @@ export function applyUpgrades() {
   store.phys.susp = deriveSuspension(v, up);
   store.phys.mu = deriveFriction(store.phys.TRACTION, v, up);
   store.phys.wheelI = wheelInertia(rb.mW); // 轮转动惯量（实心圆盘近似）
+
+  // 特殊终极模式（放在所有派生量覆写之后：μ 由 deriveFriction 派生，
+  // 若在前面放大会被覆盖，车会因打滑而极速上不去）
+  if (isUltraActive() && v.id === "sport") {
+    // 加速度收敛：极速模式不再放大扭矩（×10 起步太冲），保持普通档位的加速手感，
+    // 极速（MAXV=4200）仍由下面保留——慢加速、冲高极速。
+    // store.phys.torquePeak *= ULTRA_SPEED_N;
+    // store.phys.brakePeak *= ULTRA_SPEED_N;
+    // 极速标定参考（HUD 表盘 / 相机速度感）：贴近"实际可达"而不是虚标一个大数，
+    // 否则 speedN = 速度/MAXV 趋近 0，相机无前推、表盘只走 1%，极速感全无。
+    store.phys.MAXV = Math.max(store.phys.MAXV, 4200);
+    store.phys.rpmK = 12; // 扭矩域宽到高速段仍满功率
+    store.phys.mu = Math.max(store.phys.mu, 4); // 高抓地：大扭矩不打滑
+    store.phys.airDragK = AIR_DRAG_K * 0.1; // 极低风阻，极速真正冲上去
+  } else {
+    store.phys.rpmK = 1;
+    store.phys.airDragK = 0;
+  }
   bike.rb = rb;
   bindMasses(rb);
 }
@@ -146,10 +198,10 @@ export function rotateBikeAround(mx, my, rot, count) {
   if (count !== false) b.rotAcc += rot;
 }
 
-/** 摔车（附惩罚：扣 8% 燃料 + 2s 计时惩罚） */
+/** 摔车（附惩罚：扣 8% 燃料 + 2s 计时惩罚）；贴地模式下永不摔车 */
 export function crash() {
+  if (isUltraStable()) return;
   const run = store.run;
-  globalThis.__CRASHFROM = new Error("crash").stack;
   if (run.crashed) return;
   run.crashed = true;
   run.runCrashed = true;
@@ -166,27 +218,6 @@ export function crash() {
     fuelLoss: CRASH_FUEL_LOSS,
     timePenalty: CRASH_TIME_PENALTY,
   });
-}
-
-/**
- * 障碍物碰撞：车身两轮 vs 障碍物圆。
- * 只有"贴着地面高速通过"才算撞上——低速可安全碾过，腾空可飞越。
- */
-function hitObstacle() {
-  if (!world.obstacles.length) return;
-  const b = bike;
-  if (Math.abs((b.front.x - b.front.px) * SUBV) < OBST_HIT_V) return;
-  for (const o of world.obstacles) {
-    const oy = o.y - OBST_VIS_H * 0.5;
-    for (const wk of WHEELS) {
-      const p = b[wk];
-      if (Math.abs(o.x - p.x) > OBST_R + WHEEL_R) continue;
-      if (Math.hypot(o.x - p.x, oy - p.y) < OBST_R + WHEEL_R * 0.7) {
-        crash();
-        return;
-      }
-    }
-  }
 }
 
 // ============================================================
@@ -286,13 +317,28 @@ function applySuspension(b, susp, sub) {
 //  动力链：油门 → 轮上扭矩；刹车 → 反向扭矩 / 锁死；滚动阻力
 // ============================================================
 function applyDrive(b, P, sub, drv, brk) {
+  // 贴地模式（越野车终极模式）：轮子被钉在地表、接触摩擦为 0，
+  // 油门/刹车改走"整车速度指令"（磁悬浮滑行）——否则完全走不动。
+  if (isUltraStable()) {
+    const sv = systemVel(b);
+    const vx = sv.vx;
+    const target = drv ? P.MAXV * 0.95 : 0; // 前进冲到极速；刹车/松油门滑停
+    const maxAcc = P.MAXV * 2; // 加速（/s），0.5s 内到极速，不突兀
+    const dv = clamp(target - vx, -maxAcc * sub, maxAcc * sub);
+    if (dv !== 0) for (const p of b.pts) p._vx += dv;
+    // 轮子视觉角速度跟随车速（轮心贴地时真实接触不转轮）
+    const want = vx / WHEEL_R;
+    b.wheelRot.rear += clamp(want - b.wheelRot.rear, -40, 40) * sub;
+    b.wheelRot.front = b.wheelRot.rear;
+    return;
+  }
   const veh = VEHICLES[store.currentVehicle];
   const IW = P.wheelI || wheelInertia(P.rb.mW);
   for (const wk of WHEELS) {
     let w = b.wheelRot[wk];
     let tau = 0;
     // 油门只驱动后轮；刹车前后轮都作用（真车如此）
-    if (wk === "rear" && drv) tau += torqueAt(veh, w, drv, P.torquePeak);
+    if (wk === "rear" && drv) tau += torqueAt(veh, w, drv, P.torquePeak, P.rpmK || 1);
     if (brk) {
       // 刹车扭矩不得把轮子转成倒转（否则会变成"倒车"）；到 0 即抱死 → 转滑动摩擦
       const cap = Math.min(P.brakePeak, (Math.abs(w) * IW) / sub);
@@ -314,8 +360,9 @@ function applyDrag(b, P, sub) {
   const sv = systemVel(b);
   const sp = Math.hypot(sv.vx, sv.vy);
   if (sp < 1e-6) return;
-  const ax = (-sv.vx / sp) * (AIR_DRAG_K * sp * sp) / sv.m;
-  const ay = (-sv.vy / sp) * (AIR_DRAG_K * sp * sp) / sv.m;
+  const k = P.airDragK || AIR_DRAG_K; // 极速模式用压缩后的阻力，普通模式用默认
+  const ax = (-sv.vx / sp) * (k * sp * sp) / sv.m;
+  const ay = (-sv.vy / sp) * (k * sp * sp) / sv.m;
   for (const p of b.pts) addVel(p, ax * sub, ay * sub);
 }
 
@@ -370,16 +417,16 @@ function velTravel(W, A, fr, susp) {
  * 单侧地面接触：法向（只推不拉，离开接触带则完全没有法向力）
  * + 切向库仑摩擦（上限 μ×Jn），摩擦冲量同时作用于车轮线速度与轮角速度。
  */
-function solveContacts(b, P, mu, sub, first) {
+function solveContacts(b, P, mu, sub, first, geo) {
   const IW = P.wheelI || wheelInertia(P.rb.mW);
   const FN_MAX = FN_MAX_K * P.rb.mTot * P.GRAV;
   if (first) b.grounded = 0;
   for (const wk of WHEELS) {
     const W = b[wk];
-    const g = groundInfo(W.x);
+    const g = geo[wk].info;
     if (first) { b.fn[wk] = 0; b.slip[wk] = 0; }
     if (!isFinite(g.y)) continue;
-    const n = groundNormal(W.x);
+    const n = geo[wk].norm;
     const cosT = -n.y; // 1/√(1+m²)
     const tx = -n.y;
     const ty = n.x;
@@ -450,6 +497,12 @@ function solveVelocityConstraints(b, P, susp, mu, sub) {
   const L = WHEELBASE;
   const Lr = Math.hypot(L * 0.5, SEAT_H);
   const fr = frameOf(b);
+  // 地形静态：速度层迭代只改速度、不改位置，同一位置沿迭代数轮采样结果完全相同，
+  // 因此每子步采样一次、迭代内复用（原实现每轮迭代都重新采样，等于把地形算约 10 遍）。
+  const geo = {
+    rear: { info: groundInfo(b.rear.x), norm: groundNormal(b.rear.x) },
+    front: { info: groundInfo(b.front.x), norm: groundNormal(b.front.x) },
+  };
   let resid = 0;
   let iters = 0;
   for (let it = 0; it < SOLVER_ITERS; it++) {
@@ -462,7 +515,7 @@ function solveVelocityConstraints(b, P, susp, mu, sub) {
       const A = wk === "rear" ? b.axleR : b.axleF;
       r = Math.max(r, velLateral(b[wk], A, fr, sub), velTravel(b[wk], A, fr, susp));
     }
-    solveContacts(b, P, mu, sub, it === 0);
+    solveContacts(b, P, mu, sub, it === 0, geo);
     iters = it + 1;
     resid = r;
     if (r < SOLVER_TOL) break;
@@ -636,7 +689,8 @@ export function stepPhysics() {
   const b = bike;
   const SUS = P.susp;
   const mu = P.mu;
-  // 倒立摔车容差（车架等级越高越耐摔）——与第 1 期一致
+  // 倒立摔车阈值：车架等级只决定"提前量"（等级越高阈值越小、摔得越晚）；
+  // 头真的贴地则任何等级必摔，见本函数末尾的判定
   const crashTol = Math.max(8, 30 - (P.crashMargin - 4) * 1.4);
   const invMargin = -8 - (P.crashMargin - 4) * 0.3;
   const drvK = key.right && !run.crashed ? 1 : 0;
@@ -684,6 +738,9 @@ export function stepPhysics() {
   b.frontGr = b.fn.front > 0;
   for (const wk of WHEELS) b.wheelAcc[wk] = (b.wheelRot[wk] - prevSpin[wk]) / DT;
 
+  // —— 贴地模式（越野车终极模式）：整车钉在地表，永不翻车 ——
+  if (isUltraStable() && !run.crashed) pinToGround();
+
   // ---------------- 落地结算（悬挂行程与压缩速度派生） ----------------
   if (prevGrounded === 0 && b.grounded > 0 && !run.crashed) {
     const vimp = b._impactV;
@@ -709,12 +766,14 @@ export function stepPhysics() {
   b.angRate = wrapAngle(ang1 - ang0) / DT;
 
   // ---------------- 摔车判定：倒立且头触地 ----------------
+  //  · 头真的贴到地面（间距 < 头半径 + 接触带）→ 任何车架等级都必摔。
+  //    否则满级车架会落进"物理上把头顶在地面、逻辑上却不判摔"的死区。
+  //  · 未贴地但已很接近 → 车架等级只决定提前量：等级越高 crashTol 越小，摔得越晚。
   const hgi = groundInfo(b.head.x);
-  if (!run.crashed && isFinite(hgi.y) && b.head.y > hgi.y - crashTol) {
+  if (!run.crashed && isFinite(hgi.y)) {
+    const gap = hgi.y - b.head.y;
     const inverted = b.axleR.y < b.head.y + invMargin && b.axleF.y < b.head.y + invMargin;
-    if (inverted) crash();
+    if (gap < HEAD_R + CONTACT_BAND && bodyLow(b)) crash();
+    else if (gap < crashTol && inverted) crash();
   }
-
-  // ---------------- 障碍物碰撞（须减速碾过或腾空飞越） ----------------
-  if (!run.crashed) hitObstacle();
 }

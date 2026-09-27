@@ -22,6 +22,7 @@ import { hideOverlay, showMenu, togglePause, showResultCard } from "./ui/menu.js
 import { initPanels } from "./ui/panels.js";
 import { initShop, toggleShop } from "./ui/shop.js";
 import { initDonate } from "./ui/donate.js";
+import { initSettings } from "./ui/settings.js";
 
 installRoundRect();
 resize();
@@ -43,6 +44,7 @@ initGame({ hideOverlay, toMenu: showMenu, presentResult: showResultCard });
 initPanels({ startGame, applyVehicle: applyUpgrades });
 initShop();
 initDonate();
+initSettings();
 initInput({ restart, togglePause, toggleShop });
 
 // 首屏：构建第 1 关地形作为菜单背景

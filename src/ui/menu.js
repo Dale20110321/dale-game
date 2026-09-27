@@ -17,19 +17,41 @@ const menuGroups = document.getElementById("menuGroups");
 const heroSummary = document.getElementById("heroSummary");
 const modePanel = document.getElementById("modePanel");
 
-// "继续"按钮（暂停时显示），由 setMenuChrome / togglePause 切换显隐
+// 暂停操作条（overlay 顶层容器）：包含「继续」与「返回主页」。
+// 放在 menuGroups 之外 —— 否则暂停时 menuGroups 被 display:none 会把按钮一起藏掉（旧的"进游戏退不出"）。
+const pauseBar = document.createElement("div");
+pauseBar.className = "pauseBar";
+pauseBar.id = "pauseBar";
+pauseBar.style.display = "none";
+
 const resumeBtn = document.createElement("button");
 resumeBtn.className = "btn lg";
 resumeBtn.id = "btnResume";
 resumeBtn.dataset.entry = "resume";
 resumeBtn.textContent = "▶ 继续";
-resumeBtn.style.display = "none";
 resumeBtn.addEventListener("click", () => {
   if (store.state === "pause") togglePause();
 });
-{
-  const mainGrp = document.querySelector('.menuGroup[data-group="main"] .grpBtns');
-  if (mainGrp) mainGrp.insertBefore(resumeBtn, mainGrp.firstChild);
+
+const homeBtn = document.createElement("button");
+homeBtn.className = "btn ghost lg";
+homeBtn.id = "btnHome";
+homeBtn.dataset.entry = "home";
+homeBtn.textContent = "🏠 返回主页";
+homeBtn.addEventListener("click", () => {
+  // 暂停/结束都回主页：状态交给 showMenu 统一处理
+  if (store.state === "pause" || store.state === "ended") showMenu();
+});
+pauseBar.appendChild(resumeBtn);
+pauseBar.appendChild(homeBtn);
+if (overlay && overlay.appendChild) overlay.appendChild(pauseBar);
+
+// 游戏画面内常驻的「返回主页」悬浮按钮（右上角，进游戏显示 / 回菜单隐藏）
+const homeFloat = document.getElementById("btnHomeFloat");
+if (homeFloat) {
+  homeFloat.addEventListener("click", () => {
+    if (store.state === "play" || store.state === "pause" || store.state === "ended") showMenu();
+  });
 }
 
 /** 已通关关卡数（星级 ≥ 1）——阶梯入口的显示依据 */
@@ -133,6 +155,12 @@ export function refreshMenuButtons() {
 function visibleEntries() {
   if (!menuGroups) return [];
   const btns = [];
+  // 暂停态：pauseBar 内的「继续 / 返回主页」可见
+  if (store.state === "pause" && pauseBar) {
+    if (resumeBtn) btns.push(resumeBtn);
+    if (homeBtn) btns.push(homeBtn);
+    return btns;
+  }
   if (resumeBtn.style.display !== "none") btns.push(resumeBtn);
   // 分组被隐藏（暂停态）时不要在里面游走焦点
   if (menuGroups.style.display === "none") return btns;
@@ -172,7 +200,7 @@ if (typeof window !== "undefined" && window.addEventListener) {
 
 /** 默认焦点：暂停时落在"继续"，否则落在"闯关" */
 function focusDefault() {
-  const target = resumeBtn.style.display !== "none"
+  const target = store.state === "pause"
     ? resumeBtn
     : document.getElementById("btnLevels");
   if (target && typeof target.focus === "function") {
@@ -187,12 +215,15 @@ export function setMenuChrome() {
     "→/D 加速(空中顺时针转)  ←/A 刹车(空中逆时针转)  P/Esc 暂停  R 重开  M 静音  ↑↓←→ 选择";
   if (menuGroups) menuGroups.style.display = "";
   resumeBtn.style.display = "none";
+  if (pauseBar) pauseBar.style.display = "none";
   refreshMenuButtons();
   focusDefault();
 }
 
 export function hideOverlay() {
   overlay.classList.add("hidden");
+  // 悬浮返回按钮用内联 flex 覆盖 CSS 的 display:none（设 "" 会被 CSS 默认值盖住而不显示）
+  if (homeFloat) homeFloat.style.display = "flex";
 }
 
 export function showPanel(html) {
@@ -223,6 +254,8 @@ export function showMenu() {
   store.raceAI = null;
   hidePanel();
   setMenuGroupsVisible(true);
+  if (pauseBar) pauseBar.style.display = "none";
+  if (homeFloat) homeFloat.style.display = "none";
   setMenuChrome();
   overlay.classList.remove("hidden");
 }
@@ -235,6 +268,7 @@ export function showMenu() {
  */
 export function showResultCard(res = {}) {
   store.state = "ended";
+  if (pauseBar) pauseBar.style.display = "none";
   overlay.classList.remove("hidden");
   setMenuGroupsVisible(false);
   renderHeroSummary();
@@ -317,10 +351,12 @@ export function togglePause() {
   if (store.state === "play") {
     store.state = "pause";
     ovTitle.textContent = "⏸ 已暂停";
-    ovSub.textContent = "休息一下，随时继续（R 重开 / P 继续）";
+    ovSub.textContent = "休息一下，随时继续，或返回主页";
     ovKeys.textContent = "";
     if (menuGroups) menuGroups.style.display = "none";
+    if (pauseBar) pauseBar.style.display = "";
     resumeBtn.style.display = "";
+    homeBtn.style.display = "";
     overlay.classList.remove("hidden");
     focusDefault();
   } else if (store.state === "pause") {

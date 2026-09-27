@@ -224,8 +224,8 @@ if (ONLY_MODULES) {
   const { updateStats } = await import(new URL("../src/game/stats.js", import.meta.url).href);
   const { startGame, update, runGuard, restart, initGame } = await import(new URL("../src/game/game.js", import.meta.url).href);
   const {
-    SUBV, SUB_DT, DT, toM, REF_SPEED, OBST_HIT_V, CRASH_FUEL_LOSS, CRASH_TIME_PENALTY,
-    OBST_R, gateSpeed, hazardSpeed,
+    SUBV, SUB_DT, DT, toM, REF_SPEED, CRASH_FUEL_LOSS, CRASH_TIME_PENALTY,
+    gateSpeed, hazardSpeed,
   } = await import(new URL("../src/config/constants.js", import.meta.url).href);
   const { hasAch } = await import(new URL("../src/game/progress.js", import.meta.url).href);
   const { save, loadSave, loadAchList, getUp } = await import(new URL("../src/core/storage.js", import.meta.url).href);
@@ -545,8 +545,8 @@ if (ONLY_MODULES) {
     const stateBak = store.state;
     const qBak = fx.getQuality();
 
-    check("画质档位为 高 / 中 / 低 / 关",
-      fx.QUALITY.join("/") === "high/medium/low/off",
+    check("画质档位为 低 / 中 / 高",
+      fx.QUALITY.join("/") === "low/medium/high",
       fx.QUALITY.map((q) => fx.QUALITY_LABEL[q]).join(" / "));
 
     const bad = [];
@@ -559,9 +559,9 @@ if (ONLY_MODULES) {
         bad.push(q + ":" + e.message);
       }
     }
-    check("四档画质各渲染一帧无异常", bad.length === 0, bad.join(" ; ") || "4 档 × 1 帧全部通过");
+    check("三档画质各渲染一帧无异常", bad.length === 0, bad.join(" ; ") || "3 档 × 1 帧全部通过");
 
-    // 后处理为纯视觉层：同输入下"高"与"关"两档轨迹与用时完全一致
+    // 后处理为纯视觉层：同输入下"高"与"低"（低 = 零后效）两档轨迹与用时完全一致
     const runTrace = () => {
       startGame("level", 3);
       const xs = [];
@@ -576,11 +576,11 @@ if (ONLY_MODULES) {
     };
     fx.setQuality("high");
     const A = runTrace();
-    fx.setQuality("off");
+    fx.setQuality("low");
     const B = runTrace();
     let maxd = 0;
     for (let i = 0; i < Math.min(A.xs.length, B.xs.length); i++) maxd = Math.max(maxd, Math.abs(A.xs[i] - B.xs[i]));
-    check("后处理不改变物理（高 vs 关 轨迹与用时一致）",
+    check("后处理不改变物理（高 vs 低 轨迹与用时一致）",
       maxd === 0 && Math.abs(A.t - B.t) < 1e-9,
       `最大位移差 ${maxd.toFixed(6)}px · 用时差 ${(A.t - B.t).toFixed(6)}s · ${A.xs.length} 帧`);
 
@@ -1195,13 +1195,16 @@ if (ONLY_MODULES) {
       `陡上坡滑移 均值=${steepSeg.slip.toFixed(3)}/最负=${steepSeg.minSlip.toFixed(3)}，段内车速 ${steepSeg.v0.toFixed(0)}→${steepSeg.v1.toFixed(0)}px/s`);
 
     // 刹车锁死：刹后轮速归零、转滑动摩擦（slip > 0 = 拖滞）
+    // 受控实验：清空机制（危险段 / 门 / 跳台 / 加速带）避免中途摔车干扰；
+    // 刹车力矩峰值有限（12000）→ 锁死需要时间，观测窗口取 2s（120 帧）足够 ω 归零。
     zeroUp3(); startGame("level", 0);
+    world.hazards = []; world.gates = []; world.jumps = []; world.boosts = [];
     key.right = true; key.left = false;
     for (let i = 0; i < 240; i++) update(DT);
     const wBefore = Math.abs(bike.wheelRot.rear), vBefore = Math.abs(bike.speed);
     key.right = false; key.left = true;
     let minW = Infinity, maxSlipB = 0;
-    for (let i = 0; i < 40; i++) { update(DT); minW = Math.min(minW, Math.abs(bike.wheelRot.rear)); maxSlipB = Math.max(maxSlipB, bike.slip.rear); }
+    for (let i = 0; i < 120; i++) { update(DT); minW = Math.min(minW, Math.abs(bike.wheelRot.rear)); maxSlipB = Math.max(maxSlipB, bike.slip.rear); }
     check("刹车扭矩过大时轮子锁死（角速度归零、转滑动摩擦）",
       minW < 0.5 && maxSlipB > 0.3 && vBefore > 100,
       `刹前 ω=${wBefore.toFixed(1)}rad/s v=${vBefore.toFixed(0)}px/s → 刹后 min|ω|=${minW.toFixed(2)} 最大拖滞滑移=${maxSlipB.toFixed(3)}`);
@@ -1244,7 +1247,7 @@ if (ONLY_MODULES) {
   section("阻力与极速自平衡（Task 6.1 / 6.4）");
   {
     zeroUp3(); startGame("level", 0);
-    world.hazards = []; world.obstacles = []; world.gates = []; world.jumps = []; world.boosts = [];
+    world.hazards = []; world.gates = []; world.jumps = []; world.boosts = [];
     store.finishX = 1e9; store.run.lastSafeX = 300;
     key.right = true; key.left = false;
     let maxV = 0, winA = 0, winB = 0, t = 0;
@@ -1383,7 +1386,7 @@ if (ONLY_MODULES) {
 
     // 9.5 无动力自由滑行：机械能不增长
     zeroUp3(); startGame("level", 0);
-    world.hazards = []; world.obstacles = []; world.gates = []; world.jumps = []; world.boosts = [];
+    world.hazards = []; world.gates = []; world.jumps = []; world.boosts = [];
     store.finishX = 1e9; store.run.lastSafeX = 300;
     key.right = true; key.left = false;
     for (let i = 0; i < 180; i++) update(DT);
@@ -1459,7 +1462,6 @@ if (ONLY_MODULES) {
    * 参考骑手（"刹车策略"）：不是无脑全油门，而是"会玩的人"的下限。
    * 用途是证明关卡在合理操作下可通关，而不是考验 AI 会不会玩。
    *  · 危险段：进入前 / 段内把速度压到限速以下
-   *  · 障碍物：前方有障碍且速度过高 → 提前点刹（低速可碾过，高速必摔）
    *  · 腾空：用左右键把车身姿态往水平修（避免空中乱转导致摔车）
    *  · 其余时间全油门
    */
@@ -1485,15 +1487,6 @@ if (ONLY_MODULES) {
         if (mx > h.x1) continue;
         if (h.x0 - mx > 620) continue;
         if (spd > h.vmax * 0.9) { brake = true; break; }
-      }
-      if (!brake) {
-        for (const o of world.obstacles) {
-          const d = o.x - mx;
-          if (d < -30) continue;
-          // 制动距离判据（而不是固定 260px 视距）：高速时提前很多刹车，
-          // 低速时几乎不刹——既避免"起飞后撞上落点的障碍"，又不牺牲整体节奏。
-          if (spd > OBST_HIT_V * 0.8 && d < 200 + spd * 0.75) { brake = true; break; }
-        }
       }
     }
     const ang = Math.atan2(bike.front.y - bike.rear.y, bike.front.x - bike.rear.x);
@@ -1634,16 +1627,6 @@ if (ONLY_MODULES) {
 
     // 机制常量不得为了"更好过"而被放宽（安全带：数值一旦漂移立刻失败）
     check(
-      "障碍物判定半径未放宽（OBST_R=17）",
-      OBST_R === 17,
-      `OBST_R=${OBST_R}`
-    );
-    check(
-      "撞障碍速度阈值未放宽（OBST_HIT_V=330）",
-      OBST_HIT_V === 330,
-      `OBST_HIT_V=${OBST_HIT_V}`
-    );
-    check(
       "摔车代价未放宽（燃料 -8% / 计时 +2s）",
       CRASH_FUEL_LOSS === 0.08 && CRASH_TIME_PENALTY === 2,
       `CRASH_FUEL_LOSS=${CRASH_FUEL_LOSS} CRASH_TIME_PENALTY=${CRASH_TIME_PENALTY}`
@@ -1666,7 +1649,7 @@ if (ONLY_MODULES) {
     const L = LEVELS[DIAG];
     results.push(
       `
-──── 诊断：第${DIAG + 1}关 ${L.name} · 场景${(THEMES[L.theme] || THEMES[0]).name}(${L.theme}) · 重力${store.phys.GRAV} · MAXV=${store.phys.MAXV.toFixed(0)} · DRIVE=${store.phys.DRIVE.toFixed(0)} ────`
+──── 诊断：第${DIAG + 1}关 ${L.name} · 场景${(THEMES[L.theme] || THEMES[0]).name}(${L.theme}) · 重力${store.phys.GRAV} · MAXV=${store.phys.MAXV.toFixed(0)} · 扭矩=${store.phys.torquePeak.toFixed(0)} ────`
     );
     let line = "    坡度剖面(°): ";
     for (let x = 0; x <= L.len; x += Math.max(400, Math.round(L.len / 24))) {
@@ -1674,7 +1657,7 @@ if (ONLY_MODULES) {
     }
     results.push(line);
     results.push(
-      `    变体=${L.variant} 跳台=${world.jumps.length} 障碍=${world.obstacles.length} 危险段=${world.hazards.length} 门=${world.gates.length} 滞空目标=${atOfDiag(L).toFixed(2)}s`
+      `    变体=${L.variant} 跳台=${world.jumps.length} 危险段=${world.hazards.length} 门=${world.gates.length} 滞空目标=${atOfDiag(L).toFixed(2)}s`
     );
 
     let t = 0;
@@ -1923,7 +1906,6 @@ if (ONLY_MODULES) {
     startGame("level", LEVELS.length - 1);
     // 隔离机制：只测"下坡能否超过平路极速"这一物理属性
     world.hazards = [];
-    world.obstacles = [];
     world.gates = [];
     let maxSpd = 0;
     let t = 0;
@@ -2177,7 +2159,7 @@ if (ONLY_MODULES) {
     const leak = [];
     for (const L of LEVELS) {
       const r = variantRule(L.variant);
-      if (r.gateK === undefined || r.obstK === undefined) leak.push(`${L.name} 规则字段缺失`);
+      if (r.gateK === undefined || r.hazardK === undefined || r.canN === undefined) leak.push(`${L.name} 规则字段缺失`);
     }
     check("变体规则字段完整", leak.length === 0, leak.slice(0, 4).join(",") || "全部完整");
 
@@ -2195,7 +2177,8 @@ if (ONLY_MODULES) {
       world.jumps.length > 0 && atOfDiag(LEVELS[airIdx]) > 0,
       `${world.jumps.length} 个跳台 · 目标 ${atOfDiag(LEVELS[airIdx]).toFixed(2)}s`);
 
-    // airtime 未达标不判通过：清掉跳台（无法腾空）后跑完，必须判负
+    // airtime 不再要求滞空达标（机制已移除）：清掉跳台（无腾空源）后跑完，
+    // 应正常到达终点通过，而不是判负 —— 跳台只是趣味/特效，不再是通关门槛
     startGame("level", airIdx);
     world.jumps = [];
     key.right = true;
@@ -2207,13 +2190,15 @@ if (ONLY_MODULES) {
       update(DT);
       t2 += DT;
     }
-    check("airtime 未达标不判通过", store.run.clearing === true && store.run.failed === true,
+    check("airtime 不腾空也能正常通过（不再要求滞空达标）",
+      store.run.clearing === true && store.run.failed !== true,
       `clearing=${store.run.clearing} failed=${store.run.failed} 滞空=${world.airScore.toFixed(2)}s`);
 
-    // 跳台滞空可靠性：逐个 airtime 关验证"存在足够大的单次滞空"。
-    // 跳台是 airtime 变体的唯一确定性滞空源，若冲量被贴地钳制吞掉（历史缺陷），
+    // 跳台滞空可靠性：逐个跳台关（airtime / gauntlet）验证"存在足够大的单次滞空"。
+    // 跳台是这两个变体唯一的确定性滞空源，若冲量被贴地钳制吞掉（历史缺陷），
     // 单次滞空会退化到 0.1s 量级而目标不可达——本断言锁死该退化。
-    const airLevels = LEVELS.map((L, i) => [L, i]).filter(([L]) => L.variant === "airtime");
+    const airLevels = LEVELS.map((L, i) => [L, i])
+      .filter(([L]) => L.variant === "airtime" || L.variant === "gauntlet");
     let worstHop = Infinity;
     const hopDetail = [];
     for (const [L, i] of airLevels) {
@@ -2240,13 +2225,16 @@ if (ONLY_MODULES) {
     check("跳台单次滞空可靠（每关最大单跳 ≥0.6s）", worstHop >= 0.6,
       `最小单跳 ${worstHop.toFixed(2)}s ｜ ${hopDetail.join(" / ")}`);
 
-    // gauntlet：障碍密度显著高于同进度的 normal 关
+    // gauntlet：跳台密度显著高于 airtime 关（"密集跳台"形态）
     const gauntIdx = LEVELS.findIndex((L) => L.variant === "gauntlet");
+    const airIdx2 = LEVELS.findIndex((L) => L.variant === "airtime");
+    startGame("level", airIdx2);
+    const airJumps = world.jumps.length;
     startGame("level", gauntIdx);
-    const gauntN = world.obstacles.length;
-    check("gauntlet 关障碍密集（≥1.8× 常规预算）",
-      gauntN >= LEVELS[gauntIdx].obstacleN * 1.8,
-      `${gauntN} 个（预算 ${LEVELS[gauntIdx].obstacleN}）`);
+    const gauntJumps = world.jumps.length;
+    check("gauntlet 关跳台密集（≥2× airtime 关）",
+      gauntJumps >= airJumps * 2,
+      `gauntlet ${gauntJumps} 个 vs airtime ${airJumps} 个 · 滞空目标 ${atOfDiag(LEVELS[gauntIdx]).toFixed(2)}s`);
 
     // downhill：危险段密度显著提高
     const dhIdx = LEVELS.findIndex((L) => L.variant === "downhill");
@@ -2255,76 +2243,10 @@ if (ONLY_MODULES) {
       world.hazards.length >= LEVELS[dhIdx].hazardN * 2,
       `${world.hazards.length} 段（基础 ${LEVELS[dhIdx].hazardN}）`);
 
-    // HUD 变体标识与变体名称可达（静态：HUD 引用 VARIANT_INFO）
+    // HUD 变体标识与变体名称可达（静态：HUD 引用 VARIANT_INFO；滞空目标显示已随机制移除）
     const srcHud = readFileSync(join(ROOT, "src", "render", "hud.js"), "utf8");
-    check("HUD 显示变体名称与 airtime 目标进度",
-      srcHud.includes("VARIANT_INFO") && srcHud.includes("airTargetOf"),
-      "hud.js 引用 VARIANT_INFO / airTargetOf");
-  }
-
-  // ---------------- 机制：障碍物 ----------------
-  section("障碍物机制");
-  {
-    let minO = Infinity;
-    let badBuffer = 0;
-    let inHazard = 0;
-    let lastO = 0;
-    const noObstLevels = [];
-    for (let i = 0; i < LEVELS.length; i++) {
-      startGame("level", i);
-      const n = world.obstacles.length;
-      minO = Math.min(minO, n);
-      // airtime 变体按设计不放障碍物（专注射滞空），其余关卡必须有障碍物
-      if (n < 1 && variantRule(LEVELS[i].variant).obstK > 0) noObstLevels.push(i + 1);
-      for (const o of world.obstacles) {
-        if (o.x < 300 || o.x > store.finishX - 300) badBuffer++;
-        for (const h of world.hazards) if (o.x > h.x0 - 220 && o.x < h.x1 + 220) inHazard++;
-      }
-      if (i === LEVELS.length - 1) lastO = world.obstacles.length;
-    }
-    check("非 airtime 关卡每关都有障碍物生成", noObstLevels.length === 0,
-      noObstLevels.length ? `第 ${noObstLevels.join(",")} 关为 0 个` : `最少 ${minO} 个（airtime 关按设计为 0）`);
-    check("障碍物不生成在出生点/终点缓冲区", badBuffer === 0, `越界 ${badBuffer} 个`);
-    check("障碍物不与危险段重叠", inHazard === 0, `重叠 ${inHazard} 个`);
-    check(
-      "障碍物预算随进度递增",
-      LEVELS[LEVELS.length - 1].obstacleN > LEVELS[0].obstacleN,
-      `${LEVELS[0].obstacleN} → ${LEVELS[LEVELS.length - 1].obstacleN}（末关实际生成 ${lastO} 个）`
-    );
-
-    const MECH_IDX = 40;
-    /** 取本关"最平坦处"的障碍物做碰撞实验，隔离地形起伏的干扰 */
-    function flattestObstacle() {
-      startGame("level", MECH_IDX);
-      return world.obstacles.reduce((a, b) =>
-        Math.abs(groundInfo(b.x).m) < Math.abs(groundInfo(a.x).m) ? b : a
-      );
-    }
-    /** 把车放到障碍物左侧、贴地、给定速度，跑若干步看是否摔车 */
-    function runIntoObstacle(vx, lift) {
-      const o = flattestObstacle();
-      key.right = false;
-      key.left = false;
-      resetBike(o.x - 110);
-      bike.locked = false;
-      for (const p of bike.pts) {
-        p.y = groundY(p.x) - 12 - lift;
-        p.py = p.y;
-      }
-      setVelocity(vx, 0);
-      for (let i = 0; i < 90; i++) {
-        setVelocity(vx, 0);
-        stepPhysics();
-        if (store.run.crashed) return true;
-      }
-      return false;
-    }
-    const fastHit = runIntoObstacle(OBST_HIT_V + 200, 0);
-    const slowPass = runIntoObstacle(OBST_HIT_V - 150, 0);
-    const airPass = runIntoObstacle(OBST_HIT_V + 240, 300);
-    check("高速撞上障碍物会摔车", fastHit, fastHit ? "已摔车" : "未摔车（碰撞判定失效）");
-    check("低速碾过障碍物不摔车", !slowPass, slowPass ? "误判摔车" : "安全碾过");
-    check("腾空越过障碍物不摔车", !airPass, airPass ? "空中仍被判碰撞" : "安全飞越");
+    check("HUD 显示变体名称", srcHud.includes("VARIANT_INFO"),
+      "hud.js 引用 VARIANT_INFO");
   }
 
   // ---------------- 机制：危险段（超速必摔） ----------------
@@ -2357,6 +2279,39 @@ if (ONLY_MODULES) {
     const under = runThroughHazard(0.6);
     check("危险段超速进入必摔车", over, over ? "已摔车" : "未摔车（阈值失效）");
     check("危险段低于限速通过不摔车", !under, under ? "误判摔车" : "安全通过");
+
+    // 加速带不得落在限速区（危险段）± BOOST_HAZARD_GAP 内：
+    // 加速带 +230px/s 与限速区是自相矛盾的组合（刚被推上去就超速必摔），必须留出刹车距离
+    const { BOOST_HAZARD_GAP } = await import(new URL("../src/game/world.js", import.meta.url).href);
+    let badBoost = null;
+    let boostTotal = 0;
+    let minBoost = Infinity;
+    let minBoostLv = 0;
+    for (let i = 0; i < LEVELS.length; i++) {
+      startGame("level", i);
+      boostTotal += world.boosts.length;
+      if (world.boosts.length < minBoost) { minBoost = world.boosts.length; minBoostLv = i + 1; }
+      for (const bo of world.boosts) {
+        for (const h of world.hazards) {
+          if (bo.x > h.x0 - BOOST_HAZARD_GAP && bo.x < h.x1 + BOOST_HAZARD_GAP) {
+            badBoost = { lv: i + 1, x: Math.round(bo.x), x0: h.x0, x1: h.x1 };
+          }
+        }
+      }
+    }
+    check(
+      "加速带避开限速区（含一次刹车距离）",
+      badBoost === null,
+      badBoost
+        ? `第${badBoost.lv}关 加速带 x=${badBoost.x} 落在危险段 [${badBoost.x0},${badBoost.x1}] ±${BOOST_HAZARD_GAP}px 内`
+        : `全 ${LEVELS.length} 关共 ${boostTotal} 条加速带，全部避开危险段 ±${BOOST_HAZARD_GAP}px`
+    );
+    // 反向守护：避开限速区不能变成"整关没有加速带"（跳过安置时每关至少仍保 1 条）
+    check(
+      "每关仍保有 ≥1 条加速带",
+      minBoost >= 1,
+      `最少 ${minBoost} 条（第${minBoostLv}关）`
+    );
   }
 
   // ---------------- 机制：限时门 ----------------
@@ -2881,10 +2836,11 @@ if (ONLY_MODULES) {
     check("同一局内延迟结算回调正常执行", called === 1, `called=${called}`);
 
     // 静态：延迟结算都经过单局世代守卫
-    // （通关下一关 / 限时门判负 / 滞空不达标判负 / 燃料耗尽 / 对手先到终点）
+    // （快速通关回退 / 限时门判负 / 燃料耗尽 / 对手先到终点）
+    // （空中滞空达标判负已随"不再要求滞空时间"移除）
     const srcGame = readFileSync(join(ROOT, "src", "game", "game.js"), "utf8");
     const guards = (srcGame.match(/setTimeout\(\s*runGuard\(/g) || []).length;
-    check("延迟结算都经过单局世代守卫", guards === 5, `匹配 ${guards} 处`);
+    check("延迟结算都经过单局世代守卫", guards === 4, `匹配 ${guards} 处`);
 
     // 集成级：通关后立即重开不会被推到下一关
     startGame("level", 0);
@@ -2902,7 +2858,7 @@ if (ONLY_MODULES) {
     );
   }
 
-  // ---------------- 车架升级：更抗倒立摔车 + 清除死状态 ----------------
+  // ---------------- 车架升级：倒立摔车只是"提前量"（头贴地照摔） + 清除死状态 ----------------
   section("车架升级效果");
   {
     /** 参数化倒立落地：抬高后自由落体，返回是否摔车（工况：抬高 220px、旋转 160°、零初速） */
@@ -2929,10 +2885,17 @@ if (ONLY_MODULES) {
     }
     const lo = invertedDrop(4);  // 0 级车架
     const hi = invertedDrop(14); // 满级车架
+    // 头真的贴地 → 任何车架等级都必须摔（满级也不例外，否则会落进"头物理贴地却不判摔"的死区）
     check(
-      "车架等级高时更抗倒立摔车",
-      lo.crashed === true && hi.crashed === false,
+      "头贴地的倒立落地：任何车架等级都必摔",
+      lo.crashed === true && hi.crashed === true,
       `Lv0(crashMargin=4) 摔车=${lo.crashed}(${lo.steps}步) / 满级(crashMargin=14) 摔车=${hi.crashed}(${hi.steps}步)`
+    );
+    // 车架等级只决定"提前量"：满级车架的阈值更靠后 → 同一下落里摔得更晚（步数更多）
+    check(
+      "车架等级高时摔车判定更晚（提前量更大）",
+      lo.crashed === true && hi.crashed === true && lo.steps < hi.steps,
+      `Lv0 ${lo.steps} 步 < 满级 ${hi.steps} 步`
     );
 
     // 静态：死状态 stunned 已彻底清除

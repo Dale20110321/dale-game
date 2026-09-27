@@ -27,6 +27,8 @@ export const store = {
   ownedVehicles: [0],
   currentVehicle: 0,
   upgrades: {},
+  /** 特殊终极模式解锁状态：{ vehicleId: true }（由车库购买） */
+  ultra: {},
 
   // 进度阶梯（Task 9）：支线通关 / 最终任务 / 比赛邀请 / 段位 / 登顶 / 无限模式可选场景
   progress: {
@@ -73,12 +75,7 @@ export const store = {
     minY: 0, // 当前关卡地形最低点（世界 y 最大），用于"掉出地图"判定
     GRAV: 750,
     TRACTION: 1,
-    DRIVE: 200,
-    BRAKE: 600,
     MAXV: 520,
-    susAbsorb: 0.25,
-    susClimb: 6,
-    susRot: 0.7,
     crashMargin: 4,
     fuel: 1,
     fuelMax: 1,
@@ -138,6 +135,8 @@ export const bike = {
   axleF: { x: 0, y: 0, px: 0, py: 0 },
   grounded: 0,
   speed: 0,
+  /** 加速带助推剩余时长（秒）：触发后平滑缓进缓出的加速，避免一次性脉冲造成顿挫 */
+  boostT: 0,
   wheelRear: 0,
   wheelFront: 0,
   locked: true,
@@ -186,10 +185,7 @@ export const world = {
   prepFuel: 0,
   /** 本局 airtime 变体的累计得分（滞空秒数 + 连招加权） */
   airScore: 0,
-  /** 本局 airtime 变体的达标线（秒）：按跳台数量派生 */
-  airTarget: 0,
-  /** 机制实体：障碍物 / 危险段 / 限时门 / 跳台（buildLevel 构建，无限模式为空） */
-  obstacles: [],
+  /** 机制实体：危险段 / 限时门 / 跳台（buildLevel 构建，无限模式为空） */
   hazards: [],
   gates: [],
   jumps: [],

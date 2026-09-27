@@ -3,33 +3,29 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>自行车越野 · 真实物理版</title>
-<meta name="description" content="原生 JavaScript + Canvas 的物理越野自行车游戏：闯关 / 比赛 / 无限模式，三质点刚体物理、燃料、特技与成就。">
+<title>自动进入游戏（调试用）</title>
 <link rel="stylesheet" href="styles/tokens.css">
 <link rel="stylesheet" href="styles/main.css">
+<style>body { background: #2a1f3d; } #diag { position: fixed; top: 0; left: 0; right: 0; z-index: 99; background: #000e; color: #0f0; font: 16px monospace; padding: 8px 12px; white-space: pre-wrap; }</style>
 </head>
 <body>
 <div id="wrap">
   <canvas id="cv"></canvas>
-
   <div id="touch" class="hidden">
     <button class="tbtn tleft" data-k="left" aria-label="刹车 / 空中逆时针转体">◀</button>
     <button class="tbtn tright" data-k="right" aria-label="加速 / 空中顺时针转体">▶</button>
   </div>
   <button id="fullBtn" class="tbtn tfull" aria-label="全屏">⛶</button>
   <button id="touchBtn" class="tbtn ttoggle" aria-label="方向键开关">🎮</button>
-  <button id="btnHomeFloat" class="tbtn thome" aria-label="返回主页">🏠</button>
-
   <div id="comboTag"></div>
   <div id="toast"></div>
-
-  <div id="overlay">
+  <div id="overlay" class="hidden">
     <div id="menuBg" aria-hidden="true"><i class="glow"></i><i class="glow g2"></i></div>
     <div class="hero">
       <h1 id="ovTitle">🚲 越野自行车</h1>
-      <div class="sub" id="ovSub">物理引擎越野：支线任务 · 最终任务 · 排位赛 · 无限模式</div>
+      <div class="sub" id="ovSub"></div>
       <div class="heroSummary" id="heroSummary" aria-label="当前状态摘要"></div>
-      <div class="keys" id="ovKeys">→/D 加速（空中顺时针转体） &nbsp;←/A 刹车（空中逆时针转体） &nbsp;P/Esc 暂停 &nbsp;R 重开 &nbsp;M 静音</div>
+      <div class="keys" id="ovKeys"></div>
     </div>
     <div class="menuGroups" id="menuGroups">
       <div class="menuGroup" data-group="main" aria-label="主玩法">
@@ -54,14 +50,12 @@
       <div class="menuGroup" data-group="support" aria-label="支持">
         <div class="grpHead">支持</div>
         <div class="grpBtns">
-          <button class="btn ghost" id="btnSettings" data-entry="settings">⚙️ 设置</button>
-          <button class="btn" id="btnDonate" data-entry="donate">☕ 请我喝咖啡</button>
+          <button class="btn" id="btnDonate" data-entry="donate">☕ 你喜欢这个游戏吗</button>
         </div>
       </div>
     </div>
     <div id="modePanel" class="hidden"></div>
   </div>
-
   <div id="shop" class="hidden">
     <h2 id="shopTitle">🛠 升级车间</h2>
     <div class="upGold">🪙 金币 <span id="shopGold">0</span></div>
@@ -69,41 +63,87 @@
     <div class="upItm"><div class="upT">🛞 轮胎</div><div class="upD">抓地 / 防滑 / 极速</div><div class="upL" id="lv-tire">Lv0</div><button class="btn sm" data-buy="tire">升级</button></div>
     <div class="upItm"><div class="upT">🛡️ 车架</div><div class="upD">倒立容错 · 贴地即摔</div><div class="upL" id="lv-frame">Lv0</div><button class="btn sm" data-buy="frame">升级</button></div>
     <div class="upItm"><div class="upT">🛠️ 减震</div><div class="upD">落地缓冲 / 更稳</div><div class="upL" id="lv-susp">Lv0</div><button class="btn sm" data-buy="susp">升级</button></div>
-    <div class="upUltra" id="shopUltra"></div>
     <div class="upNote" id="shopNote"></div>
     <button class="btn" id="closeShop">返回</button>
   </div>
-
-  <div id="settings" class="hidden">
-    <h2>⚙️ 设置</h2>
-    <div class="setGrp">🎚 画质</div>
-    <div class="qualityTabs tabs" id="qualityTabs" role="tablist" aria-label="画质档位">
-      <button class="tab" data-q="low" role="tab" aria-selected="true">低</button>
-      <button class="tab" data-q="medium" role="tab" aria-selected="false">中</button>
-      <button class="tab" data-q="high" role="tab" aria-selected="false">高</button>
-    </div>
-    <div class="setNote" id="qDesc"></div>
-    <div class="setGrp">🔊 声音</div>
-    <button class="btn sm" id="btnMute">🔊 声音开启</button>
-    <div class="setFoot"><button class="btn" id="closeSettings">返回</button></div>
-  </div>
-
   <div id="donate" class="hidden">
     <h2>☕ 一杯咖啡</h2>
-    <div class="dntText">
-      这个小游戏完全免费，没有广告，也没有内购。玩得开心就是最好的回馈。<br>
-      如果你愿意，可以留下一杯咖啡 ☕，作为对作者的鼓励。<br>
-      祝你一路顺风不摔车 🙂
-    </div>
-    <div class="qrBox" id="qrBox"><span>把你的收款二维码保存为 <b>assets/qr.png</b>，游戏里就会自动显示</span><img id="qrImg" src="assets/qr.png" alt="收款二维码"></div>
-    <div class="dntTip">（二维码只在本地显示，不会上传到任何地方）</div>
+    <div class="dntText">调试页面</div>
+    <div class="qrBox" id="qrBox"><span>QR</span><img id="qrImg" src="assets/qr.png" alt="收款二维码"></div>
+    <div class="dntTip"></div>
     <button class="btn" id="closeDonate">返回</button>
   </div>
 </div>
-
-<!-- 普通脚本（打包产物）：可直接双击 index.html 在 file:// 下运行，也兼容本地服务器。
-     改源码后需重新打包：bun build src/main.js --outfile dist/game.bundle.js --target browser --format iife
-     调试源码时可用 <script type="module" src="src/main.js"></script> 替换本行。 -->
-<script src="dist/game.bundle.js"></script>
+<div id="diag">loading…</div>
+<script>
+window.addEventListener("error", (e) => {
+  document.body.style.background = "#800";
+  const d = document.getElementById("diag");
+  d.style.background = "#c00";
+  d.style.color = "#ff0";
+  d.textContent = "GLOBAL ERR: " + e.message + " @ " + (e.filename || "") + ":" + (e.lineno || 0);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  document.body.style.background = "#804";
+  const d = document.getElementById("diag");
+  d.style.background = "#c00";
+  d.style.color = "#ff0";
+  d.textContent = "REJECT: " + (e.reason && e.reason.stack || e.reason);
+});
+</script>
+<script type="module" src="src/main.js"></script>
+<script type="module">
+import { startGame, stepper } from "./src/main.js";
+import { drawScene } from "./src/render/scene.js";
+const diag = () => {
+  const cv = document.getElementById("cv");
+  const st = window.__st;
+  document.getElementById("diag").textContent =
+    `cv=${cv.width}x${cv.height} state=${st ? st.state : "?"} t=${st ? st.time.toFixed(1) : "?"} x=${(st && st.bike && st.bike.rear.x.toFixed(0)) || "?"} theme=${(st && st.phys && st.phys.theme) ?? "?"}`;
+};
+try {
+  startGame("level", 0);
+  const src = await import("./src/core/store.js");
+  window.__st = src.store;
+  diag();
+  // 同步驱动 240 帧（4 秒游戏时间），不依赖 RAF
+  for (let i = 0; i < 240; i++) {
+    stepper.advance(1 / 60);
+    drawScene();
+  }
+  diag();
+  // 用 body 背景色编码诊断：蓝=canvas宽0 / 绿=canvas有宽 / 红=抛错
+  const cv = document.getElementById("cv");
+  const cvw = await import("./src/core/canvas.js");
+  if (!cv.width) {
+    document.body.style.background = "#0000cc";
+  } else if (cvw.view.W < 100) {
+    document.body.style.background = "#cc00cc";
+  } else if (window.__st.state === "play") {
+    document.body.style.background = "#006600";
+  } else {
+    document.body.style.background = "#cc8800";
+  }
+  // 把诊断画到 canvas 上，截图可见
+  const tctx = cv.getContext("2d");
+  tctx.fillStyle = "#000";
+  tctx.fillRect(0, 0, 1100, 60);
+  tctx.fillStyle = "#fff";
+  tctx.font = "18px monospace";
+  tctx.fillText(
+    `W=${cvw.view.W} H=${cvw.view.H} cv=${cv.width}x${cv.height} iw=${window.innerWidth} ih=${window.innerHeight} dpr=${window.devicePixelRatio}`,
+    8, 22
+  );
+  tctx.fillText(
+    `state=${window.__st.state} t=${window.__st.time.toFixed(1)} x=${window.__st.bike.rear.x.toFixed(0)} theme=${window.__st.phys.theme}`,
+    8, 44
+  );
+  document.getElementById("diag").textContent += " frames=240";
+} catch (err) {
+  document.body.style.background = "#800";
+  document.getElementById("diag").textContent = "ERR: " + err.stack;
+  console.error(err);
+}
+</script>
 </body>
 </html>

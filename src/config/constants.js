@@ -87,7 +87,7 @@ export const M_W = 0.22;
 
 /** 约束求解：残差收敛阈值（px）与迭代上限（收敛判据驱动，不是写死 6 次） */
 export const SOLVER_TOL = 0.05;
-export const SOLVER_ITERS = 10;
+export const SOLVER_ITERS = 8;
 /** 法向力上限系数：Fn ≤ K × mTot × g（轮胎不可能无上限地推，防止深穿透爆冲） */
 export const FN_MAX_K = 40;
 /** 单侧接触的允许压入深度（px） */
@@ -195,10 +195,10 @@ export function deriveFriction(traction, veh, up) {
  * 轮上扭矩曲线：ω 超过峰值转速后线性衰减（高转没劲），throttle 为 0~1。
  * peak 由 deriveHandling 给出（含车辆扭矩与发动机升级），未给出时回退到车辆基准。
  */
-export function torqueAt(veh, omega, throttle, peak) {
+export function torqueAt(veh, omega, throttle, peak, rpmK) {
   const p = (veh && veh.phys) || {};
   const P = peak || TORQUE_PEAK_BASE * (p.torque || 1);
-  const w0 = TORQUE_RPM_BASE * (p.rpm || 1);
+  const w0 = TORQUE_RPM_BASE * (p.rpm || 1) * (rpmK || 1);
   const w = Math.abs(omega || 0);
   let f = 1;
   if (w > w0 * TORQUE_FADE_LO) {
@@ -222,13 +222,7 @@ export const STUN_TIME = 1.1;
 /** 出生点 x */
 export const START_X = 40;
 
-// ---------------- 机制标度：障碍物 / 危险段 / 限时门 / 摔车惩罚 ----------------
-/** 障碍物碰撞半径（px，世界标度） */
-export const OBST_R = 17;
-/** 障碍物视觉高度（px） */
-export const OBST_VIS_H = 30;
-/** 撞击障碍物的速度阈值（px/s）：低于此速度可安全碾过，高于则摔车（须减速或腾空越过） */
-export const OBST_HIT_V = 330;
+// ---------------- 机制标度：危险段 / 限时门 / 摔车惩罚 ----------------
 /**
  * 危险段允许的最大速度（px/s）：随关卡难度收紧（ramp 0→1 时 0.95→0.75 倍基准极速）。
  * 车身中点进入危险段时超此速度必摔，玩家须提前减速。
@@ -244,7 +238,7 @@ export const CRASH_FUEL_LOSS = 0.08;
 /** 摔车惩罚：本关计时增加（秒） */
 export const CRASH_TIME_PENALTY = 2;
 
-// ---------------- 跳台（airtime 变体专用，确定性滞空源） ----------------
+// ---------------- 跳台（跳台变体专用，确定性滞空源） ----------------
 /**
  * 跳台抬升速度（px/s）：一次性施加给整车的向上速度冲量。
  * 滞空 ≈ 2v/g = 2×250/750 ≈ 0.67s（与 KICK_TARGET 对应）。
@@ -288,6 +282,8 @@ export const SAVE_KEYS = {
   prog: "bike_prog",
   rating: "bike_rating",
   stat: "bike_stat",
+  // 特殊终极模式：各车是否已解锁（{ vehicleId: true }）
+  ultra: "bike_ultra",
 };
 
 // ---------------- 进度阶梯阈值 ----------------

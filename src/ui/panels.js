@@ -3,7 +3,7 @@
 //  · 全部面板交互走 #modePanel 上的事件委托（面板 HTML 重绘不会丢监听）
 //  · 本模块只 import 其它层，绝不反向被 import
 import {
-  ACHS, toM, rankName, RATING_ADVANCED, RATING_PEAK,
+  ACHS, toM, rankName, MAX_LV, RATING_ADVANCED, RATING_PEAK,
   RATING_WIN_GAIN, RATING_LOSS, RATING_WIN_GAIN_ADVANCED, RATING_LOSS_ADVANCED,
 } from "../config/constants.js";
 import { THEMES } from "../config/themes.js";
@@ -100,6 +100,9 @@ function onPanelClick(e) {
       return;
     case "veh":
       buyOrSelectVeh(+el.dataset.veh);
+      return;
+    case "buyUltra":
+      buyUltra(+el.dataset.veh);
       return;
     case "finaleStart":
       api.startGame("level", FINALE_INDEX);
@@ -451,10 +454,54 @@ export function renderGaragePanel() {
       interactive: true,
       selected: sel,
       attrs: `data-act="veh" data-veh="${i}"`,
-    });
+    }) + (v.ultra ? ultraBlock(v, i) : "");
   }).join("")}
   <div class="panelNote" id="pnNote"></div>
   <button class="btn backBtn" data-act="back">返回</button>`);
+}
+
+/** 车辆全部升级（引擎/轮胎/车架/减震）是否已满级 —— 解锁特殊模式的前提 */
+function allMaxed(id) {
+  const u = store.upgrades[id];
+  return !!u && u.engine >= MAX_LV && u.tire >= MAX_LV && u.frame >= MAX_LV && u.susp >= MAX_LV;
+}
+
+/** 车库卡片下的特殊模式区块（已开启 / 未满级提示 / 可购买三态） */
+function ultraBlock(v, i) {
+  if (store.ultra[v.id] === true) {
+    return `<div class="ultraRow got">${v.ultra.icon} 特殊模式「${v.ultra.name}」已开启 · ${v.ultra.desc}</div>`;
+  }
+  if (!allMaxed(v.id)) {
+    return `<div class="ultraRow lock">🔒 ${v.ultra.icon} ${v.ultra.name}：${v.ultra.desc}（全部升级满级 Lv${MAX_LV} 后解锁）</div>`;
+  }
+  return `<div class="ultraRow buy">
+    <button class="btn sm" data-act="buyUltra" data-veh="${i}">${v.ultra.icon} 解锁「${v.ultra.name}」 · ${v.ultra.cost.toLocaleString()} 🪙</button>
+    <div class="ultraDesc">${v.ultra.desc}</div>
+  </div>`;
+}
+
+/** 购买特殊终极模式：满级 + 100 万金币 */
+function buyUltra(i) {
+  const v = VEHICLES[i];
+  if (!allMaxed(v.id)) {
+    showToast("🔒 先把这辆车的全部升级升到满级", 900);
+    return;
+  }
+  if (store.ultra[v.id] === true) {
+    showToast("🏆 已拥有该特殊模式", 700);
+    return;
+  }
+  if (store.gold < v.ultra.cost) {
+    showToast("🪙 金币不足，需要 " + v.ultra.cost.toLocaleString(), 900);
+    return;
+  }
+  store.gold -= v.ultra.cost;
+  store.ultra[v.id] = true;
+  save();
+  // 若买的就是当前使用的车，立即应用效果
+  if (store.currentVehicle === i && api.applyVehicle) api.applyVehicle();
+  renderGaragePanel();
+  showToast("🚀 已解锁「" + v.ultra.name + "」！", 1200);
 }
 
 export function buyOrSelectVeh(i) {

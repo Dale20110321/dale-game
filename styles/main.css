@@ -251,6 +251,14 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 }
 #modePanel.enter { opacity: 0; transform: translateY(8px); }
 
+/* ---- 暂停操作条（overlay 顶层，避开 menuGroups 的隐藏逻辑） ---- */
+#pauseBar {
+  position: relative; z-index: 2; /* 高于 #menuBg 渐晕层 */
+  display: flex; gap: var(--space-2); margin-top: var(--space-3); flex-wrap: wrap;
+  justify-content: center;
+}
+#pauseBar button { min-width: 160px; }
+
 /* ---- 结算结果卡 ---- */
 .resultCard { text-align: center; }
 .resultStars { display: flex; justify-content: center; gap: var(--space-2); margin: var(--space-3) 0; }
@@ -317,6 +325,36 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 .upD { font-size: var(--font-caption-size); color: var(--text-lo); flex: 1; text-align: left; }
 .upL { width: 54px; color: var(--success); font-weight: var(--font-title-weight); }
 #shop .upNote { font-size: var(--font-caption-size); color: var(--gold); min-height: 18px; margin: var(--space-2) 0; }
+/* 特殊模式解锁提醒：随升级进度变化（锁定=info 色，可解锁=金色，已开启=成功色） */
+#shop .upUltra {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--font-caption-size);
+  font-weight: var(--font-caption-weight);
+  line-height: 1.7;
+  color: var(--info);
+}
+#shop .upUltra.canBuy { color: var(--gold); }
+#shop .upUltra.got { color: var(--success); }
+
+/* ============================================================
+   设置面板（画质三档 + 声音）
+   ============================================================ */
+#settings {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: var(--scrim-strong); color: var(--text-hi); text-align: center;
+  z-index: 31; padding: var(--space-4); overflow-y: auto;
+}
+#settings.hidden { display: none; }
+#settings h2 { font-size: 30px; letter-spacing: 1px; margin-bottom: var(--space-3); }
+.setGrp {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: var(--font-micro-size); font-weight: var(--font-micro-weight);
+  letter-spacing: 2px; color: var(--text-lo); text-align: center;
+}
+.setNote { font-size: var(--font-caption-size); color: var(--text-mid); max-width: 420px; line-height: 1.7; margin-bottom: var(--space-2); }
+.setFoot { margin-top: var(--space-4); }
+#btnMute { min-width: 160px; }
 
 /* ============================================================
    通用浮层提示
@@ -362,6 +400,9 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 .tright { right: var(--space-4); }
 .tfull { position: absolute; top: var(--space-2); right: var(--space-2); z-index: 26; bottom: auto; width: 44px; height: 44px; font-size: 15px; opacity: .5; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
 .ttoggle { position: absolute; top: 56px; right: var(--space-2); z-index: 26; bottom: auto; width: 44px; height: 44px; font-size: 14px; background: var(--glass-fill); opacity: .5; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
+/* 游戏画面内的"返回主页"按钮：只在游玩时由 menu.js 显示 */
+.thome { position: absolute; top: 104px; right: var(--space-2); z-index: 26; bottom: auto; width: 44px; height: 44px; font-size: 16px; background: var(--glass-fill); opacity: .5; display: none; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
+.thome:hover, .thome:active { opacity: 1; }
 .tfull:hover, .ttoggle:hover, .tfull:active, .ttoggle:active { opacity: 1; }
 .ttoggle.on { background: var(--toggle-on); border-color: var(--toggle-on-border); }
 .tbtn:active { background: var(--press); }
@@ -443,6 +484,17 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 .rankBox .rankScore { font-size: 34px; font-weight: var(--font-display-weight); color: var(--gold); }
 .rankBox .rankSub { font-size: var(--font-caption-size); color: var(--text-mid); }
 .vehCard.locked { color: var(--text-lo); cursor: not-allowed; }
+
+/* ---- 特殊终极模式（车库内） ---- */
+.ultraRow {
+  display: flex; flex-direction: column; gap: var(--space-1);
+  align-items: center; margin: var(--space-1) 0 var(--space-3);
+  background: var(--glass-fill); border-radius: var(--radius-chip);
+  padding: var(--space-2) var(--space-3); font-size: var(--font-caption-size);
+}
+.ultraRow.got { background: var(--gold-soft); color: var(--gold); }
+.ultraRow.lock { color: var(--text-lo); background: var(--glass-fill); }
+.ultraRow .ultraDesc { font-size: var(--font-micro-size); color: var(--text-mid); }
 
 /* ============================================================
    存档面板

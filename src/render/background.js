@@ -7,6 +7,7 @@ import { ctx, view } from "../core/canvas.js";
 import { THEMES } from "../config/themes.js";
 import { store } from "../core/store.js";
 import { mulberry32 } from "../core/utils.js";
+import { getQuality } from "./postfx.js";
 
 /** 水平循环包裹：把世界 x 映射到 [0,W) 的屏幕 x */
 function wrapX(v, W) {
@@ -258,4 +259,30 @@ export function drawBackground(cx, cy) {
   }
   if (bg.haze) drawHaze(bg.haze, W, H);
   for (const r of bg.ridges || []) fillRidge(r, cx, W, H);
+
+  // —— 大气透视雾带（中档弱、高档强：远山融入天际，制造真实深度感）——
+  const q = getQuality();
+  if (q !== "low") {
+    ctx.save();
+    ctx.globalAlpha = q === "high" ? 1 : 0.5;
+    const fog = ctx.createLinearGradient(0, H * 0.36, 0, H * 0.72);
+    fog.addColorStop(0, token("fx-none-dark"));
+    fog.addColorStop(1, token("fx-fog-mist"));
+    ctx.fillStyle = fog;
+    ctx.fillRect(0, H * 0.36, W, H * 0.36);
+    ctx.restore();
+  }
+  // —— 高画质：地平线日光辉光（柔和、中性不偏黄）——
+  if (q === "high") {
+    const gx = W * 0.55;
+    const gy = H * 0.52;
+    const glow = ctx.createRadialGradient(gx, gy, H * 0.02, gx, gy, H * 0.32);
+    glow.addColorStop(0, token("fx-sun-warm"));
+    glow.addColorStop(1, token("fx-sun-none"));
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+    ctx.fillStyle = glow;
+    ctx.fillRect(gx - H * 0.32, gy - H * 0.32, H * 0.64, H * 0.64);
+    ctx.restore();
+  }
 }

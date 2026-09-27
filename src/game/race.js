@@ -16,6 +16,7 @@ import { levelAt } from "../config/levels.js";
 import { store, bike } from "../core/store.js";
 import { groundInfo } from "../physics/terrain.js";
 import { emitParticles } from "../render/particles.js";
+import { token } from "../config/ui-tokens.js";
 
 // 段位名与排位赛数值同为"配置层数据"，统一放 config/constants.js；
 // 这里转出以便排位赛相关测试只从一个模块取用。
@@ -103,7 +104,7 @@ export function raceUpdate(dt) {
     ai.finish = true;
     const gy = groundInfo(store.finishX);
     if (gy.y !== Infinity) {
-      emitParticles(store.finishX, gy.y - 20, 16, { color: "#e63946", spd: 2, life: 30, size: 3, grav: 0.03 });
+      emitParticles(store.finishX, gy.y - 20, 16, { color: token("danger"), spd: 2, life: 30, size: 3, grav: 0.03 });
     }
   }
 }

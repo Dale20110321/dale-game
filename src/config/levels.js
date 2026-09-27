@@ -30,8 +30,8 @@ const SPECIALS = ["sprint", "gauntlet", "airtime", "fuelrun", "downhill"];
 export const VARIANT_INFO = {
   normal: { name: "常规", icon: "🚩", desc: "标准赛道" },
   sprint: { name: "限时冲刺", icon: "⏱", desc: "门限极严；赛前满油、赛道无补给" },
-  gauntlet: { name: "障碍迷宫", icon: "🧱", desc: "障碍成簇密布，须减速穿越" },
-  airtime: { name: "空翻挑战", icon: "🕊", desc: "累计滞空 + 连招达标才算通关" },
+  gauntlet: { name: "跳台狂飙", icon: "🛫", desc: "跳台密集、断层相连" },
+  airtime: { name: "空翻挑战", icon: "🕊", desc: "跳台飞跃：多刷滞空与连招" },
   fuelrun: { name: "燃料极限", icon: "⛽", desc: "赛道仅 1 个油罐，必须规划" },
   downhill: { name: "极速下坡", icon: "🎿", desc: "危险段密集，须精准刹车" },
 };
@@ -41,20 +41,19 @@ export const VARIANT_INFO = {
  * ★ 故意不改 L 的难度指标字段（len / ramp / den3 / fuelK / mech / waves / steps）：
  *   那些字段被"难度逐关单调递增"断言守护，改了会破坏单调性。
  *   变体只改写"实体密度、门时限、结算条件"，难度仍由全局进度决定。
- *   · obstK / hazardK：障碍物、危险段数量系数
+ *   · hazardK：危险段数量系数
  *   · gateK：门时限系数（>1 更严、<1 更宽松；门要求均速 = gateSpeed(den3) × gateK）
  *   · canN：赛道上油罐数量（null = 按油耗公式推导）
- *   · jumpN：跳台数量（airtime 变体的确定性滞空源）
- *   · airTarget / comboW：airtime 变体的达标目标（滞空秒数 + 连招权重）
+ *   · jumpN：跳台数量（确定性滞空源；达标线由 airTargetOf 从它派生）
  *   · prepFuel：是否把"少放的油罐"折算成赛前预加油（保证总油量不变、仍可通关）
  */
 export const VARIANT_RULES = {
-  normal: { obstK: 1, hazardK: 1, gateK: 1, canN: null, jumpN: 0, prepFuel: false },
-  sprint: { obstK: 1, hazardK: 1, gateK: 1.1, canN: 0, jumpN: 0, prepFuel: true },
-  gauntlet: { obstK: 2.2, hazardK: 0, gateK: 0.85, canN: null, jumpN: 0, prepFuel: false },
-  airtime: { obstK: 0, hazardK: 0, gateK: 0.6, canN: null, jumpN: 4, prepFuel: false },
-  fuelrun: { obstK: 0.5, hazardK: 0.5, gateK: 0.9, canN: 1, jumpN: 0, prepFuel: true },
-  downhill: { obstK: 0.5, hazardK: 2.2, gateK: 0.7, canN: null, jumpN: 0, prepFuel: false },
+  normal: { hazardK: 1, gateK: 1, canN: null, jumpN: 0, prepFuel: false },
+  sprint: { hazardK: 1, gateK: 1.1, canN: 0, jumpN: 0, prepFuel: true },
+  gauntlet: { hazardK: 0, gateK: 0.75, canN: null, jumpN: 8, prepFuel: false },
+  airtime: { hazardK: 0, gateK: 0.6, canN: null, jumpN: 4, prepFuel: false },
+  fuelrun: { hazardK: 0.5, gateK: 0.9, canN: 1, jumpN: 0, prepFuel: true },
+  downhill: { hazardK: 2.2, gateK: 0.7, canN: null, jumpN: 0, prepFuel: false },
 };
 
 /** 取变体规则 */
@@ -188,10 +187,9 @@ function makeLevel(gi) {
     den3: REF_SPEED * (0.72 - 0.22 * ramp),
     // 油耗倍率：后期环境恶劣（缺氧/沙尘/低温），同样动作更费油
     fuelK: 1 + 3.1 * ramp,
-    // 机制密度权重（0~1）：障碍物/危险段/限时门的数量都按它缩放
+    // 机制密度权重（0~1）：危险段/限时门的数量都按它缩放
     mech: gN,
     // 机制预算（数量）：实际落点由 game/world.js 按地形与既有机制筛选
-    obstacleN: Math.round(5 + gN * 25), // 障碍物 5 → 30
     hazardN: Math.round(1 + gN * 5), // 危险段 1 → 6
     gateN: 3 + Math.round(gN * 2), // 限时门 3 → 5
     variant,
@@ -217,7 +215,6 @@ export const FINALE = (() => {
     den3: REF_SPEED * (0.72 - 0.22),
     fuelK: 1 + 3.1,
     mech: 1.3,
-    obstacleN: 40,
     hazardN: 8,
     gateN: 6,
     variant: "normal",
@@ -305,13 +302,13 @@ export function starTime(L) {
 }
 
 /**
- * airtime 变体的滞空达标线（秒）= 跳台数 × 单台达标滞空。
+ * 跳台变体（airtime / gauntlet）的滞空达标线（秒）= 跳台数 × 单台达标滞空。
  * 跳台是确定性的滞空源，因此"达标"只取决于玩家是否真的飞了跳台，
  * 不依赖随机地形是否恰好有坡顶——保证任何支线（含最平缓的翠野乡道）都可达成。
  */
 export function airTargetOf(L) {
   const r = variantRule(L.variant);
   if (!r.jumpN) return 0;
-  // 只要求飞满 3/4 的跳台（留出容错：漏掉最后一个跳台仍能通关）
+  // 只要求飞满绝大多数跳台（留出容错：漏掉最后一个跳台仍能通关）
   return Math.max(1, r.jumpN - 1) * KICK_TARGET;
 }

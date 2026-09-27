@@ -30,8 +30,7 @@ export const THEMES = [
       haze: null,
     },
     surface: { type: "grass", color: "rgba(28,84,38,.45)", color2: "#58a24f" },
-    dust: { light: "#c4a882", heavy: "#d9c39a" },
-    obstacle: { c1: "#6b4a2e", c2: "#8a6a44", shape: "log" },
+    dust: { light: "#c4a882", heavy: "#d9c39a" },
     ambient: { type: "pollen", color: "#eaf6c0", rate: 0.3, spd: 0.3 },
   },
   // 1 雪原
@@ -57,8 +56,7 @@ export const THEMES = [
       haze: null,
     },
     surface: { type: "snowpuff", color: "rgba(255,255,255,.5)", color2: "rgba(190,215,235,.6)" },
-    dust: { light: "#eef5fb", heavy: "#ffffff" },
-    obstacle: { c1: "#cfe9f7", c2: "#ffffff", shape: "crystal" },
+    dust: { light: "#eef5fb", heavy: "#ffffff" },
     ambient: { type: "snow", color: "#ffffff", rate: 0.6, spd: 0.5 },
   },
   // 2 荒漠
@@ -84,8 +82,7 @@ export const THEMES = [
       haze: { color: "rgba(255,225,175,.20)" },
     },
     surface: { type: "sandripple", color: "rgba(120,80,40,.30)", color2: "rgba(200,160,100,.4)" },
-    dust: { light: "#e6c98f", heavy: "#d9c39a" },
-    obstacle: { c1: "#b09a78", c2: "#d9c39a", shape: "rock" },
+    dust: { light: "#e6c98f", heavy: "#d9c39a" },
     ambient: { type: "sand", color: "#e9c98f", rate: 0.5, spd: 0.6 },
   },
   // 3 月面
@@ -108,8 +105,7 @@ export const THEMES = [
       haze: null,
     },
     surface: { type: "crater", color: "rgba(28,32,42,.35)", color2: "rgba(120,128,140,.35)" },
-    dust: { light: "#9aa2ad", heavy: "#9aa2ad" },
-    obstacle: { c1: "#6a7078", c2: "#9aa2ad", shape: "rock" },
+    dust: { light: "#9aa2ad", heavy: "#9aa2ad" },
     ambient: { type: "none", color: "#9aa2ad", rate: 0, spd: 0 },
   },
   // 4 雨林
@@ -135,8 +131,7 @@ export const THEMES = [
       haze: { color: "rgba(180,230,190,.18)" },
     },
     surface: { type: "moss", color: "rgba(30,80,40,.5)", color2: "rgba(90,150,70,.5)" },
-    dust: { light: "#6b4a2e", heavy: "#8a6a3a" },
-    obstacle: { c1: "#4a3020", c2: "#6b4a2e", shape: "log" },
+    dust: { light: "#6b4a2e", heavy: "#8a6a3a" },
     ambient: { type: "mist", color: "#dff5e0", rate: 0.5, spd: 0.25 },
   },
   // 5 火山
@@ -162,8 +157,7 @@ export const THEMES = [
       haze: { color: "rgba(120,40,20,.18)" },
     },
     surface: { type: "lava", color: "rgba(255,120,40,.75)", color2: "rgba(255,200,80,.55)" },
-    dust: { light: "#4a2f26", heavy: "#8a5a3a" },
-    obstacle: { c1: "#2a201e", c2: "#ff7a2a", shape: "lavaRock" },
+    dust: { light: "#4a2f26", heavy: "#8a5a3a" },
     ambient: { type: "ember", color: "#ff9040", rate: 0.7, spd: 0.5 },
   },
   // 6 冰川
@@ -189,8 +183,7 @@ export const THEMES = [
       haze: null,
     },
     surface: { type: "frost", color: "rgba(255,255,255,.6)", color2: "rgba(160,215,245,.5)" },
-    dust: { light: "#dff2fa", heavy: "#ffffff" },
-    obstacle: { c1: "#a8ddff", c2: "#ffffff", shape: "crystal" },
+    dust: { light: "#dff2fa", heavy: "#ffffff" },
     ambient: { type: "snow", color: "#dff2fa", rate: 0.5, spd: 0.5 },
   },
   // 7 红岩峡谷
@@ -216,8 +209,7 @@ export const THEMES = [
       haze: { color: "rgba(240,180,130,.16)" },
     },
     surface: { type: "strata", color: "rgba(90,45,25,.35)", color2: "rgba(200,130,90,.4)" },
-    dust: { light: "#b5643a", heavy: "#d98a5a" },
-    obstacle: { c1: "#8a4526", c2: "#c26a3a", shape: "rock" },
+    dust: { light: "#b5643a", heavy: "#d98a5a" },
     ambient: { type: "sand", color: "#d98a5a", rate: 0.4, spd: 0.5 },
   },
   // 8 沼泽
@@ -243,8 +235,7 @@ export const THEMES = [
       haze: { color: "rgba(180,190,170,.22)" },
     },
     surface: { type: "puddle", color: "rgba(40,60,50,.45)", color2: "rgba(120,160,150,.4)" },
-    dust: { light: "#4a5238", heavy: "#6a7a50" },
-    obstacle: { c1: "#3e4a32", c2: "#6a7a50", shape: "log" },
+    dust: { light: "#4a5238", heavy: "#6a7a50" },
     ambient: { type: "mist", color: "#c9d6c2", rate: 0.6, spd: 0.2 },
   },
   // 9 城市废墟
@@ -270,8 +261,7 @@ export const THEMES = [
       haze: { color: "rgba(200,205,215,.14)" },
     },
     surface: { type: "debris", color: "rgba(50,52,60,.4)", color2: "rgba(150,152,162,.45)" },
-    dust: { light: "#7a7f88", heavy: "#a0a4ac" },
-    obstacle: { c1: "#6a6e76", c2: "#aab0bc", shape: "crate" },
+    dust: { light: "#7a7f88", heavy: "#a0a4ac" },
     ambient: { type: "dust", color: "#b0b4bc", rate: 0.4, spd: 0.4 },
   },
   // 10 天空浮岛
@@ -300,8 +290,7 @@ export const THEMES = [
       haze: { color: "rgba(220,240,255,.18)" },
     },
     surface: { type: "cloudtuft", color: "rgba(255,255,255,.5)", color2: "#9ccb7a" },
-    dust: { light: "#eaf6ff", heavy: "#ffffff" },
-    obstacle: { c1: "#cfe3a0", c2: "#ffffff", shape: "crystal" },
+    dust: { light: "#eaf6ff", heavy: "#ffffff" },
     ambient: { type: "none", color: "#ffffff", rate: 0, spd: 0 },
   },
   // 11 极夜星空
@@ -330,8 +319,7 @@ export const THEMES = [
       haze: { color: "rgba(60,90,140,.12)" },
     },
     surface: { type: "iceglow", color: "rgba(140,200,255,.5)", color2: "rgba(90,150,220,.4)" },
-    dust: { light: "#5a6a7a", heavy: "#8ab0d0" },
-    obstacle: { c1: "#3a4a5a", c2: "#8ab0d0", shape: "crystal" },
+    dust: { light: "#5a6a7a", heavy: "#8ab0d0" },
     ambient: { type: "snow", color: "#bfe0ff", rate: 0.6, spd: 0.5 },
   },
 ];

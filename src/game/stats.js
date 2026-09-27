@@ -8,6 +8,7 @@ import { showCombo, showToast } from "../core/toast.js";
 import { playFlipSound, playLandSound, playFuelSound } from "../core/audio.js";
 import { addGold, checkAch } from "./progress.js";
 import { refuel, fuelRatio } from "../physics/fuel.js";
+import { token } from "../config/ui-tokens.js";
 
 /** 连招时间窗口（秒）：超过则连招重新计数 */
 export const COMBO_WINDOW = 4.0;
@@ -87,7 +88,7 @@ export function settleLanding() {
 export function pickCanister(c) {
   c.taken = true;
   refuel(0.45);
-  emitParticles(c.x, c.y, 10, { color: "#ffba08", spd: 1.4, life: 26, size: 3, grav: 0.02 });
+  emitParticles(c.x, c.y, 10, { color: token("warn"), spd: 1.4, life: 26, size: 3, grav: 0.02 });
   showToast("⛽ +45%", 650);
   playFuelSound();
 }
