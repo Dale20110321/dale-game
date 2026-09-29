@@ -368,11 +368,13 @@ function levelCell(bi, k) {
   const v = VARIANT_INFO[L.variant] || VARIANT_INFO.normal;
   const locked = !levelUnlocked(bi, k);
   const st = store.stars[gi] || 0;
+  // next = 支线内第一个未通关且已解锁的关卡，也就是"该你打的下一关"，给它最醒目的样式
+  const isNext = !locked && st === 0;
   const stars = locked ? "🔒 未解锁" : st > 0 ? "★".repeat(st) + "☆".repeat(3 - st) : "☆☆☆";
-  const label = `${BRANCHES[bi].name} 第${k + 1}关 ${v.name} 坡度${Math.round(L.maxSlope)}度 三星时限${Math.round(starTime(L))}秒 ${locked ? "未解锁" : st + "星"}`;
-  return `<div class="lvCell${locked ? " locked" : st > 0 ? " done" : ""}" data-act="play" data-gi="${gi}"
+  const label = `${BRANCHES[bi].name} 第${k + 1}关 ${v.name} 坡度${Math.round(L.maxSlope)}度 三星时限${Math.round(starTime(L))}秒 ${locked ? "未解锁" : st + "星"}${isNext ? "，下一关" : ""}`;
+  return `<div class="lvCell${locked ? " locked" : st > 0 ? " done" : " next"}" data-act="play" data-gi="${gi}"
       role="button" tabindex="0" aria-label="${label}">
-    <div>第${k + 1}关</div>
+    <div>${isNext ? '<span class="lvNext">▶ 下一关</span>' : "第" + (k + 1) + "关"}</div>
     <div class="thm">${badge(v.icon + " " + v.name, "variant")}</div>
     <div class="thm">坡度 ${Math.round(L.maxSlope)}° · ${Math.round(toM(L.len))}m</div>
     <div class="thm">三星 ≤ ${fmtClock(starTime(L))}</div>
@@ -380,16 +382,24 @@ function levelCell(bi, k) {
   </div>`;
 }
 
-/** 展开支线的 6 个关卡格（只有点开才渲染，首屏不会一次铺 72 个） */
-function levelBlock() {
+/**
+ * 展开支线的 6 个关卡格。
+ * @param {boolean} [withClose] 是否带"收起"按钮。面板模式（renderLevelsPanel /
+ *   renderRacePanel）需要它切回卡片墙；主页面（renderHomeView）下方本就紧跟 12 支线
+ *   总览，再放一个"收起"只会挤占首屏。
+ */
+function levelBlock(withClose) {
   const b = BRANCHES[openBranch];
   const th = THEMES[b.theme] || THEMES[0];
   const cells = Array.from({ length: LEVELS_PER_BRANCH }, (_, k) => levelCell(openBranch, k)).join("");
+  const note = withClose
+    ? `${b.desc} · ${VARIANT_INFO.normal.icon} 常规关为 🚩；第 3、5 关为特殊变体`
+    : b.desc;
   return `<div class="branchLevels">
     <div class="brHead">${b.name} · 场景「${th.name}」 · 6 关</div>
     <div class="lvGrid">${cells}</div>
-    <div class="panelNote">${b.desc} · ${VARIANT_INFO.normal.icon} 常规关为 🚩；第 3、5 关为特殊变体</div>
-    <button class="btn sm ghost" data-act="branchClose">收起</button>
+    <div class="panelNote">${note}</div>
+    ${withClose ? '<button class="btn sm ghost" data-act="branchClose">收起</button>' : ""}
   </div>`;
 }
 
@@ -399,7 +409,7 @@ export function renderLevelsPanel(openBi) {
   openBranch = Number.isInteger(openBi) && branchOpen(openBi) ? openBi : -1;
   showPanel(`<div class="modeTitle">🏁 闯关模式 · 支线任务</div>
   <div class="branchWall">${BRANCHES.map((_, i) => branchCard(i)).join("")}</div>
-  ${openBranch >= 0 ? levelBlock() : ""}
+  ${openBranch >= 0 ? levelBlock(true) : ""}
   <div class="panelNote">星级：通关 1★ · 金币 70% 以上 2★ · 快速通关 3★ ｜ 支线内链式解锁，支线之间可并行推进</div>
   <button class="btn backBtn" data-act="back">返回</button>`);
 }
@@ -410,7 +420,7 @@ export function renderRacePanel(openBi) {
   openBranch = Number.isInteger(openBi) && branchOpen(openBi) ? openBi : -1;
   showPanel(`<div class="modeTitle">🏆 比赛模式 · 与 AI 竞速</div>
   <div class="branchWall">${BRANCHES.map((_, i) => branchCard(i)).join("")}</div>
-  ${openBranch >= 0 ? levelBlock() : ""}
+  ${openBranch >= 0 ? levelBlock(true) : ""}
   <div class="panelNote">先到终点赢 300 🪙（赛道需已解锁）</div>
   <button class="btn backBtn" data-act="back">返回</button>`);
 }

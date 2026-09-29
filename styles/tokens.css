@@ -113,6 +113,9 @@
   --glass-hover: rgba(255,255,255,0.2);
   --track: rgba(255,255,255,0.2);
   --scrim: rgba(8,20,32,0.74);
+  /* 菜单态专用：比 --scrim-strong 浅，让 Canvas 里实时渲染的场景透出来当背景。
+     面板（shop/settings/donate）内容密集，仍用 --scrim-strong/--scrim-solid 保证可读。 */
+  --scrim-menu: rgba(8,20,32,0.60);
   --scrim-strong: rgba(8,20,32,0.88);
   --scrim-solid: rgba(8,20,32,0.97);
   --success-soft: rgba(80,255,150,0.16);

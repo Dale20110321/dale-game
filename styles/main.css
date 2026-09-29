@@ -65,7 +65,11 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; }
 .card.interactive:active { background: var(--glass-fill-strong); }
 .card.interactive.selected { border-color: var(--success); background: var(--success-soft); }
 .card[aria-disabled="true"], .card.locked { opacity: .45; cursor: not-allowed; }
-.cardHead { display: flex; align-items: center; gap: var(--space-3); }
+/* min-width:0 —— 卡片（.card / .branchCard / .vehCard）是 flex 容器，.cardHead 作为
+   flex item 的默认 min-width:auto 会让它撑到 min-content，导致卡片内容区被顶破
+   （实测 3 列时 cardHead 310px > 卡片内容区 267px，右侧文字被裁）。置 0 后由 .cardBody
+   的 min-width:0 接手收缩，内部文字的 text-overflow:ellipsis 才会真正生效。 */
+.cardHead { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 .cardIcon { font-size: 24px; line-height: 1; }
 .cardBody { flex: 1; min-width: 0; }
 .cardRight { text-align: right; flex: none; }
@@ -225,7 +229,7 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   align-items: center;
   justify-content: center;      /* 老浏览器兜底 */
   justify-content: safe center; /* 内容溢出时不把顶部挤出屏幕（否则面板/按钮点不到） */
-  background: var(--scrim-strong); color: var(--text-hi); text-align: center;
+  background: var(--scrim-menu); color: var(--text-hi); text-align: center;
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px); /* Safari */
   z-index: 20;
@@ -285,6 +289,18 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 .lvCell:hover { background: var(--glass-hover); }
 .lvCell.locked { color: var(--text-lo); cursor: not-allowed; }
 .lvCell.done { background: var(--success-soft); }
+/* 「该打的下一关」：金色描边，和"已通关(绿)" / "未解锁(灰)"三态一眼可分 */
+.lvCell.next {
+  background: var(--gold-soft);
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold-glow), var(--glass-shadow-out);
+}
+.lvCell.next .lvNext {
+  color: var(--gold);
+  font-size: var(--font-caption-size);
+  font-weight: var(--font-title-weight);
+  letter-spacing: .5px;
+}
 .lvCell .stars { color: var(--gold); font-size: var(--font-micro-size); letter-spacing: 1px; }
 .lvCell .thm { font-size: var(--font-micro-size); color: var(--text-lo); }
 
@@ -462,6 +478,10 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   background: var(--glass-fill); border-radius: var(--radius-card);
   padding: var(--space-2) var(--space-3); cursor: pointer;
   border: 2px solid transparent; border-left: 4px solid var(--theme-accent, var(--success));
+  /* grid item 的 min-width 默认是 auto，会按 min-content 定列宽；卡片文字是 nowrap，
+     min-content = 文字完整宽度，于是 3 列各撑到 368px（容器仅 918px）→ 右侧溢出被裁。
+     置 0 后列宽回到 1fr 的 297px，省略号才真正生效。 */
+  min-width: 0;
 }
 .branchCard:hover { background: var(--glass-hover); }
 .branchCard.open { background: var(--success-soft); border-color: var(--success); }
@@ -536,7 +556,7 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   /* .glow 靠 drift 动画的 translate3d 移动，动画中途会飘出视口并把整页撑出
      横向滚动条（旧布局里一直存在的那个底部横条就是它）。装饰层一律裁掉。 */
   overflow: hidden;
-  opacity: .32;
+  opacity: .5;
   background:
     radial-gradient(60% 45% at 18% 12%, var(--accent-glow), transparent 70%),
     radial-gradient(50% 40% at 82% 78%, var(--gold-glow), transparent 72%);
@@ -565,6 +585,18 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
      ④ 横屏矮屏 H<480：压缩垂直空间
    另附 ≤519px 细分档（HUD 同步按 W<520 切紧凑布局）
    ============================================================ */
+/* 宽屏（≥1180px）：原先内容恒定 680px 居中，1920 屏上两侧留出大片空白，
+   且 6 个关卡格只能排成 4+2。这里把版面加宽并让 6 关一行排完。
+   选择器统一带 #overlay 前缀：下方主页面基础样式块写在本媒体查询之后，
+   同优先级下"后写的赢"，不加前缀会被 680px 覆盖掉。 */
+@media (min-width: 1180px) {
+  #overlay .hero, #overlay .modeTabs, #overlay .homeView, #overlay .menuFoot { max-width: 940px; }
+  #overlay .homeView { max-height: min(66vh, 640px); }
+  #overlay .homeView .lvGrid { grid-template-columns: repeat(6, 1fr); }
+  #overlay .homeView .branchWall { grid-template-columns: repeat(3, 1fr); }
+  #overlay .modeTabs { padding: var(--space-1) var(--space-2); }
+  #overlay .mtab { font-size: var(--font-body-size); min-height: 42px; }
+}
 @media (max-width: 1023px) {
   #modePanel { max-width: 92vw; }
 }
@@ -572,6 +604,13 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   .lvGrid { grid-template-columns: repeat(3, 1fr); }
   .statGrid { grid-template-columns: 1fr; }
   .branchWall { grid-template-columns: 1fr; }
+  /* 手机竖屏：锁定的最终任务卡原本独占首屏约 1/5，信息价值却最低（只有一句
+     "通关全部 72 关后解锁"）。去掉它的描述行、收紧支线卡，并把地图区放高，
+     让「▶ 下一关 + 本支线 6 关」尽量落在首屏内。 */
+  .homeView { max-height: min(70vh, 600px); }
+  .homeView .finaleTile.locked .vdesc { display: none; }
+  .homeView .branchCard { padding: var(--space-2); gap: var(--space-1); }
+  .homeView .branchCard .brThumb { width: 38px; height: 30px; }
 }
 /* 视口不够高时收起说明文字，保证 10 个入口全部落在视口内（否则点不到） */
 @media (max-height: 820px) {
@@ -587,6 +626,31 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   #overlay .sub { display: none; }
   .btn { padding: var(--space-2) var(--space-5); font-size: 15px; }
   #modePanel { max-height: 44vh; }
+}
+
+/* 手机横放（宽度够、高度只有 ~390px）：竖屏那套「大标题 + 大 tab + 图标栏」会把高度吃光，
+   关卡格整个被推出视口。这里把纵向元素逐级压扁，并让 6 个关卡横排一行。
+   最终任务卡只压成一行而**不隐藏** —— 隐藏会让 72 关通关后失去该入口。 */
+@media (max-height: 480px) and (min-width: 700px) {
+  #overlay { padding: var(--space-2) 0; }
+  #overlay .hero h1 { font-size: 20px; margin-bottom: 2px; }
+  #overlay .heroStat { margin-bottom: var(--space-1); }
+  #overlay .heroStat .chip { font-size: var(--font-caption-size); }
+  #overlay .modeTabs { margin-bottom: var(--space-2); padding: 2px; }
+  #overlay .mtab { min-height: 32px; font-size: var(--font-caption-size); }
+  /* 390px 高度里，标题 28 + 状态条 28 + tab 44 + 底部图标栏 46 + 上下 padding 16 = 162px，
+     地图区可拿到约 220px —— 正好容纳「支线标题 + 一行 6 个关卡格」的完整高度。 */
+  #overlay .homeView { max-height: min(60vh, 240px); gap: var(--space-1); }
+  #overlay .homeView .finaleTile { padding: var(--space-1) var(--space-2); }
+  #overlay .homeView .finaleTile .vdesc { display: none; }
+  #overlay .homeView .brHead { margin-bottom: var(--space-1); }
+  #overlay .homeView .lvGrid { grid-template-columns: repeat(6, 1fr); }
+  #overlay .homeView .lvCell { padding: var(--space-1); }
+  #overlay .homeView .lvCell .thm { font-size: 10px; }
+  #overlay .homeView .branchWall { grid-template-columns: repeat(4, 1fr); }
+  #overlay .menuFoot { margin-top: var(--space-2); }
+  #overlay .fbtn { min-height: 38px; }
+  #overlay .fbtn b { font-size: 15px; }
 }
 
 /* ============================================================
@@ -611,6 +675,12 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   justify-content: center; align-items: center; margin-bottom: var(--space-2);
 }
 .heroStat .chip { font-size: var(--font-body-size); }
+
+/* 蒙层变浅后（--scrim-menu 0.60）Canvas 场景透上来，标题/说明需要自带投影压住亮背景 */
+#overlay .hero h1 { text-shadow: 0 2px 12px var(--shadow-text-strong); }
+#overlay .modeTabs, #overlay .menuFoot { box-shadow: var(--glass-shadow-out); }
+#overlay .homeView { box-shadow: none; }
+.homeView .modeTitle, .homeView .brHead { text-shadow: 0 1px 6px var(--shadow-text); }
 .modeTabs {
   position: relative; z-index: 1; display: flex; gap: var(--space-1);
   padding: var(--space-1); margin: 0 auto var(--space-3);

@@ -157,6 +157,8 @@ export const TOKENS = Object.freeze({
   "glass-hover": "rgba(255,255,255,0.2)",
   track: "rgba(255,255,255,0.2)",
   scrim: "rgba(8,20,32,0.74)",
+  // 与 styles/tokens.css 的 --scrim-menu 保持逐字一致（autotest 断言双端取值完全一致）
+  "scrim-menu": "rgba(8,20,32,0.60)",
   "scrim-strong": "rgba(8,20,32,0.88)",
   "scrim-solid": "rgba(8,20,32,0.97)",
   "success-soft": "rgba(80,255,150,0.16)",
