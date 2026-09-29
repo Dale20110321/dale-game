@@ -23,7 +23,10 @@ export function groundInfo(x) {
   const yL = groundY(x - e);
   const yR = groundY(x + e);
   if (!isFinite(y0) || !isFinite(yL) || !isFinite(yR)) {
-    return { y: y0, m: 0 };
+    // 兜底必须返回**有限值**：原实现把 NaN/Infinity 原样返回，会沿"接触求解 → Verlet 积分"
+    // 一路传播进物理链，最终让 game.js 每帧判定"坠出地图"并无限 respawn + 刷 toast。
+    const safe = isFinite(y0) ? y0 : isFinite(yL) ? yL : isFinite(yR) ? yR : 0;
+    return { y: safe, m: 0 };
   }
   return { y: y0, m: (yR - yL) / (2 * e) };
 }
@@ -83,7 +86,8 @@ export function canSpot(len, xx) {
 export function safeSpot(x) {
   let bx = x;
   let bm = Math.abs(groundInfo(x).m);
-  for (let d = -120; d <= 320; d += 20) {
+  // 搜索窗向前留得更长：摔车多发生在下坡/断层之后，真正能起步的落点通常在前方
+  for (let d = -200; d <= 600; d += 20) {
     const xx = Math.max(24, x + d);
     const m = Math.abs(groundInfo(xx).m);
     if (m < bm) {
@@ -91,5 +95,8 @@ export function safeSpot(x) {
       bx = xx;
     }
   }
-  return bm <= 0.16 ? bx : x;
+  // 找不到 |m|≤0.16 的点时也返回"窗内最平缓的那个"。原实现在此原样返回 x，
+  // 于是陡坡/断层处每次重生都落回同一点 → 起步即摔 → 再重生（死循环，
+  // 且每次循环都扣 8% 燃料 + 2s 计时）。
+  return bx;
 }

@@ -27,38 +27,27 @@
     <div id="menuBg" aria-hidden="true"><i class="glow"></i><i class="glow g2"></i></div>
     <div class="hero">
       <h1 id="ovTitle">🚲 越野自行车</h1>
-      <div class="sub" id="ovSub">物理引擎越野：支线任务 · 最终任务 · 排位赛 · 无限模式</div>
-      <div class="heroSummary" id="heroSummary" aria-label="当前状态摘要"></div>
-      <div class="keys" id="ovKeys">→/D 加速（空中顺时针转体） &nbsp;←/A 刹车（空中逆时针转体） &nbsp;P/Esc 暂停 &nbsp;R 重开 &nbsp;M 静音</div>
+      <div class="sub" id="ovSub" hidden></div>
+      <div class="heroStat" id="heroSummary" aria-label="当前进度"></div>
     </div>
-    <div class="menuGroups" id="menuGroups">
-      <div class="menuGroup" data-group="main" aria-label="主玩法">
-        <div class="grpHead">主玩法</div>
-        <div class="grpBtns">
-          <button class="btn lg" id="btnLevels" data-entry="levels">🏁 闯关</button>
-          <button class="btn ghost" id="btnRace" data-entry="race">🏆 比赛模式</button>
-          <button class="btn ghost" id="btnFinale" data-entry="finale">🎯 最终任务</button>
-          <button class="btn ghost" id="btnRanked" data-entry="ranked">🏆 排位赛</button>
-          <button class="btn ghost" id="btnFree" data-entry="free">♾️ 无限模式</button>
-        </div>
-      </div>
-      <div class="menuGroup" data-group="progress" aria-label="养成与进度">
-        <div class="grpHead">养成与进度</div>
-        <div class="grpBtns">
-          <button class="btn ghost" id="btnGarage" data-entry="garage">🏍️ 车库</button>
-          <button class="btn ghost" id="btnShop" data-entry="shop">🔧 升级车间</button>
-          <button class="btn ghost" id="btnAch" data-entry="ach">🏅 成就</button>
-          <button class="btn ghost" id="btnSave" data-entry="save">💾 存档</button>
-        </div>
-      </div>
-      <div class="menuGroup" data-group="support" aria-label="支持">
-        <div class="grpHead">支持</div>
-        <div class="grpBtns">
-          <button class="btn ghost" id="btnSettings" data-entry="settings">⚙️ 设置</button>
-          <button class="btn" id="btnDonate" data-entry="donate">☕ 请我喝咖啡</button>
-        </div>
-      </div>
-    </div>
+
+    <nav class="modeTabs" id="modeTabs" aria-label="玩法">
+      <button class="mtab is-on" data-mode="level" type="button" aria-selected="true">🏁 闯关</button>
+      <button class="mtab" data-mode="race" type="button" aria-selected="false">🏆 比赛</button>
+      <button class="mtab" data-mode="ranked" type="button" aria-selected="false">🏆 排位</button>
+      <button class="mtab" data-mode="free" type="button" aria-selected="false">♾️ 无限</button>
+    </nav>
+
+    <section id="homeView" class="homeView" aria-label="关卡地图"></section>
+
+    <nav class="menuFoot" aria-label="养成与设置">
+      <button class="fbtn" id="btnGarage" data-entry="garage" type="button"><b>🏍️</b><span>车库</span></button>
+      <button class="fbtn" id="btnShop" data-entry="shop" type="button"><b>🔧</b><span>升级</span></button>
+      <button class="fbtn" id="btnAch" data-entry="ach" type="button"><b>🏅</b><span>成就</span></button>
+      <button class="fbtn" id="btnSave" data-entry="save" type="button"><b>💾</b><span>存档</span></button>
+      <button class="fbtn" id="btnSettings" data-entry="settings" type="button"><b>⚙️</b><span>设置</span></button>
+    </nav>
+
     <div id="modePanel" class="hidden"></div>
   </div>
 
@@ -85,6 +74,8 @@
     <div class="setNote" id="qDesc"></div>
     <div class="setGrp">🔊 声音</div>
     <button class="btn sm" id="btnMute">🔊 声音开启</button>
+    <div class="setGrp">☕ 支持</div>
+    <button class="btn sm ghost" id="btnDonate">请我喝咖啡</button>
     <div class="setFoot"><button class="btn" id="closeSettings">返回</button></div>
   </div>
 
@@ -101,9 +92,9 @@
   </div>
 </div>
 
-<!-- 普通脚本（打包产物）：可直接双击 index.html 在 file:// 下运行，也兼容本地服务器。
-     改源码后需重新打包：bun build src/main.js --outfile dist/game.bundle.js --target browser --format iife
-     调试源码时可用 <script type="module" src="src/main.js"></script> 替换本行。 -->
-<script src="dist/game.bundle.js"></script>
+<!-- 原生 ES module 直连：零依赖、零构建，任意静态服务器（含 GitHub Pages）直接运行。
+     本地调试：node tools/_serve.mjs  →  http://localhost:8765
+     注意：file:// 下浏览器会以 CORS 拦截 module 加载，请勿直接双击打开。 -->
+<script type="module" src="src/main.js"></script>
 </body>
 </html>

@@ -172,6 +172,10 @@ export function resetBike(x) {
   b.susp.front.t = 0; b.susp.front.v = 0;
   b.slip.rear = 0; b.slip.front = 0;
   b.fn.rear = 0; b.fn.front = 0;
+  // 助推计时必须一并归零：boostImpulse 只要 boostT>0 就继续改写 Verlet 前一帧位置
+  // （=注入速度）。压过加速带后 0.5s 内重开/换关，新一局会白送一段速度冲量。
+  b.boostT = 0;
+  b.angRate = 0;
   b.rb = store.phys.rb;
   bindMasses(store.phys.rb);
 }

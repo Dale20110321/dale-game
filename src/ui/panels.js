@@ -12,7 +12,7 @@ import {
   branchLevel, globalIndexOf, branchProgress, starTime, VARIANT_INFO,
 } from "../config/levels.js";
 import { VEHICLES } from "../config/vehicles.js";
-import { store } from "../core/store.js";
+import { store, uiHooks } from "../core/store.js";
 import {
   save, downloadSave, parseSave, importSave, resetSave,
   isStorageAvailable, availableFreeThemes, isAdvancedUnlocked,
@@ -21,13 +21,15 @@ import { showToast } from "../core/toast.js";
 import { initAudio } from "../core/audio.js";
 import { hasAch } from "../game/progress.js";
 import { getQuality, setQuality, QUALITY, QUALITY_LABEL } from "../render/postfx.js";
-import { showPanel, showMenu, refreshMenuButtons } from "./menu.js";
+import { showPanel, hidePanel, showMenu, refreshMenuButtons } from "./menu.js";
 import { card, chip, badge, statRow, emptyState, themeVars } from "./components.js";
 
 let api = {};
 /** 支线墙面板：当前展开的支线下标（-1 = 全部收起）与面板种类（level | race） */
 let openBranch = -1;
 let panelKind = "level";
+/** 主页面容器（关卡地图）：菜单态显示，面板态隐藏 —— 与 #modePanel 是"一屏一视图"关系 */
+const homeView = document.getElementById("homeView");
 /** 存档面板的临时视图状态（导入待确认数据 / 对比摘要 / 提示 / 二次确认） */
 const saveView = { pending: null, summary: null, error: "", note: "", confirmReset: false };
 
@@ -42,14 +44,20 @@ export function initPanels(a) {
       if (store.state === "menu") fn();
     });
   };
-  bind("btnLevels", () => renderLevelsPanel());
-  bind("btnRace", () => renderRacePanel());
-  bind("btnFinale", renderFinalePanel);
-  bind("btnRanked", renderRankedPanel);
-  bind("btnFree", renderFreePanel);
   bind("btnGarage", renderGaragePanel);
   bind("btnAch", renderAchPanel);
   bind("btnSave", openSavePanel);
+
+  // 玩法切换：闯关 / 比赛 / 排位 / 无限
+  const tabs = document.getElementById("modeTabs");
+  if (tabs) {
+    tabs.addEventListener("click", (e) => {
+      const el = e.target && e.target.closest ? e.target.closest("[data-mode]") : null;
+      if (!el) return;
+      initAudio();
+      if (store.state === "menu") selectMode(el.dataset.mode);
+    });
+  }
 
   const panel = document.getElementById("modePanel");
   if (panel) {
@@ -58,7 +66,88 @@ export function initPanels(a) {
     // 可访问性（Task 9.1）：带 role=button 的卡片支持 Enter / 空格触发
     panel.addEventListener("keydown", onPanelKeydown);
   }
+  // 主页面（关卡地图）与弹出面板共用同一套 data-act 委托
+  const home = document.getElementById("homeView");
+  if (home) {
+    home.addEventListener("click", onPanelClick);
+    home.addEventListener("keydown", onPanelKeydown);
+  }
+  // menu.js 的 showMenu() 也要重画主页面；panels 已 import menu，反向 import 会成环，
+  // 故经 store 的钩子槽单向接线（见 core/store.js 的 uiHooks 注释）。
+  uiHooks.onHome = () => { openBranch = -1; selectMode("level"); };
+  uiHooks.onHome(); // 首屏就要有关卡地图：#homeView 在 HTML 里是空的
   refreshMenuButtons();
+}
+
+/** 玩法 tab 切换：闯关/比赛渲染关卡地图；排位/无限走全屏面板 */
+export function selectMode(mode) {
+  const m = mode === "race" || mode === "ranked" || mode === "free" ? mode : "level";
+  for (const b of document.querySelectorAll("#modeTabs .mtab")) {
+    const on = b.dataset.mode === m;
+    b.classList.toggle("is-on", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  }
+  if (m === "level" || m === "race") {
+    // 从"排位/无限"切回地图时，上一个面板还开着，必须先收起来，
+    // 否则 modePanel 会盖住刚渲染好的关卡地图。
+    hidePanel();
+    if (homeView) homeView.style.display = "";
+    renderHomeView(m);
+  } else {
+    if (homeView) homeView.style.display = "none";
+    if (m === "ranked") renderRankedPanel();
+    else renderFreePanel();
+  }
+}
+
+/**
+ * 主页面视图：最终任务 + 12 条支线的关卡地图。
+ *
+ * 旧版是"点开「闯关」才看得到、且 12 张卡默认全收起"，玩家得逐张扫读才能找到自己那条。
+ * 这里直接展开**当前前沿支线**，并在卡片上标「▶ 继续 第 N 关」，
+ * 让"我在第几关 / 下一关是什么 / 还剩多少"在一屏内自明。
+ */
+export function renderHomeView(mode) {
+  const host = document.getElementById("homeView");
+  if (!host) return;
+  panelKind = mode === "race" ? "race" : "level";
+  if (openBranch < 0 || !branchOpen(openBranch)) openBranch = frontierBranch();
+  // 顺序：最终任务 → 当前支线的 6 个关卡 → 12 支线总览。
+  // 关卡格排在总览之前，玩家进主页面第一眼看到的是"现在打哪一关"，而不是先扫一遍 12 张卡。
+  host.innerHTML =
+    finaleTile() +
+    (openBranch >= 0 ? levelBlock() : "") +
+    `<div class="branchWall">${BRANCHES.map((_, i) => branchCard(i)).join("")}</div>`;
+}
+
+/** 当前前沿支线：已开放且尚未全部通关的第一条（全部通关时回落到最后一条） */
+function frontierBranch() {
+  for (let i = 0; i < N_BRANCHES; i++) {
+    if (branchOpen(i) && firstLockedK(i) < LEVELS_PER_BRANCH) return i;
+  }
+  const last = Math.floor(unlockFrontier() / LEVELS_PER_BRANCH);
+  return Math.max(0, Math.min(N_BRANCHES - 1, last));
+}
+
+/** 主页面顶部的最终任务卡：锁定时也显示进度，给出终极目标感 */
+function finaleTile() {
+  const done = clearedCount();
+  const total = LEVELS.length;
+  const unlocked = done >= total;
+  const cleared = store.progress.finaleDone === true;
+  return card({
+    cls: "vehCard finaleTile",
+    icon: unlocked ? "🎯" : "🔒",
+    title: FINALE.name,
+    sub: `${Math.round(toM(FINALE.len))}m · 依次穿越 6 个场景 · 坡度 ${Math.round(FINALE.maxSlope)}°`,
+    meta: cleared ? "✅ 已通关，可重复挑战"
+      : unlocked ? "已解锁 · 点击开始"
+        : `通关全部 ${total} 关后解锁`,
+    right: unlocked ? "▶" : `${done}/${total}`,
+    interactive: unlocked,
+    locked: !unlocked,
+    attrs: unlocked ? 'data-act="finaleStart"' : "",
+  });
 }
 
 /** 键盘激活面板内的伪按钮（真按钮由浏览器原生处理） */
@@ -161,6 +250,9 @@ function onPanelChange(e) {
 
 /** 重绘当前支线墙面板（保持展开状态） */
 function rerender() {
+  // 主页面（关卡地图）与弹出面板各有自己的宿主，重绘到对的那个
+  const home = document.getElementById("homeView");
+  if (home && home.innerHTML) { renderHomeView(panelKind === "race" ? "race" : "level"); return; }
   if (panelKind === "race") renderRacePanel(openBranch);
   else renderLevelsPanel(openBranch);
 }
@@ -248,11 +340,17 @@ function branchCard(bi) {
     stars += s;
   }
   const done = cleared >= LEVELS_PER_BRANCH;
+  const nextK = firstLockedK(bi);
+  // 前沿 = 已开放、未全通、且还有未通关卡 → 标「▶ 继续 第 N 关」
+  // 这是"玩家不知道自己在第几关"的直接解药：不用再逐张扫 12 张同构卡片去找自己那条。
+  const front = open && !done && nextK < LEVELS_PER_BRANCH;
   return card({
-    cls: "branchCard",
+    cls: "branchCard" + (front ? " frontier" : ""),
     icon: `<div class="brThumb"></div>`,
     title: `${open ? "" : "🔒 "}${b.name}`,
-    sub: `场景「${th.name}」 · ${b.desc}`,
+    sub: front
+      ? `▶ 继续 第 ${nextK + 1} 关 · 场景「${th.name}」`
+      : `场景「${th.name}」 · ${b.desc}`,
     meta: chip(`★ ${stars}/${LEVELS_PER_BRANCH * 3}`, "gold") +
       (done ? " " + badge("已通关", "success") : ""),
     right: `<div class="brDone">${cleared}/${LEVELS_PER_BRANCH}${done ? "<br>✅" : ""}</div>`,

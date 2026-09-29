@@ -227,7 +227,10 @@ export function nextLevel() {
 
 /** 回到安全点 */
 export function respawn() {
-  const sx = safeSpot(store.run.lastSafeX);
+  const prev = store.run.lastSafeX;
+  let sx = safeSpot(prev);
+  // safeSpot 原地无解时会返回原值：必须强制前移，否则"回到同一点 → 再摔"死循环。
+  if (sx === prev) sx = Math.max(24, prev + 80);
   store.run.lastSafeX = sx;
   resetBike(sx);
   bike.locked = false;
@@ -238,7 +241,9 @@ export function respawn() {
 
 /** 掉出地图：回到安全点重来 */
 export function pitRewind() {
-  const sx = safeSpot(store.run.lastSafeX);
+  const prev = store.run.lastSafeX;
+  let sx = safeSpot(prev);
+  if (sx === prev) sx = Math.max(24, prev + 80); // 同 respawn：躲开原地死循环
   store.run.lastSafeX = sx;
   resetBike(sx);
   bike.locked = false;
