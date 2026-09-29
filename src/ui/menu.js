@@ -2,6 +2,7 @@
 //  · 信息架构：Hero（标题 + 状态摘要 + 活体背景）+ 三组入口（主玩法 / 养成与进度 / 支持）
 //  · 键盘导航：方向键在入口间移动、Enter 触发（按钮原生）、Esc 关闭面板
 import { store, uiHooks } from "../core/store.js";
+import { syncTouchVisibility } from "../core/input.js";
 import { LEVELS } from "../config/levels.js";
 import { isStorageAvailable } from "../core/storage.js";
 import { statRow, badge, chip } from "./components.js";
@@ -172,6 +173,7 @@ export function hideOverlay() {
   overlay.classList.add("hidden");
   // 悬浮返回按钮用内联 flex 覆盖 CSS 的 display:none（设 "" 会被 CSS 默认值盖住而不显示）
   if (homeFloat) homeFloat.style.display = "flex";
+  syncTouchVisibility(); // 进游戏：触摸方向键该出现了
 }
 
 export function showPanel(html) {
@@ -206,6 +208,7 @@ export function showMenu() {
   if (homeFloat) homeFloat.style.display = "none";
   setMenuChrome();
   overlay.classList.remove("hidden");
+  syncTouchVisibility(); // 回菜单：收掉操作键，别挡住底部图标栏
 }
 
 /**
