@@ -13,6 +13,13 @@ export const key = { left: false, right: false };
 let touchWanted = false;
 
 /**
+ * 触摸方向键当前是否生效（触摸设备 且 在游戏中）。
+ * 以活绑定导出：HUD 布局（render/hud.js）据此把速度表从右下角让开，
+ * 否则会被油门键整个盖住。改这里不用动 hud.js。
+ */
+export let touchActive = false;
+
+/**
  * 触摸方向键的可见性 = 用户开关 × 是否在游戏中。
  * 菜单 / 结算 / 面板里不该出现操作键：既无意义，又会在主页面挡住底部图标栏。
  * 由 menu.js 在 hideOverlay / showMenu 时调用。
@@ -21,7 +28,8 @@ export function syncTouchVisibility() {
   const el = document.getElementById("touch");
   if (!el) return;
   const playing = store.state === "play" || store.state === "pause";
-  el.classList.toggle("hidden", !(touchWanted && playing));
+  touchActive = !!(touchWanted && playing);
+  el.classList.toggle("hidden", !touchActive);
 }
 
 function bind(e, down) {

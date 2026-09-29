@@ -435,6 +435,15 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 .ttoggle.on { background: var(--toggle-on); border-color: var(--toggle-on-border); }
 .tbtn:active { background: var(--press); }
 .tbtn:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+/* 右上三个浮按钮：原先 opacity .5 压在任意场景背景上（亮雪原 / 暗月面都算），
+   实测在绿野的太阳位置几乎不可辨。提到 .72 并补毛玻璃 + 投影，让它从背景里浮起来；
+   hover / active 仍回到 1。 */
+.tfull, .ttoggle, .thome {
+  opacity: .72;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: var(--glass-shadow-out);
+}
 
 /* ============================================================
    打赏

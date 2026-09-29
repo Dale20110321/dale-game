@@ -10,6 +10,7 @@ import { ctx, view } from "../core/canvas.js";
 import { toKmh, toM, SPEEDLINE_V, SPEEDLINE_REF } from "../config/constants.js";
 import { LEVELS, VARIANT_INFO, levelAt } from "../config/levels.js";
 import { store, bike, world } from "../core/store.js";
+import { touchActive } from "../core/input.js";
 import { clamp } from "../core/utils.js";
 import { key } from "../core/input.js";
 import { fuelRatio } from "../physics/fuel.js";
@@ -22,9 +23,10 @@ const WARN_H = 26;
 /**
  * HUD 布局（纯函数，只读 view 尺寸）——所有元素互不重叠且完全落在视口内。
  * @param {boolean} hasWarn 是否正在显示机制警告
- * @returns {{info:{x,y,w,h}, fuel:object, race:object|null, warn:object|null, speed:object, drive:object}}
+ * @param {boolean} touch 触摸方向键是否在显示（此时右下角被油门键占据，布局需避让）
+ * @returns {{info:{x,y,w,h}, fuel:object, race:object|null, warn:object|null, speed:object, drive:object|null}}
  */
-export function hudLayout(hasWarn = false) {
+export function hudLayout(hasWarn = false, touch = false) {
   const W = view.W;
   const H = view.H;
   const compact = W < 520 || H < 480;
@@ -46,22 +48,33 @@ export function hudLayout(hasWarn = false) {
   const warn = hasWarn ? { x: (W - warnW) / 2, y: pad, w: warnW, h: WARN_H } : null;
 
   const gr = compact ? 36 : 50;
-  const speed = { x: W - pad - gr * 2, y: H - pad - gr * 2, w: gr * 2, h: gr * 2 };
+  // 右下角是油门键（.tright，触摸时占住右下 ~90px 见方）。速度表若仍钉在右下，
+  // 就会被拇指和半透明圆钮整个盖住（实测 390×844 重叠区 x310-374 / y764-802）。
+  // 触摸时改放右侧偏上：既离开拇指可达区，也避开底部中央的竞速条。
+  const speed = {
+    x: W - pad - gr * 2,
+    y: touch ? Math.round(H * 0.3) : H - pad - gr * 2,
+    w: gr * 2, h: gr * 2,
+  };
 
-  const drive = { x: (W - 104) / 2, y: H - pad - 14, w: 104, h: 14 };
+  // 底部居中的 A/D ←→ 键位提示只对键盘用户有意义；触摸时已有屏幕方向键，再挂一条纯属噪音
+  const drive = touch ? null : { x: (W - 104) / 2, y: H - pad - 14, w: 104, h: 14 };
 
   return { info, fuel, race, warn, speed, drive };
 }
 
-/** 玻璃卡片底座 */
+/** 玻璃卡片底座（深色） */
 function glassRect(r, radius) {
   ctx.beginPath();
   ctx.roundRect(r.x, r.y, r.w, r.h, radius === undefined ? tokenNum("radius-card", 14) : radius);
-  ctx.fillStyle = token("glass-fill");
+  // 深色底而非 --glass-fill（白色 6%）：HUD 压在**任意场景**上，白色薄底等于没底，
+  // 白字在亮色天空（绿野的近白天空色）上会直接糊掉。深色底 + 白字对比才稳定。
+  ctx.fillStyle = token("hud-scrim");
   ctx.fill();
   ctx.lineWidth = 1;
   ctx.strokeStyle = token("glass-border");
   ctx.stroke();
+  // 顶部 1px 高光：把卡片从背景里"抬"起来，是玻璃感的关键
   ctx.beginPath();
   ctx.roundRect(r.x, r.y, r.w, 1, 0.5);
   ctx.fillStyle = token("glass-highlight");
@@ -130,13 +143,13 @@ const WARN_BG = { danger: "danger", warn: "warn", info: "info", success: "succes
 export function drawHud() {
   if (store.state === "menu") return;
   const w = activeWarning();
-  const L = hudLayout(!!w);
+  const L = hudLayout(!!w, touchActive);
 
   drawInfoCard(L.info);
   drawFuelGauge(L.fuel);
   if (store.mode === "race" || store.mode === "ranked") drawRaceBar(L.race);
   drawSpeedGauge(L.speed);
-  drawDriveIndicator(L.drive);
+  if (L.drive) drawDriveIndicator(L.drive);
   if (w) drawWarning(L.warn, w);
   drawSpeedLines();
 }
@@ -151,10 +164,12 @@ function drawInfoCard(r) {
       ? "🏆 " + (store.mode === "ranked" ? "排位赛" : "比赛") + " 第" + (store.selLevel + 1) + "关"
       : "关卡 " + (store.selLevel + 1) + (compact ? "" : " · " + L.name);
 
-  // 无底板：文字靠投影保证在任意天空/地表上可读
+  // 无底板：文字靠投影保证在任意天空/地表上可读。
+  // 实测 4px + shadow-text(黑 0.6) 在绿野的近白天空上压不住次要行（"破纪录 9.5s"发灰），
+  // 故改用 shadow-text-strong(0.72) + 6px 模糊，并且整段文字统一走投影（save/restore 已包住）。
   ctx.save();
-  ctx.shadowColor = token("shadow-text");
-  ctx.shadowBlur = 4;
+  ctx.shadowColor = token("shadow-text-strong");
+  ctx.shadowBlur = 6;
   label(title, x, r.y + 14, "title", token("text-hi"));
 
   // 变体徽标（normal 不显示）与竞速差距：跟在标题同一行右侧（ctx.font 此刻仍是标题字体）
