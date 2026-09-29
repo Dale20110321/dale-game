@@ -433,7 +433,19 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 .thome:hover, .thome:active { opacity: 1; }
 .tfull:hover, .ttoggle:hover, .tfull:active, .ttoggle:active { opacity: 1; }
 .ttoggle.on { background: var(--toggle-on); border-color: var(--toggle-on-border); }
-.tbtn:active { background: var(--press); }
+/* Apple HIG「Game controls」：必须有 visible press state，且手指遮住控件时仍要看得见。
+   原来只改背景色 —— 指腹压上去后整个按钮被盖住，玩家看不到任何反馈。
+   改为"按钮自身缩放 + 一圈外扩光晕"：光晕在按钮外缘，手指盖住按钮时仍可见。 */
+.tbtn {
+  transition: background var(--dur-base) var(--ease-std),
+              transform var(--dur-fast) var(--ease-std),
+              box-shadow var(--dur-base) var(--ease-std);
+}
+.tbtn[data-k]:active {
+  background: var(--press);
+  transform: scale(0.92);
+  box-shadow: 0 0 0 4px var(--accent-glow), 0 0 22px 6px var(--accent-glow);
+}
 .tbtn:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
 /* 右上三个浮按钮：原先 opacity .5 压在任意场景背景上（亮雪原 / 暗月面都算），
    实测在绿野的太阳位置几乎不可辨。提到 .72 并补毛玻璃 + 投影，让它从背景里浮起来；

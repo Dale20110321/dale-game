@@ -48,12 +48,18 @@ export function hudLayout(hasWarn = false, touch = false) {
   const warn = hasWarn ? { x: (W - warnW) / 2, y: pad, w: warnW, h: WARN_H } : null;
 
   const gr = compact ? 36 : 50;
-  // 右下角是油门键（.tright，触摸时占住右下 ~90px 见方）。速度表若仍钉在右下，
-  // 就会被拇指和半透明圆钮整个盖住（实测 390×844 重叠区 x310-374 / y764-802）。
-  // 触摸时改放右侧偏上：既离开拇指可达区，也避开底部中央的竞速条。
+  // 触摸时的位置按 Apple HIG「Game controls」定：
+  //   · 主控近拇指，但必须"避开拇指预期滑动/视角移动的圆形区域"；
+  //   · 次级控件放屏幕顶部。
+  // 速度表是只读信息，既非主控也非次级，因此贴右下角**内侧**、让开底角的油门键。
+  // 上移量按触摸键实测占位算（.tbtn 74px + space-4 边距 = 约 90px），而不是按 gr 的倍数 ——
+  // gr 在小屏是 36、大屏 50，和触摸键尺寸不成比例，用倍数会把两者拉回重叠。
+  // 实测 390×844：油门键 x300-374 / y728-802；这里让速度表完全停在其上沿之上。
+  const TOUCH_KEY_ZONE = 90;   // .tbtn 直径 74 + space-4(16) 边距
   const speed = {
     x: W - pad - gr * 2,
-    y: touch ? Math.round(H * 0.3) : H - pad - gr * 2,
+    // 上移量 = 触摸键占位 + 两者之间留出的间隙（gap），否则速度表下沿会压住键的上沿
+    y: H - pad - gr * 2 - (touch ? TOUCH_KEY_ZONE + gap * 2 : 0),
     w: gr * 2, h: gr * 2,
   };
 
