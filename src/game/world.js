@@ -46,6 +46,20 @@ function pickDecoIndex(list, r) {
   return list.length - 1;
 }
 
+/**
+ * 「竖立/柱状」装饰白名单 —— 这类保持前景地位（带投影、正常对比，维持空间层次）。
+ * 其余（岩石 / 灌木 / 花 / 瓦砾 / 冰山 / 陨坑…）一律退到背景层。
+ *
+ * 修掉一个长期存在的分组 bug：原实现按**数组下标**分流（`di === 0 ? trees : rocks`），
+ * 于是月面的 moonrock、火山的 lavarock、冰川的 iceberg、峡谷的 mesarock 这些"最大最像
+ * 障碍"的石头全被扔进 decoTree 画在最底层并套上高大投影；而绿野的 bush/flower 反而
+ * 进 decoRock 被画在最前。结果是"草长得像石头、石头长得像树"。
+ * 白名单按 themes.js 全部 12 个场景的 deco 列表逐一核对过。
+ */
+const TALL_DECO = new Set([
+  "tree", "snowtree", "cactus", "fern", "pine", "reed", "stump", "pillar", "ruin",
+]);
+
 /** 生成装饰物（纯视觉）：只长在坡度平缓的地方；类型按"该处所属分段场景"的 deco 列表加权选择 */
 function buildDeco(L, rng) {
   const T0 = THEMES[segmentThemeAt(L, 0)] || THEMES[0];
@@ -60,7 +74,7 @@ function buildDeco(L, rng) {
     const T = THEMES[segmentThemeAt(L, x)] || T0;
     const di = pickDecoIndex(T.deco, rng());
     const item = { x, y: gi.y, kind: T.deco[di], s, ph };
-    if (di === 0) trees.push(item);
+    if (TALL_DECO.has(item.kind)) trees.push(item);
     else rocks.push(item);
   }
   return { trees, rocks };
@@ -368,6 +382,7 @@ export function updateCoins() {
   const my = (bike.rear.y + bike.front.y) / 2;
   for (const c of world.coins) {
     if (c.taken) continue;
+    c.ph += 0.05; // 自转相位固定步推进：原在 drawCoins() 里按渲染帧自增，120/144Hz 屏上转速翻倍
     if (Math.hypot(c.x - mx, c.y - my) < 45) {
       c.taken = true;
       store.run.coinGot++;
@@ -384,6 +399,7 @@ export function updateCanisters() {
   const my = (bike.rear.y + bike.front.y) / 2;
   for (const c of world.canisters) {
     if (c.taken) continue;
+    c.ph += 0.05; // 同 updateCoins：浮动相位必须与刷新率无关
     if (Math.hypot(c.x - mx, c.y - my) < 45) pickCanister(c);
   }
 }

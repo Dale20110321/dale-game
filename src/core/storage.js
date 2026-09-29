@@ -117,6 +117,7 @@ export function save() {
   lsSet(SAVE_KEYS.mute, store.muted ? "1" : "0");
   lsSet(SAVE_KEYS.best, store.best);
   lsSet(SAVE_KEYS.ultra, JSON.stringify(store.ultra || {}));
+  lsSet(SAVE_KEYS.sel, store.selLevel || 0);
   saveProgress();
 }
 
@@ -363,16 +364,30 @@ export function loadSave() {
       Math.min(LEVELS.length - 1, parseInt(lsGet(SAVE_KEYS.unlocked) || "0", 10) || 0)
     );
 
+    // 当前关卡下标：此前只活在内存，刷新后 HUD / 排位赛面板会显示"第 1 关"
+    store.selLevel = Math.max(
+      0,
+      Math.min(LEVELS.length - 1, parseInt(lsGet(SAVE_KEYS.sel) || "0", 10) || 0)
+    );
+
     const rawStars = jsonOr(lsGet(SAVE_KEYS.stars) || "[]", []);
     const starsArr = Array.isArray(rawStars) ? rawStars.slice() : [];
 
     store.currentVehicle = parseInt(lsGet(SAVE_KEYS.veh) || "0", 10) || 0;
 
     const owned = jsonOr(lsGet(SAVE_KEYS.owned) || "[0]", [0]);
-    store.ownedVehicles = Array.isArray(owned) ? owned : [0];
+    // 过滤越界/非整数的车辆下标：坏存档（如 bike_owned="[5]"）会让 VEHICLES[i] 变成
+    // undefined，随后 applyUpgrades() 读 .id 抛错 —— 抛点在模块顶层，整个 bundle 死掉、
+    // 且坏值已写进内存态，玩家反复刷新都是白屏，只能手动清 localStorage。
+    store.ownedVehicles = (Array.isArray(owned) ? owned : [0])
+      .map((i) => parseInt(i, 10))
+      .filter((i) => Number.isInteger(i) && i >= 0 && i < VEHICLES.length);
     if (!store.ownedVehicles.length) store.ownedVehicles = [0];
     if (!store.ownedVehicles.includes(store.currentVehicle)) {
-      store.currentVehicle = store.ownedVehicles[0] || 0;
+      store.currentVehicle = store.ownedVehicles[0];
+    }
+    if (!(store.currentVehicle >= 0 && store.currentVehicle < VEHICLES.length)) {
+      store.currentVehicle = 0;
     }
 
     store.muted = lsGet(SAVE_KEYS.mute) === "1";

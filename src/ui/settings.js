@@ -21,9 +21,12 @@ export function initSettings() {
 
   const close = document.getElementById("closeSettings");
   if (close) close.addEventListener("click", closeSettings);
-  // Esc 关闭
-  panel.addEventListener("keydown", (e) => {
-    if (e.code === "Escape") closeSettings();
+  // Esc 关闭：绑在 window 上。原实现绑在 panel 子树，keydown 只有焦点落在面板内
+  // 才会冒泡到这里 —— 鼠标点开设置后焦点仍留在触发按钮上，按 Esc 完全没反应。
+  window.addEventListener("keydown", (e) => {
+    if (e.code !== "Escape" || panel.classList.contains("hidden")) return;
+    e.preventDefault();
+    closeSettings();
   });
 
   const tabs = document.getElementById("qualityTabs");
@@ -42,12 +45,23 @@ export function openSettings() {
   renderQuality();
   renderMute();
   const panel = document.getElementById("settings");
-  if (panel) panel.classList.remove("hidden");
+  if (!panel) return;
+  panel.classList.remove("hidden");
+  focusIn(panel.querySelector("button:not([disabled])"));
 }
 
 export function closeSettings() {
   const panel = document.getElementById("settings");
-  if (panel) panel.classList.add("hidden");
+  if (!panel) return;
+  panel.classList.add("hidden");
+  // 焦点交还给触发按钮，否则会掉到 body，方向键导航要从第 0 项重新开始
+  focusIn(document.getElementById("btnSettings"));
+}
+
+/** 安全聚焦（部分环境不支持 preventScroll 选项） */
+function focusIn(el) {
+  if (!el || typeof el.focus !== "function") return;
+  try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
 }
 
 function applyQuality(q) {

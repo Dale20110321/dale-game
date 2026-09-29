@@ -106,12 +106,20 @@ export function activeWarning() {
     const rem = g.limit - ride;
     if (rem < 2.5) return { level: "warn", text: "⏱ 限时门 " + Math.max(0, rem).toFixed(1) + "s" };
   }
-  // 危险段：进入前 620px 且超速
+  // 危险段：提前 1000px 起预警，并直接给出"超了多少 / 当前多少"，让减速成为可操作动作。
+  // 提前量从 620px 提上来的原因：满速 520px/s 下 620px 只有 1.2s 反应时间，几乎来不及松油门。
+  // 注意：限速公式 hazardSpeed() 一个字没动，难度不变 —— 这里只增加**可预判性**。
   for (const h of world.hazards) {
     if (mx > h.x1) continue;
-    if (h.x0 - mx > 620) continue;
+    if (h.x0 - mx > 1000) continue;
+    const lim = Math.round(toKmh(h.vmax));
     if (mx >= h.x0 && spd > h.vmax) return { level: "danger", text: "⚠️ 危险路段超速！" };
-    if (spd > h.vmax * 0.9) return { level: "warn", text: "⚠️ 前方限速 " + Math.round(toKmh(h.vmax)) + "km/h" };
+    if (spd > h.vmax) {
+      return { level: "warn", text: "⚠️ 已超速 " + Math.round(toKmh(spd) - lim) + " · 限速 " + lim };
+    }
+    if (spd > h.vmax * 0.9) {
+      return { level: "warn", text: "⚠️ 前方限速 " + lim + "km/h · 当前 " + Math.round(toKmh(spd)) };
+    }
   }
   return null;
 }

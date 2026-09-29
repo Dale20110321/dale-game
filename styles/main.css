@@ -13,6 +13,9 @@ html, body {
   height: 100%;
   height: 100dvh; /* 移动端地址栏不再截断画面 */
   overflow: hidden;
+  /* 挡下拉刷新 / 前进后退手势：它们会直接打断游戏 */
+  overscroll-behavior: none;
+  touch-action: none;
   background: var(--surface-1);
   color: var(--text-hi);
   font-family: var(--font-family);
@@ -32,7 +35,11 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; }
   min-height: 44px;
 }
 .chip.interactive, .stat.interactive { min-width: 44px; }
-.lvCell { display: flex; flex-direction: column; justify-content: center; }
+.lvCell {
+  display: flex; flex-direction: column; justify-content: center;
+  /* 锁定态把 "☆☆☆" 换成 "🔒 未解锁"（行更高），不加 gap 会让变体徽标与锁标签糊在一起 */
+  gap: 3px;
+}
 
 /* ---- 浮层容器 ---- */
 .glass-sheet {
@@ -222,7 +229,7 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px); /* Safari */
   z-index: 20;
-  overflow-y: auto; /* 小屏/横屏时按钮不再被裁掉 */
+  overflow-y: auto; overflow-x: hidden; /* 小屏/横屏时按钮不再被裁掉；横向一律不滚 */
   padding: var(--space-4) var(--space-4) var(--space-5);
 }
 #overlay.hidden { display: none; }
@@ -231,7 +238,6 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 #overlay .keys { font-size: var(--font-caption-size); color: var(--text-lo); margin-bottom: 0; }
 
 .btn.sm { margin: 0; }
-.menuGroups { display: flex; flex-direction: column; align-items: center; }
 
 #modePanel {
   position: relative; z-index: 2; /* 高于 #menuBg 渐晕层 */
@@ -251,7 +257,7 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 }
 #modePanel.enter { opacity: 0; transform: translateY(8px); }
 
-/* ---- 暂停操作条（overlay 顶层，避开 menuGroups 的隐藏逻辑） ---- */
+/* ---- 暂停操作条（overlay 顶层，避开关卡地图的显示切换） ---- */
 #pauseBar {
   position: relative; z-index: 2; /* 高于 #menuBg 渐晕层 */
   display: flex; gap: var(--space-2); margin-top: var(--space-3); flex-wrap: wrap;
@@ -270,7 +276,7 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 }
 .resultCard .statGrid { text-align: left; margin-top: var(--space-3); }
 .resultCard .row2 { margin-top: var(--space-4); }
-.modeTitle { font-size: 17px; font-weight: var(--font-title-weight); margin-bottom: var(--space-3); color: var(--info); text-align: center; }
+.modeTitle { font-size: 22px; font-weight: var(--font-title-weight); margin-bottom: var(--space-3); color: var(--info); text-align: center; }
 .lvGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-2); }
 .lvCell {
   padding: 9px var(--space-1); background: var(--glass-fill-strong); border-radius: var(--radius-chip);
@@ -314,7 +320,7 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   background: var(--scrim-strong); color: var(--text-hi); text-align: center; z-index: 30;
 }
 #shop.hidden { display: none; }
-#shop h2 { font-size: 30px; letter-spacing: 1px; margin-bottom: var(--space-1); }
+#shop h2 { font-size: 28px; letter-spacing: 1px; margin-bottom: var(--space-1); }
 #shop .upGold { font-size: 22px; color: var(--gold); margin: var(--space-2) 0 var(--space-3); }
 .upItm {
   display: flex; align-items: center; gap: var(--space-4);
@@ -346,7 +352,7 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   z-index: 31; padding: var(--space-4); overflow-y: auto;
 }
 #settings.hidden { display: none; }
-#settings h2 { font-size: 30px; letter-spacing: 1px; margin-bottom: var(--space-3); }
+#settings h2 { font-size: 28px; letter-spacing: 1px; margin-bottom: var(--space-3); }
 .setGrp {
   margin: var(--space-3) 0 var(--space-2);
   font-size: var(--font-micro-size); font-weight: var(--font-micro-weight);
@@ -386,22 +392,28 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 /* ============================================================
    触摸控制
    ============================================================ */
-#touch { position: absolute; inset: 0; pointer-events: none; z-index: 25; }
+/* z-index 必须低于 #overlay(20)：原实现给 25/26，导致触屏上触摸键压住主菜单按钮、
+   暂停遮罩上多出一个浮着的「🏠」、菜单态方向键仍能响应。 */
+#touch { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
 #touch.hidden { display: none; }
 .tbtn {
-  pointer-events: auto; position: absolute; bottom: 42px; width: 74px; height: 74px;
+  pointer-events: auto; position: absolute;
+  /* env(safe-area-inset-*)：index.html 声明了 viewport-fit=cover，不吃 inset 的话
+     iOS 的 home indicator 会压住左右方向键 */
+  bottom: calc(42px + env(safe-area-inset-bottom, 0px));
+  width: 74px; height: 74px;
   border-radius: var(--radius-pill);
   background: var(--glass-fill-strong); color: var(--text-hi); font-size: 28px;
   border: 2px solid var(--glass-highlight);
   user-select: none; -webkit-user-select: none; touch-action: none;
   display: flex; align-items: center; justify-content: center; font-family: var(--font-family);
 }
-.tleft { left: var(--space-4); }
-.tright { right: var(--space-4); }
-.tfull { position: absolute; top: var(--space-2); right: var(--space-2); z-index: 26; bottom: auto; width: 44px; height: 44px; font-size: 15px; opacity: .5; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
-.ttoggle { position: absolute; top: 56px; right: var(--space-2); z-index: 26; bottom: auto; width: 44px; height: 44px; font-size: 14px; background: var(--glass-fill); opacity: .5; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
+.tleft { left: calc(var(--space-4) + env(safe-area-inset-left, 0px)); }
+.tright { right: calc(var(--space-4) + env(safe-area-inset-right, 0px)); }
+.tfull { position: absolute; top: calc(var(--space-2) + env(safe-area-inset-top, 0px)); right: calc(var(--space-4) + env(safe-area-inset-right, 0px)); z-index: 10; bottom: auto; width: 44px; height: 44px; font-size: 15px; opacity: .5; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
+.ttoggle { position: absolute; top: calc(56px + env(safe-area-inset-top, 0px)); right: calc(var(--space-4) + env(safe-area-inset-right, 0px)); z-index: 10; bottom: auto; width: 44px; height: 44px; font-size: 14px; background: var(--glass-fill); opacity: .5; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
 /* 游戏画面内的"返回主页"按钮：只在游玩时由 menu.js 显示 */
-.thome { position: absolute; top: 104px; right: var(--space-2); z-index: 26; bottom: auto; width: 44px; height: 44px; font-size: 16px; background: var(--glass-fill); opacity: .5; display: none; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
+.thome { position: absolute; top: calc(104px + env(safe-area-inset-top, 0px)); right: calc(var(--space-4) + env(safe-area-inset-right, 0px)); z-index: 10; bottom: auto; width: 44px; height: 44px; font-size: 16px; background: var(--glass-fill); opacity: .5; display: none; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
 .thome:hover, .thome:active { opacity: 1; }
 .tfull:hover, .ttoggle:hover, .tfull:active, .ttoggle:active { opacity: 1; }
 .ttoggle.on { background: var(--toggle-on); border-color: var(--toggle-on-border); }
@@ -425,7 +437,7 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   margin-top: var(--space-4); width: 220px; height: 220px; border-radius: var(--radius-card);
   background: var(--text-hi); display: flex; align-items: center; justify-content: center; overflow: hidden;
 }
-.qrBox span { color: var(--muted); font-size: var(--font-caption-size); line-height: 1.8; padding: var(--space-4); }
+.qrBox span { color: var(--text-mid); font-size: var(--font-caption-size); line-height: 1.8; padding: var(--space-4); }
 .qrBox img { width: 100%; height: 100%; object-fit: contain; display: none; }
 .qrBox.filled img { display: block; }
 .qrBox.filled span { display: none; }
@@ -521,6 +533,9 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
    ============================================================ */
 #menuBg {
   position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  /* .glow 靠 drift 动画的 translate3d 移动，动画中途会飘出视口并把整页撑出
+     横向滚动条（旧布局里一直存在的那个底部横条就是它）。装饰层一律裁掉。 */
+  overflow: hidden;
   opacity: .32;
   background:
     radial-gradient(60% 45% at 18% 12%, var(--accent-glow), transparent 70%),
@@ -538,24 +553,6 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   to { transform: translate3d(58vw, 42vh, 0) scale(1.25); }
 }
 #overlay .hero { position: relative; z-index: 1; width: 100%; max-width: 680px; }
-#overlay .menuGroups { position: relative; z-index: 1; }
-.heroSummary { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); justify-content: center; margin-bottom: var(--space-2); }
-/* 两组并排 + 主玩法通栏：把纵向高度压到视口内（高度不够时下面的说明文字自动隐藏） */
-.menuGroups {
-  display: grid; grid-template-columns: 1fr 1fr;
-  gap: var(--space-3); align-items: start; width: 100%; max-width: 680px;
-}
-.menuGroup[data-group="main"] { grid-column: 1 / -1; }
-.menuGroup[data-group="support"] .grpBtns .btn { grid-column: 1 / -1; }
-.menuGroup { margin-top: 0; }
-.menuGroup .grpHead {
-  font-size: var(--font-micro-size); font-weight: var(--font-micro-weight);
-  letter-spacing: 2px; color: var(--text-lo); margin-bottom: var(--space-1); text-align: center;
-}
-/* 等宽网格：按钮对齐，不再参差不齐 */
-.grpBtns { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-2); width: 100%; }
-.grpBtns .btn { width: 100%; min-height: 44px; padding: 8px var(--space-3); font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.grpBtns .btn.lg { grid-column: 1 / -1; min-height: 52px; font-size: 17px; }
 
 /* ============================================================
    小屏 / 横屏适配
@@ -574,7 +571,6 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 @media (max-width: 767px) {
   .lvGrid { grid-template-columns: repeat(3, 1fr); }
   .statGrid { grid-template-columns: 1fr; }
-  .menuGroups { grid-template-columns: 1fr; }
   .branchWall { grid-template-columns: 1fr; }
 }
 /* 视口不够高时收起说明文字，保证 10 个入口全部落在视口内（否则点不到） */
@@ -584,15 +580,12 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 @media (max-width: 519px) {
   .lvGrid { grid-template-columns: repeat(2, 1fr); }
   .btn { padding: 10px var(--space-5); font-size: 16px; }
-  .grpBtns { grid-template-columns: 1fr; }
 }
 @media (max-height: 480px) {
   #overlay { justify-content: flex-start; }
   #overlay h1 { font-size: 24px; margin-bottom: var(--space-1); }
   #overlay .sub { display: none; }
-  .btn { margin-top: var(--space-2); padding: var(--space-2) var(--space-5); font-size: 15px; }
-  .menuGroup { margin-top: var(--space-2); }
-  .menuGroup .grpHead { display: none; }
+  .btn { padding: var(--space-2) var(--space-5); font-size: 15px; }
   #modePanel { max-height: 44vh; }
 }
 
@@ -606,3 +599,69 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   .resultStars .badge.star { animation: none !important; }
   #modePanel.enter { transform: none; }
 }
+
+/* ============================================================
+   主页面：玩法 tab + 关卡地图 + 底部图标栏
+   （取代原来的「11 个按钮 + 3 个分组」按钮墙）
+   ============================================================ */
+/* Hero 状态条：只留「通关 n/72」与「🪙 金币」两个数（原为 6 个 chip，挤掉主视觉） */
+.heroStat {
+  position: relative; z-index: 1;
+  display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2);
+  justify-content: center; align-items: center; margin-bottom: var(--space-2);
+}
+.heroStat .chip { font-size: var(--font-body-size); }
+.modeTabs {
+  position: relative; z-index: 1; display: flex; gap: var(--space-1);
+  padding: var(--space-1); margin: 0 auto var(--space-3);
+  background: var(--glass-fill); border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill); width: 100%; max-width: 680px;
+}
+.mtab {
+  flex: 1; min-height: 38px; padding: 6px var(--space-2);
+  border: 0; border-radius: var(--radius-pill); background: transparent;
+  color: var(--text-mid); font-family: var(--font-family);
+  font-size: var(--font-caption-size); font-weight: var(--font-title-weight);
+  white-space: nowrap; cursor: pointer;
+  transition: background var(--dur-base) var(--ease-std), color var(--dur-base) var(--ease-std);
+}
+.mtab:hover { background: var(--glass-hover); }
+.mtab.is-on {
+  background: var(--glass-fill-strong); color: var(--text-hi);
+  box-shadow: var(--glass-shadow-in);
+}
+.homeView {
+  position: relative; z-index: 1; width: 100%; max-width: 680px;
+  display: flex; flex-direction: column; gap: var(--space-2);
+  /* 一屏一视图：地图自己滚动，底部图标栏与 tab 始终可见 */
+  max-height: min(56vh, 440px); overflow-y: auto; overflow-x: hidden;
+  padding: var(--space-1) var(--space-2) var(--space-2);
+  -webkit-overflow-scrolling: touch;
+}
+.homeView::-webkit-scrollbar { width: 6px; }
+.homeView::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 3px; }
+.homeView .branchWall { min-width: 0; }
+
+.menuFoot {
+  position: relative; z-index: 1; display: flex; gap: var(--space-1);
+  margin: var(--space-3) auto 0; width: 100%; max-width: 680px;
+}
+.fbtn {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  min-height: 48px; padding: 6px 2px; border: 1px solid var(--glass-border);
+  border-radius: var(--radius-chip); background: var(--glass-fill);
+  color: var(--text-mid); font-family: var(--font-family);
+  font-size: var(--font-micro-size); cursor: pointer;
+  transition: background var(--dur-base) var(--ease-std);
+}
+.fbtn b { font-size: 18px; font-weight: 400; line-height: 1; }
+.fbtn:hover { background: var(--glass-hover); }
+.fbtn.lockedBtn { opacity: .55; }
+
+/* 前沿支线（当前该打的那条）：一眼可辨 */
+.branchCard.frontier { border-color: var(--success); }
+.branchCard.frontier .vname { color: var(--success); }
+
+/* 主页面顶部的最终任务卡（锁定时也显示进度，给出终极目标感） */
+.finaleTile { width: 100%; }
+.finaleTile .cardHead { width: 100%; }
