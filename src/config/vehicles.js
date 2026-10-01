@@ -84,7 +84,8 @@ export const VEHICLES = [
     ultra: {
       name: "极速模式",
       icon: "🚀",
-      cost: 1000000,
+      mode: "surge",
+      cost: 80000,
       desc: "引擎过载：加速与极速大幅提升，风驰电掣",
     },
   },
@@ -114,8 +115,133 @@ export const VEHICLES = [
     ultra: {
       name: "贴地模式",
       icon: "🛡️",
-      cost: 1000000,
+      mode: "stable",
+      cost: 120000,
       desc: "磁悬浮贴地：始终贴地，永不翻车",
+    },
+  },
+
+  // ================================================================
+  //  以下 4 辆是"高价变态车"：底子就吊打前三辆，满级后再开终极模式更是离谱。
+  //  设计约束（被 autotest 锁死，改数值前先看 tools/autotest.mjs 的车辆体检）：
+  //    · phys.mass 两两不同、phys.inertia 两两不同
+  //    · air × inertia ≈ 1（空中角冲量 ω ∝ air/inertia，两者互为倒数）
+  //    · ultra.mode 是物理层唯一的分派依据（见 physics/bike.js 的 activeMode）
+  // ================================================================
+  {
+    id: "volt",
+    name: "电磁脉冲车",
+    icon: "⚡",
+    desc: "变态：满级极速是山地车的 2 倍，爬坡不喘",
+    price: 32000,
+    drv: 1.55,
+    spd: 1.85,
+    grp: 1.2,
+    wgt: 0.85,
+    air: 0.87,
+    tank: 1.3,
+    color: "#00d4ff",
+    // 电磁车：紧凑轻量、细高轮、大落差上管、车把前伸很低（骑手几乎趴平）
+    art: ART({
+      tire: 2.2, rim: false, spokes: 10, spokeW: 1.0, tube: 3.0,
+      topDrop: 8, coil: 0.6, bar: "drop", saddleW: 8,
+      helmR: 5.0, vents: 2,
+      pose: POSE(5, 6, 7, 5.5, 2, 4),
+    }),
+    phys: P(0.85, 1.15, 1.35, 1.15, 14, 1.55, 1.3),
+    ultra: {
+      name: "电磁轨道炮",
+      icon: "🔌",
+      mode: "railgun",
+      cost: 260000,
+      desc: "电磁轨道炮：推力与红线同时暴涨，平地直接贴地飞行",
+    },
+  },
+  {
+    id: "ghost",
+    name: "影行者",
+    icon: "👻",
+    desc: "变态：摔不坏、油无限、危险段随便冲",
+    price: 58000,
+    drv: 1.4,
+    spd: 1.6,
+    grp: 1.55,
+    wgt: 0.7,
+    air: 1.62,
+    tank: 2.2,
+    color: "#9d4edd",
+    // 影行者：细胎 + 细密辐条、几乎无避震、坐垫窄、头盔圆润无前檐、骑手高伏（探身向前）
+    art: ART({
+      tire: 1.5, rim: false, spokes: 14, spokeW: 0.7, tube: 2.2,
+      topDrop: 9, coil: 0.3, bar: "drop", saddleW: 6,
+      helmR: 5.2, peak: false, vents: 0,
+      pose: POSE(6, 7, 8, 6, 2.5, 5),
+    }),
+    phys: P(0.7, 0.62, 1.5, 1.2, 12, 1.2, 1.45),
+    ultra: {
+      name: "相位穿行",
+      icon: "🌀",
+      mode: "phase",
+      cost: 400000,
+      desc: "相位穿行：永不摔车 + 燃料无限 + 危险段限速豁免",
+    },
+  },
+  {
+    id: "fort",
+    name: "磁力堡垒",
+    icon: "🛡️",
+    desc: "变态：巨重巨稳，抓地碾压，翻过来也能爬起来",
+    price: 96000,
+    drv: 1.6,
+    spd: 1.35,
+    grp: 2.1,
+    wgt: 2.4,
+    air: 0.42,
+    tank: 2.6,
+    color: "#f4a261",
+    // 磁力堡垒：全项目最粗的胎与管、超长避震、超宽坐垫、大头盔多通风口、骑手坐得高把手很低
+    art: ART({
+      tire: 7.5, spokes: 4, spokeW: 3.0, tube: 8.0,
+      topDrop: -3, coil: 2.6, bar: "wide", saddleW: 18,
+      helmR: 5.4, vents: 4,
+      pose: POSE(-4, -6, -2, -7, 0, -6),
+    }),
+    phys: P(2.4, 2.4, 0.72, 0.85, 24, 1.6, 1.9),
+    ultra: {
+      name: "磁力护盾",
+      icon: "🔰",
+      mode: "shield",
+      cost: 620000,
+      desc: "磁力护盾：任何姿态都摔不下去，腾空与操控全部保留",
+    },
+  },
+  {
+    id: "photon",
+    name: "光子摩托",
+    icon: "💫",
+    desc: "变态：本项目最快的脚，0.7 秒冲到极速",
+    price: 150000,
+    drv: 1.9,
+    spd: 2.1,
+    grp: 1.35,
+    wgt: 0.6,
+    air: 0.95,
+    tank: 1.6,
+    color: "#ff70a6",
+    // 光子摩托：介于公路车与电磁车之间的轻薄形态、中等胎宽、粗管、无避震、前倾伏低
+    art: ART({
+      tire: 2.6, rim: false, spokes: 11, spokeW: 1.2, tube: 3.4,
+      topDrop: 10, coil: 0.2, bar: "drop", saddleW: 7,
+      helmR: 5.1, peak: false, vents: 1,
+      pose: POSE(7, 8, 9, 7, 3, 5.5),
+    }),
+    phys: P(0.6, 1.05, 1.45, 1.25, 13, 1.15, 1.7),
+    ultra: {
+      name: "光子跃迁",
+      icon: "🌌",
+      mode: "warp",
+      cost: 1000000,
+      desc: "光子跃迁：踩住油门持续喷射，0.7 秒逼近极速",
     },
   },
 ];

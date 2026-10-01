@@ -1,6 +1,7 @@
 // 共享可变状态容器（唯一）。所有模块通过 import 读写这里，
 // 从而彻底避免模块间互相 import 造成的循环依赖。
-import { START_X } from "../config/constants.js";
+import { START_X, topSpeedOf } from "../config/constants.js";
+import { VEHICLES } from "../config/vehicles.js";
 
 /** 全局设置 / 进度 / 环境 / 单局运行态 */
 export const store = {
@@ -77,7 +78,7 @@ export const store = {
     minY: 0, // 当前关卡地形最低点（世界 y 最大），用于"掉出地图"判定
     GRAV: 750,
     TRACTION: 1,
-    MAXV: 520,
+    MAXV: topSpeedOf(VEHICLES[0], { engine: 0, tire: 0, frame: 0, susp: 0 }),
     crashMargin: 4,
     fuel: 1,
     fuelMax: 1,
@@ -170,6 +171,9 @@ export const bike = {
   slip: { rear: 0, front: 0 },
   // 法向接触力（游戏单位）：摩擦上限 = fn × μ 的依据
   fn: { rear: 0, front: 0 },
+  // 切向摩擦冲量的**子步累计量**：每轮迭代只施加增量，累计量按 μ×fn 限幅
+  // （不累加的话一轮迭代能叠加 SOLVER_ITERS 份满摩擦力，把车掀翻）
+  fricAcc: { rear: 0, front: 0 },
   // 求解器诊断量（Task 2.2）：迭代次数与残差 → "是否收敛"可被断言
   solverIters: 0,
   solverResid: 0,

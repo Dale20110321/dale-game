@@ -22,6 +22,9 @@ export default async function (ctx) {
   const raceM = await imp("game/race.js");
   const { LEVELS, BRANCHES, LEVELS_PER_BRANCH, N_BRANCHES } = await imp("config/levels.js");
   const { VEHICLES } = await imp("config/vehicles.js");
+  const CONST = await imp("config/constants.js");
+  /** 0 级山地车的真实可达极速（MAXV 的基线，见 constants.topSpeedOf） */
+  const ZERO_MAXV = CONST.topSpeedOf(VEHICLES[0], { engine: 0, tire: 0, frame: 0, susp: 0 });
   const {
     ACHS, RANKS, MAX_LV, DT,
     RATING_ADVANCED, RATING_PEAK, RATING_MIN,
@@ -1868,8 +1871,10 @@ export default async function (ctx) {
       for (let i = 0; i < 240; i++) gameM.update(DT);
       return { finite: physFinite(), MAXV: store.phys.MAXV, moved: Math.round(bike.rear.x - x0) };
     });
-    check("对照：合法 0 级升级时 MAXV 等于 520、派生量有限且 4 秒能跑约 1600px（证明上组断言有区分度）",
-      !rCtl.threw && rCtl.finite && rCtl.MAXV === 520 && rCtl.moved > 1200,
+    // ★ 520 是旧公式 MAXV_BASE+2.5·engine 的产物；MAXV 现在是 topSpeedOf 解算出的
+    //   "平路真实可达极速"，基线随之改变。改成对解算值做断言，别再钉死魔法数字。
+    check("对照：合法 0 级升级时 MAXV 等于 0 级解算极速、派生量有限且 4 秒能跑约 1600px（证明上组断言有区分度）",
+      !rCtl.threw && rCtl.finite && rCtl.MAXV === ZERO_MAXV && rCtl.moved > 1200,
       rCtl.threw ? `抛异常：${rCtl.threw}` : `MAXV=${rCtl.MAXV} · 4 秒前进 ${rCtl.moved}px`);
 
     // 8.2 负数与超上限升级

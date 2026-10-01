@@ -162,7 +162,9 @@ export default async function (ctx) {
   //     3 车 × 2 关卡 × 5 落高 × 2 档升级 = 60 组
   // ============================================================
   const DROPS = [20, 60, 120, 240, 400];
+  // 每辆车挑 2 个关卡做落高扫描。车多于 3 辆时按 vi%3 循环取同一组档位。
   const VEH_LV = [[2, 30], [40, 58], [65, 71]];
+  const vehLvOf = (vi) => VEH_LV[vi % VEH_LV.length];
   const UP_TIERS = [0, 50];
 
   /** 落体 → 落地 → 自由滑行观测；返回该组全部诊断量 */
@@ -259,8 +261,8 @@ export default async function (ctx) {
   const dropRows = [];
   guard("落高扫描", () => {
     for (let vi = 0; vi < VEHICLES.length; vi++) {
-      for (let ki = 0; ki < VEH_LV[vi].length; ki++) {
-        const lv = VEH_LV[vi][ki];
+      for (let ki = 0; ki < vehLvOf(vi).length; ki++) {
+        const lv = vehLvOf(vi)[ki];
         for (let ti = 0; ti < UP_TIERS.length; ti++) {
           const upLv = UP_TIERS[ti];
           const x = terrain.canSpot(LEVELS[lv].len, 1500 + 500 * ki);
@@ -317,7 +319,7 @@ export default async function (ctx) {
     }
     // (b) 减震升级：Lv50 行程更大，同落差下峰值压缩不得更深
     for (let vi = 0; vi < VEHICLES.length; vi++) {
-      for (let ki = 0; ki < VEH_LV[vi].length; ki++) {
+      for (let ki = 0; ki < vehLvOf(vi).length; ki++) {
         const lo = dropRows.find((r) => r.vi === vi && r.ki === ki && r.upLv === 0);
         const hi = dropRows.find((r) => r.vi === vi && r.ki === ki && r.upLv === 50);
         if (!lo || !hi) continue;
@@ -647,7 +649,7 @@ export default async function (ctx) {
   section("轮上动力学（抓地对照 / 刹车锁死 / 陡坡法向力 / 滚动阻力 / 扭矩衰减）");
   guard("轮上动力学·抓地对照", () => {
     for (let vi = 0; vi < VEHICLES.length; vi++) {
-      const lv = [0, 40, 65][vi];
+      const lv = [0, 40, 65][vi % 3]; // 车多于 3 辆时循环取样档位
       const run = (traction) => {
         setup(vi, 0, lv, {});
         store.phys.TRACTION = traction;
@@ -781,7 +783,17 @@ export default async function (ctx) {
     check("全 72 关最陡上坡可定位（坡度为负且足够陡）",
       steep.m < -0.3,
       `第${steep.lv + 1}关 x=${steep.x} m=${steep.m.toFixed(3)}（${(Math.atan(steep.m) * 57.3).toFixed(0)}°）`);
-    for (let vi = 0; vi < VEHICLES.length; vi++) {
+    /**
+     * ★ 只对**前 3 辆入门车**断言"最陡上坡不可爬"。
+     *   这条断言守的是难度阶梯（README 的"后 1/3 关全油门不可通关"），
+     *   而那条阶梯是**按山地车/竞速车/越野车这一档**标定的。
+     *   后面 4 辆是刻意做的 3.2 万~15 万金币"变态车"，它们存在的意义就是能硬爬
+     *   入门车爬不上去的坡 —— 用同一条断言卡它们等于把产品需求判成 bug
+     *   （实测影行者/光子摩托能以 150~207px/s 爬上去，入门车停在 <60px/s）。
+     *   变态车的强度另有一条正向断言兜着（见下）。
+     */
+    const STARTER = 3;
+    for (let vi = 0; vi < Math.min(STARTER, VEHICLES.length); vi++) {
       setup(vi, 0, steep.lv, {});
       B.resetBike(steep.x - 60);
       bike.locked = false;
@@ -799,10 +811,29 @@ export default async function (ctx) {
         slips.length > 10 && mnOf(slips) < -0.3 && vs[vs.length - 1] - vs[0] < 60,
         `段内 ${slips.length} 帧 · 最负滑移 ${n2(mnOf(slips), 3)} · 车速 ${(vs[0] || 0).toFixed(0)}→${(vs[vs.length - 1] || 0).toFixed(0)}px/s`);
     }
+    // 正向断言：3.2 万金币以上的变态车在平路上的极速必须显著高于入门车（它们存在的意义）
+    {
+      const flatTop = (vi) => {
+        setup(vi, 0, 0, {});
+        B.resetBike(40);
+        bike.locked = false;
+        key.right = true; key.left = false;
+        for (let i = 0; i < 60 * 8; i++) update(DT);
+        key.right = false; key.left = false;
+        return store.phys.MAXV;
+      };
+      const base = flatTop(0);
+      const weak = [];
+      const rows = VEHICLES.map((v, i) => ({ n: v.name, p: v.price, m: flatTop(i) }));
+      for (const r of rows) if (r.p >= 32000 && !(r.m > base * 1.25)) weak.push(r.n);
+      check("高价变态车（≥3.2 万金币）的标称极速至少比入门山地车高 25%",
+        weak.length === 0,
+        weak.length ? "不达标：" + weak.join(",") : rows.map((r) => `${r.n} ${r.m.toFixed(0)}`).join(" / "));
+    }
   });
   guard("轮上动力学·滚动阻力与扭矩衰减", () => {
     for (let vi = 0; vi < VEHICLES.length; vi++) {
-      const lv = [0, 40, 65][vi];
+      const lv = [0, 40, 65][vi % 3]; // 车多于 3 辆时循环取样档位
       setup(vi, 0, lv, {});
       B.resetBike(terrain.canSpot(LEVELS[lv].len, 900));
       bike.locked = false;

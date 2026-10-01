@@ -58,6 +58,9 @@ export default async function (ctx) {
   const { clamp, lerp, mulberry32, wrapAngle, installRoundRect } = utilsM;
   const { Stepper, startRaf } = loopM;
   const DT = constM.DT;
+  const VEHICLES = (await imp("config/vehicles.js")).VEHICLES;
+  /** 0 级山地车的真实可达极速（MAXV 的基线，见 constants.topSpeedOf） */
+  const ZERO_MAXV = constM.topSpeedOf(VEHICLES[0], { engine: 0, tire: 0, frame: 0, susp: 0 });
 
   const win = globalThis.window;
   const cv = canvasM.cv; // canvas 的 DOM 桩（小节间复用）
@@ -749,7 +752,10 @@ export default async function (ctx) {
     T("phys.GRAV = 750", store.phys.GRAV === 750, num(store.phys.GRAV));
     T("phys.GRAV > 0（重力方向正确）", store.phys.GRAV > 0, num(store.phys.GRAV));
     T("phys.TRACTION = 1", store.phys.TRACTION === 1, num(store.phys.TRACTION));
-    T("phys.MAXV = 520", store.phys.MAXV === 520, num(store.phys.MAXV));
+    // ★ 不再硬编码 520：MAXV 现在是"平路真实可达极速"，由 topSpeedOf 解算得出
+    //   （旧公式 MAXV_BASE+2.5·engine 与真实速度脱节，满级虚标 2.7 倍）。
+    //   判据改成"等于 0 级山地车的解算值"，基线变了也不用再回来改魔法数字。
+    T("phys.MAXV = 0 级山地车的真实可达极速", store.phys.MAXV === ZERO_MAXV, num(store.phys.MAXV) + " / 期望 " + num(ZERO_MAXV));
     T("phys.MAXV > 0", store.phys.MAXV > 0, num(store.phys.MAXV));
     T("phys.crashMargin = 4", store.phys.crashMargin === 4, num(store.phys.crashMargin));
     T("phys.crashMargin > 0（正容忍度）", store.phys.crashMargin > 0, num(store.phys.crashMargin));
