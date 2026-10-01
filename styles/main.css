@@ -104,7 +104,10 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; }
   padding: 12px var(--space-6);
   font-size: 17px; font-weight: var(--font-title-weight);
   font-family: inherit;
-  color: var(--text-hi);
+  /* 深色字压浅青渐变：白字只有 1.87:1，而本按钮 17px/粗体未达 WCAG 大字号门槛（18.66px），
+     需要 4.5:1。改用 --surface-0 后两端分别 10.3:1 / 4.96:1。
+     与 .tabs > button[aria-selected=true] 用 --surface-0 的做法一致。 */
+  color: var(--surface-0);
   background: var(--accent-grad);
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
@@ -301,6 +304,25 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   font-weight: var(--font-title-weight);
   letter-spacing: .5px;
 }
+/* 「当前关卡」：info 蓝描边 + 常驻呼吸，和「下一关(金) / 已通关(绿) / 未解锁(灰)」四态一眼可分。
+   返回首页时用它标出"我在这儿"，不必再自己数关卡。 */
+.lvCell.cur {
+  border-color: var(--info);
+  box-shadow: 0 0 0 1px var(--info-glow), var(--glass-shadow-out);
+}
+.lvCell.cur .lvNext {
+  color: var(--info);
+  font-size: var(--font-caption-size);
+  font-weight: var(--font-title-weight);
+  letter-spacing: .5px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .lvCell.cur { animation: lvCurPulse 2.4s ease-in-out infinite; }
+}
+@keyframes lvCurPulse {
+  0%, 100% { box-shadow: 0 0 0 1px var(--info-glow), var(--glass-shadow-out); }
+  50%      { box-shadow: 0 0 0 2px var(--info-glow), var(--glass-shadow-out); }
+}
 .lvCell .stars { color: var(--gold); font-size: var(--font-micro-size); letter-spacing: 1px; }
 .lvCell .thm { font-size: var(--font-micro-size); color: var(--text-lo); }
 
@@ -426,6 +448,9 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 }
 .tleft { left: calc(var(--space-4) + env(safe-area-inset-left, 0px)); }
 .tright { right: calc(var(--space-4) + env(safe-area-inset-right, 0px)); }
+/* 倒车键：与左右键同尺寸，但缩一号并抬高一档，排在左侧 —— 倒车是低频操作，
+   不该和加速/刹车抢同一个视觉权重，也不该挡住速度表。 */
+.trev { left: calc(var(--space-4) + 80px + env(safe-area-inset-left, 0px)); bottom: calc(124px + env(safe-area-inset-bottom, 0px)); width: 56px; height: 56px; font-size: 20px; }
 .tfull { position: absolute; top: calc(var(--space-2) + env(safe-area-inset-top, 0px)); right: calc(var(--space-4) + env(safe-area-inset-right, 0px)); z-index: 10; bottom: auto; width: 44px; height: 44px; font-size: 15px; opacity: .5; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
 .ttoggle { position: absolute; top: calc(56px + env(safe-area-inset-top, 0px)); right: calc(var(--space-4) + env(safe-area-inset-right, 0px)); z-index: 10; bottom: auto; width: 44px; height: 44px; font-size: 14px; background: var(--glass-fill); opacity: .5; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
 /* 游戏画面内的"返回主页"按钮：只在游玩时由 menu.js 显示 */
@@ -474,7 +499,9 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   margin-top: var(--space-4); width: 220px; height: 220px; border-radius: var(--radius-card);
   background: var(--text-hi); display: flex; align-items: center; justify-content: center; overflow: hidden;
 }
-.qrBox span { color: var(--text-mid); font-size: var(--font-caption-size); line-height: 1.8; padding: var(--space-4); }
+/* 二维码区是"白纸"（扫码需要白底），因此占位提示必须用**深色**字：
+   原来的 --text-mid 浅灰压白底只有 1.30:1，玩家没放 assets/qr.png 时那段提示基本读不出来。 */
+.qrBox span { color: var(--surface-1); font-size: var(--font-caption-size); line-height: 1.8; padding: var(--space-4); }
 .qrBox img { width: 100%; height: 100%; object-fit: contain; display: none; }
 .qrBox.filled img { display: block; }
 .qrBox.filled span { display: none; }
@@ -693,9 +720,49 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 .heroStat {
   position: relative; z-index: 1;
   display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2);
-  justify-content: center; align-items: center; margin-bottom: var(--space-2);
+  justify-content: center; align-items: center; margin-bottom: 0;
 }
 .heroStat .chip { font-size: var(--font-body-size); }
+
+/* 存档位：复用关卡格的网格与"当前/已用"状态语言，另加删除按钮 */
+.slotGrid { grid-template-columns: repeat(3, 1fr); margin-bottom: var(--space-2); }
+.slotCell { position: relative; padding-top: var(--space-2); }
+.slotCell .slotDel {
+  position: absolute; top: 2px; right: 2px;
+  min-height: 24px; min-width: 24px; padding: 0 4px;
+  font-size: var(--font-micro-size); line-height: 1;
+}
+.slotNew { width: 100%; margin-bottom: var(--space-1); }
+
+/* 打赏按钮独占一行（heroCoffeeRow）：用**留白**而不是加重颜色来获得存在感。
+   上下留出 space-3/space-2 的呼吸位，与上方进度 chip 分属两个视觉区块 ——
+   视线扫过标题后自然停在第二行，而它本身不用喊。 */
+.heroCoffeeRow {
+  position: relative; z-index: 1;
+  display: flex; justify-content: center;
+  margin-top: var(--space-3);
+}
+.heroCoffee {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1);
+  min-height: 34px; padding: var(--space-1) var(--space-5);
+  font-size: var(--font-body-size); font-weight: var(--font-title-weight);
+  line-height: 1.5; font-family: inherit;
+  /* 深棕字压金渐变：两端实测 8.90:1 / 4.82:1（WCAG AA 需 4.5:1） */
+  color: var(--ink);
+  background: var(--grad-donate);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  cursor: pointer; white-space: nowrap;
+  box-shadow: 0 var(--space-1) var(--space-3) var(--shadow-md);
+  transition: filter var(--dur-fast) var(--ease-std), transform var(--dur-fast) var(--ease-std);
+}
+.heroCoffee:hover { filter: brightness(1.08); }
+.heroCoffee:active { transform: translateY(1px); box-shadow: none; }
+.heroCoffee:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+/* 触屏上把可点区域撑到 44px 高（小尺寸只是视觉，指针命中区要够大） */
+@media (pointer: coarse) {
+  .heroCoffee { min-height: 44px; }
+}
 
 /* 蒙层变浅后（--scrim-menu 0.60）Canvas 场景透上来，标题/说明需要自带投影压住亮背景 */
 #overlay .hero h1 { text-shadow: 0 2px 12px var(--shadow-text-strong); }

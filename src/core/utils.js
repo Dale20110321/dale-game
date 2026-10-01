@@ -6,6 +6,18 @@ export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 /** 线性插值 */
 export const lerp = (a, b, t) => a + (b - a) * t;
 
+/**
+ * 水平循环包裹：把世界 x 映射到 [0, m)。
+ *
+ * ★ 单一事实来源：背景层的天空天体（render/background.js）与光源模型
+ *   （render/light.js）必须用**同一条**公式，否则"太阳画在左边、光却从右边来"。
+ *   之前两处各写一份，light.js 漏掉了相机项，镜头一远两者就分家。
+ */
+export const wrapX = (v, m) => {
+  const w = m || 1;
+  return ((v % w) + w) % w;
+};
+
 /** 确定性伪随机（地形/金币相位用，保证同一关卡每次一致） */
 export function mulberry32(a) {
   return function () {

@@ -6,14 +6,9 @@ import { token } from "../config/ui-tokens.js";
 import { ctx, view } from "../core/canvas.js";
 import { THEMES } from "../config/themes.js";
 import { store } from "../core/store.js";
-import { mulberry32 } from "../core/utils.js";
+import { mulberry32, wrapX } from "../core/utils.js";
 import { getQuality } from "./postfx.js";
-
-/** 水平循环包裹：把世界 x 映射到 [0,W) 的屏幕 x */
-function wrapX(v, W) {
-  const m = W || 1;
-  return ((v % m) + m) % m;
-}
+import { getLight } from "./light.js";
 
 // ---------------- 天体注册表 ----------------
 const CELESTIAL_PAINTERS = {
@@ -273,8 +268,12 @@ export function drawBackground(cx, cy) {
     ctx.restore();
   }
   // —— 高画质：地平线日光辉光（柔和、中性不偏黄）——
+  // 横向位置取自 light.js 的天体位置，与天空里的太阳、地表的受光方向同源。
+  // 原来钉死在 W*0.55，于是天体在右的场景（12 个里 9 个）会出现
+  // "左边地面受光、右边天上挂太阳"的自相矛盾。
   if (q === "high") {
-    const gx = W * 0.55;
+    // getLight().x 已经是屏幕坐标（含视差与包裹），不要再乘 W
+    const gx = getLight().x;
     const gy = H * 0.52;
     const glow = ctx.createRadialGradient(gx, gy, H * 0.02, gx, gy, H * 0.32);
     glow.addColorStop(0, token("fx-sun-warm"));

@@ -23,6 +23,7 @@ import {
   WHEEL_R, WHEELBASE, SEAT_H,
   AIR_ROT_MAX, AIR_ROT_ACC,
   LAND_REF, CONTACT_BAND, CONTACT_BIAS, BIAS_MAX_V, STUN_TIME,
+  REV_SPEED, REV_ENTER_V,
   SOLVER_TOL, SOLVER_ITERS, PEN_TOL, FN_MAX_K, NUM_CAP_V, HEAD_R,
   ROLL_RES_K, AIR_DRAG_K, wheelInertia, torqueAt,
   CRASH_FUEL_LOSS, CRASH_TIME_PENALTY,
@@ -47,6 +48,20 @@ const CHASSIS = ["axleR", "axleF", "head"];
 let numCapHits = 0;
 /** 读取兜底累计触发次数（正常游玩与全部测试中都应为 0） */
 export const capHitCount = () => numCapHits;
+
+/**
+ * 整车瞬时水平速度（px/s）：质量加权，**无滞后**。
+ *
+ * ★ 危险段限速判定必须用它。原实现取的是"前轮世界坐标的逐子步差分"，那算的是
+ *   **前轮这一个点**的瞬时速度：车身俯仰时前轮要绕质心横扫，落地压缩时轮心被
+ *   悬挂拽动，都会让差分瞬间冲到限速的好几倍 —— 于是 HUD 上明明没超速却被判
+ *   超速。`bike.speed`（HUD 用的那个）是 lerp(…, 0.12) 的平滑值，又带 0.13s 滞后、
+ *   系统性偏低，用它判定等于偷偷放宽限速。systemVel 则是刚体整体的真实平动速度：
+ *   旋转项在质量加权下自动抵消，也没有滞后。
+ */
+export function bikeVx() {
+  return systemVel(bike).vx;
+}
 
 /** 竞速车「极速模式」的速度倍率（×10） */
 const ULTRA_SPEED_N = 10;
@@ -96,6 +111,11 @@ export function applyUpgrades() {
   store.phys.mu = deriveFriction(store.phys.TRACTION, v, up);
   store.phys.wheelI = wheelInertia(rb.mW); // 轮转动惯量（实心圆盘近似）
 
+  // 倒挡的**物理**基准极速：必须在下面"极速模式"把 MAXV 抬到 4200 **之前**存一份。
+  // 4200 按其注释是"HUD 表盘 / 相机速度感的标定参考"，不是物理极速；
+  // 拿它当倒挡目标会让竞速车终极模式"倒着比正着还快"（实测倒速 1239 vs 正速 927 px/s）。
+  store.phys.MAXVPhys = store.phys.MAXV;
+
   // 特殊终极模式（放在所有派生量覆写之后：μ 由 deriveFriction 派生，
   // 若在前面放大会被覆盖，车会因打滑而极速上不去）
   if (isUltraActive() && v.id === "sport") {
@@ -142,7 +162,15 @@ export function resetBike(x) {
   ]) {
     p.x = px; p.y = py; p.px = px; p.py = py; p._vx = 0; p._vy = 0;
   }
-  const hx = x + L / 2 - Math.sin(ang) * SEAT_H;
+  // 骑手位置 = 车架中点 + 垂直于「后轴→前轴」方向、朝上的 SEAT_H。
+  //   方向向量 u = (cos ang, sin ang)，其"朝上"法线 = (sin ang, -cos ang)。
+  // ★ 原来这里 x 分量写的是 **-sin**，符号反了：平地上 sin=0 看不出来，
+  //   一到坡面就把骑手往"后"错位 2·sin(ang)·SEAT_H（30° 坡即 26px）。
+  //   后果是每次摔车重生都先摆出一个非刚体的姿态（实测刚性误差 p50 4.1px /
+  //   p99 26.8px / 峰值 31.3px，99% 的重生点都超过 SOLVER_TOL），
+  //   要等下一帧 solvePositions 才对上 —— 表现为重生瞬间的 1 帧"跳一下"。
+  //   （START_X=40 恰好是平地，所以开局看不到，只有重生会踩到。）
+  const hx = x + L / 2 + Math.sin(ang) * SEAT_H;
   const hy = (yR + yF) / 2 - Math.cos(ang) * SEAT_H;
   b.head.x = hx; b.head.y = hy; b.head.px = hx; b.head.py = hy;
   b.head._vx = 0; b.head._vy = 0;
@@ -150,6 +178,10 @@ export function resetBike(x) {
   b.speed = 0;
   b.wheelRear = 0;
   b.wheelFront = 0;
+  // 本帧轮角增量也必须一并归零：渲染层用它算辐条频闪淡出与踏频，
+  // 残留旧值会让重生后第一帧的辐条几乎完全淡出（实测 blur 0.97 → alpha 0.107）。
+  b.wheelStep = 0;
+  b.wheelStepF = 0;
   b.frontGr = false;
   b.rearGr = false;
   b.squash = 0;
@@ -320,17 +352,19 @@ function applySuspension(b, susp, sub) {
 // ============================================================
 //  动力链：油门 → 轮上扭矩；刹车 → 反向扭矩 / 锁死；滚动阻力
 // ============================================================
-function applyDrive(b, P, sub, drv, brk) {
+function applyDrive(b, P, sub, drv, brk, rev) {
   // 贴地模式（越野车终极模式）：轮子被钉在地表、接触摩擦为 0，
   // 油门/刹车改走"整车速度指令"（磁悬浮滑行）——否则完全走不动。
   if (isUltraStable()) {
     const sv = systemVel(b);
     const vx = sv.vx;
-    const target = drv ? P.MAXV * 0.95 : 0; // 前进冲到极速；刹车/松油门滑停
+    let target = 0;
+    if (rev) target = -(P.MAXVPhys || P.MAXV) * REV_SPEED;
+    else if (drv) target = P.MAXV * 0.95; // 前进冲到极速；刹车/松油门滑停
     const maxAcc = P.MAXV * 2; // 加速（/s），0.5s 内到极速，不突兀
     const dv = clamp(target - vx, -maxAcc * sub, maxAcc * sub);
     if (dv !== 0) for (const p of b.pts) p._vx += dv;
-    // 轮子视觉角速度跟随车速（轮心贴地时真实接触不转轮）
+    // 轮子视觉角速度跟随车速（轮心贴地时真实接触不转轮），倒车时反向
     const want = vx / WHEEL_R;
     b.wheelRot.rear += clamp(want - b.wheelRot.rear, -40, 40) * sub;
     b.wheelRot.front = b.wheelRot.rear;
@@ -343,6 +377,19 @@ function applyDrive(b, P, sub, drv, brk) {
     let tau = 0;
     // 油门只驱动后轮；刹车前后轮都作用（真车如此）
     if (wk === "rear" && drv) tau += torqueAt(veh, w, drv, P.torquePeak, P.rpmK || 1);
+    // 倒挡 = 反向驱动力矩，把后轮推向目标倒转角速度（同样只驱动后轮）。
+    // 用"趋近目标轮速"的差动式扭矩而不是固定反向扭矩：倒车到极速后扭矩自然归零。
+    //
+    // ★ 按住刹车时必须**停掉这个伺服**：torquePeak(18000×…) 恒大于 brakePeak(12000×…)
+    //   （三种车各级升级实测比值 1.16~3.59），伺服饱和在 −torquePeak 而刹车只有
+    //   +brakePeak，净扭矩永远为负 —— 于是"↓+←"会停在一个**非零的恒定倒车速度**
+    //   上一直往后飘（实测 trail L0 稳定在 −19.8px/s，60 秒倒退 1187px）。
+    //   交给刹车接管后，↓+← 能正常减速到停。
+    if (wk === "rear" && rev && !brk) {
+      const base = P.MAXVPhys || P.MAXV;
+      const wantW = (-base * REV_SPEED) / WHEEL_R;
+      tau += clamp(((wantW - w) * IW) / sub, -P.torquePeak, P.torquePeak);
+    }
     if (brk) {
       // 刹车扭矩不得把轮子转成倒转（否则会变成"倒车"）；到 0 即抱死 → 转滑动摩擦
       const cap = Math.min(P.brakePeak, (Math.abs(w) * IW) / sub);
@@ -693,12 +740,22 @@ export function stepPhysics() {
   const b = bike;
   const SUS = P.susp;
   const mu = P.mu;
-  // 倒立摔车阈值：车架等级只决定"提前量"（等级越高阈值越小、摔得越晚）；
-  // 头真的贴地则任何等级必摔，见本函数末尾的判定
+  // 倒立摔车容差（都只由车架等级决定，理由见本函数末尾的摔车判定）：
+  //  · crashTol：头离地多近算"撑在地上"（0 级 30px → 摔得早，满级 16px → 摔得晚）
+  //  · tiltMin：车架要翻过多大角度才算倒立（0 级 ≈99°，满级 ≈124°）
   const crashTol = Math.max(8, 30 - (P.crashMargin - 4) * 1.4);
-  const invMargin = -8 - (P.crashMargin - 4) * 0.3;
+  const tiltMin = Math.min(0.7 * Math.PI, (0.55 + (P.crashMargin - 4) * 0.014) * Math.PI);
   const drvK = key.right && !run.crashed ? 1 : 0;
-  const brkK = key.left && !run.crashed ? 1 : 0;
+  // 倒挡是**独立按键**（↓/S），不是"停住后继续踩刹车"——
+  // 刹车在本项目里有一条刻意的不变量：永远只减速、绝不倒转轮子（见 applyDrive）。
+  // 复用刹车键去挂倒挡会同时打破那条不变量，并让"减速进危险段"的玩家突然开始倒车。
+  //
+  // ↓ 的两段行为和真车一致：速度还快时它**先当刹车用**，停稳后才真正挂上倒挡。
+  // 不设这道门槛的话，高速按住 ↓ 会把后轮直接倒转起来硬拽整车（= 高速挂倒挡）。
+  const revK = key.rev && !run.crashed && b.grounded > 0 ? 1 : 0;
+  const revReady = revK && systemVel(b).vx < REV_ENTER_V;
+  const brkK = (key.left || (revK && !revReady)) && !run.crashed ? 1 : 0;
+  const rev = revReady ? 1 : 0;
   const prevGrounded = b.grounded;
   const prevSpin = { rear: b.wheelRot.rear, front: b.wheelRot.front };
   const ang0 = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
@@ -717,7 +774,7 @@ export function stepPhysics() {
     // 3) 悬挂弹簧-阻尼
     applySuspension(b, SUS, sub);
     // 4) 动力链 + 刹车 + 滚动阻力
-    applyDrive(b, P, sub, drvK, brkK);
+    applyDrive(b, P, sub, drvK, brkK, rev);
     // 5) 空气阻力
     applyDrag(b, P, sub);
     // 6) 速度层约束（车架刚性 / 悬挂 / 单侧接触）
@@ -759,9 +816,19 @@ export function stepPhysics() {
   b.squash += (target - b.squash) * 0.4;
   if (Math.abs(b.squash) < 0.004) b.squash = 0;
 
-  // ---------------- 车轮视觉角度由真实轮角速度派生（含空转） ----------------
-  b.wheelRear = (b.wheelRear + b.wheelRot.rear * SUB_DT * 0.06) % TAU;
-  b.wheelFront = (b.wheelFront + b.wheelRot.front * SUB_DT * 0.06) % TAU;
+  // ---------------- 车轮视觉角度：与路面严格同步 ----------------
+  // 纯滚动时轮角速度就是 v/R，所以直接用真实轮角速度积分即可"贴路"：
+  // 实测加速段 ω/(v/R)=1.04~1.06，猛加速时升到 1.28~1.36 —— 那是**真实的空转/打滑**，
+  // 过去被 0.06 这个视觉系数抹平了（轮子按真实转速的 6% 画），既不贴路也看不见打滑。
+  //
+  // ★ 必须乘 **DT（整帧）而不是 SUB_DT（单子步）**：这段积分每帧只在子步循环
+  //   之后做一次，用 SUB_DT 就等于每帧只走了 1/SUB = 1/6 圈，转速只有真实的 1/6。
+  //   （旧代码 `* SUB_DT * 0.06` 因此实际只画出真实转速的 1%。）
+  //   按真实转速画之后单帧转角会到 40°+，辐条必然频闪，交给渲染层淡出处理。
+  b.wheelStep = b.wheelRot.rear * DT;
+  b.wheelStepF = b.wheelRot.front * DT;
+  b.wheelRear = (b.wheelRear + b.wheelStep) % TAU;
+  b.wheelFront = (b.wheelFront + b.wheelStepF) % TAU;
 
   // ---------------- 车速与真实车身角速度 ----------------
   b.speed = lerp(b.speed, systemVel(b).vx, 0.12);
@@ -769,15 +836,34 @@ export function stepPhysics() {
   const ang1 = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
   b.angRate = wrapAngle(ang1 - ang0) / DT;
 
-  // ---------------- 摔车判定：倒立且头触地 ----------------
-  //  · 头真的贴到地面（间距 < 头半径 + 接触带）→ 任何车架等级都必摔。
-  //    否则满级车架会落进"物理上把头顶在地面、逻辑上却不判摔"的死区。
-  //  · 未贴地但已很接近 → 车架等级只决定提前量：等级越高 crashTol 越小，摔得越晚。
+  // ---------------- 摔车判定：车架翻过 tiltMin 且骑手身体撑到地面 ----------------
+  //
+  // ★ 这里原本有两条判据，顺序错了：
+  //     if (gap < HEAD_R + CONTACT_BAND && bodyLow(b)) crash();   ← 恒真，抢先
+  //     else if (gap < crashTol && inverted) crash();             ← 真正的判据
+  //   位置求解器本来就有骑手身体的穿透兜底（solvePositions 末尾），会把压进地里的
+  //   头推回到**恰好 HEAD_R** 处，所以只要骑手身体是最低接触点，gap 就恒在 18 上下，
+  //   而阈值 HEAD_R + CONTACT_BAND = 20 —— 第一条**永远成立**。连带后果是第二条成了
+  //   死代码：**车架等级的抗摔能力从来没生效过**；bodyLow 又只是"头低于两轮中点"
+  //   （≈ 翻过 90°），于是车身一过垂直线、哪怕头还离地几十像素也立刻判摔 ——
+  //   这就是"头朝底下立刻摔"。
+  //
+  // ★ 第二个判据的"倒立"也一并换了写法。旧的 `两轮都低于头 invMargin` 有盲区：
+  //   车倾斜着撑在地上时两轮一高一低，只要有一轮没低于头 8px 就不算倒立 ——
+  //   实测 150° 落地会稳定停在 -116°（头朝下撑地）却不判摔。
+  //   现在直接用**车架自身的倾角** |atan2(前轮−后轮)|：与哪个点最低无关，
+  //   0 = 水平、π = 完全倒置，稳。
+  //
+  //   两条同时成立才摔：
+  //   · 倾角过 tiltMin —— 擦过垂直线（约 99°）还有活路，车架升级还能再放宽到 124°；
+  //   · 骑手身体确实落到地面附近 —— 空中倒立但还离地很高时��判摔，
+  //     玩家有时间用空中转体（AIR_ROT_MAX 9.5 rad/s，转 30° 只要 0.055s）救回来。
   const hgi = groundInfo(b.head.x);
   if (!run.crashed && isFinite(hgi.y)) {
     const gap = hgi.y - b.head.y;
-    const inverted = b.axleR.y < b.head.y + invMargin && b.axleF.y < b.head.y + invMargin;
-    if (gap < HEAD_R + CONTACT_BAND && bodyLow(b)) crash();
-    else if (gap < crashTol && inverted) crash();
+    // 阈值取两者的**较大值**：下界保证"头真的撑在地上"时任何等级都必摔
+    // （满级 crashTol 只有 16px，比求解器维持的 18px 还小，单用它会开出盲区），
+    // 上界让车架等级真正生效。车架升级只会放宽窗口，不会开出"贴地却不摔"。
+    if (gap < Math.max(HEAD_R + CONTACT_BAND, crashTol) && Math.abs(wrapAngle(ang1)) > tiltMin) crash();
   }
 }

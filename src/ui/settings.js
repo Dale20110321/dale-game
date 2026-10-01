@@ -1,16 +1,27 @@
-// 设置面板：画质三档（低 / 中 / 高）切换 + 声音开关
+// 设置面板：画质三档（低 / 中 / 高）+ 画面锐度三档（省电 / 标准 / 锐利）+ 声音开关
 //  · 画质档位来自 render/postfx.js（QUALITY / setQuality），持久化到 dale_quality（非存档键）
+//  · 渲染倍率同理（getRenderScale / setRenderScalePersisted），持久化到 dale_scale
+//  · 两个旋钮**互相独立**：画质管"画多少东西"，锐度管"画在多少像素上"（详见 core/canvas.js）
 //  · 打开时按当前档位刷新选项卡高亮；改动即时生效并 Toast 提示
 import { store } from "../core/store.js";
 import { getQuality, setQuality, QUALITY, QUALITY_LABEL } from "../render/postfx.js";
+import { getRenderScale, setRenderScalePersisted, RENDER_SCALE_LABEL } from "../render/postfx.js";
+
 import { showToast } from "../core/toast.js";
 import { save } from "../core/storage.js";
 
-/** 各档位的用途说明（展示在面板里） */
+/** 画质各档位的用途说明（展示在面板里） */
 const DESC = {
   low: "性能最优：干净画面，任何设备都能流畅跑",
   medium: "增强：装饰投影 · 天气粒子 · 轻色调",
-  high: "光影真实：坡面明暗 · 自行车投影 · 大气雾 · 太阳浸染 · 速度拖影",
+  high: "光影真实：坡面明暗 · 自行车投影 · 大气雾 · 太阳浸染",
+};
+
+/** 锐度各档位的用途说明；像素数按 (倍率²) 相对 1x 计 */
+const SCALE_DESC = {
+  0.75: "省电：只画 56% 的像素，老旧设备 / 边充边玩最稳（画面略软）",
+  1: "标准：与屏幕像素 1:1，绝大多数设备的推荐档",
+  1.25: "锐利：1.25 倍超采样（156% 像素），高分屏最清晰，也最吃性能",
 };
 
 export function initSettings() {
@@ -39,10 +50,20 @@ export function initSettings() {
   }
   const mute = document.getElementById("btnMute");
   if (mute) mute.addEventListener("click", toggleMute);
+
+  const sTabs = document.getElementById("scaleTabs");
+  if (sTabs) {
+    sTabs.addEventListener("click", (e) => {
+      const el = e.target && e.target.closest ? e.target.closest("[data-s]") : null;
+      if (!el) return;
+      applyScale(el.dataset.s);
+    });
+  }
 }
 
 export function openSettings() {
   renderQuality();
+  renderScale();
   renderMute();
   const panel = document.getElementById("settings");
   if (!panel) return;
@@ -79,6 +100,24 @@ function renderQuality() {
   });
   const d = document.getElementById("qDesc");
   if (d) d.textContent = DESC[q] || "";
+}
+
+/** 应用渲染倍率：立即重建画布 + 持久化（非存档键 dale_scale），不影响画质档 */
+function applyScale(s) {
+  const v = setRenderScalePersisted(s);
+  renderScale();
+  showToast("🔍 锐度已切到「" + (RENDER_SCALE_LABEL[v] || v) + "」", 800);
+}
+
+/** 高亮当前锐度档并刷新说明（面板每次打开都调，避免与存档/画质不一致） */
+function renderScale() {
+  const s = getRenderScale();
+  document.querySelectorAll("#scaleTabs .tab").forEach((b) => {
+    const on = Math.abs(Number(b.dataset.s) - s) < 0.01;
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  const d = document.getElementById("sDesc");
+  if (d) d.textContent = SCALE_DESC[s] || "";
 }
 
 function toggleMute() {

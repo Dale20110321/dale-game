@@ -6,11 +6,43 @@ import { initAudio } from "./audio.js";
 import { showToast } from "./toast.js";
 import { save } from "./storage.js";
 
-/** 左右键状态（加速 / 刹车；空中为转体） */
-export const key = { left: false, right: false };
+/** 左右键状态（加速 / 刹车；空中为转体）+ 倒挡 */
+export const key = { left: false, right: false, rev: false };
 
 /** 用户是否希望显示触摸方向键（🎮 手动开关的持久状态，与设备无关） */
 let touchWanted = false;
+
+/**
+ * 是否有模态面板正开着 —— 它才是 Esc 的归属方。
+ * 设置 / 车间 / 打赏都是叠在画面上的浮层，各自已经绑了 Esc 关闭。
+ *
+ * ★ 为什么必须让位：这些面板的 Esc 处理只调了 preventDefault()，没有阻断冒泡，
+ *   而下面的暂停分支也会看到同一个 keydown。玩家在**暂停中**点开设置（.menuFoot
+ *   在 pause 下仍可见可点）后按一次 Esc，实测会同时关掉面板**并把游戏恢复成 play** ——
+ *   人还在看设置，车已经在跑了。
+ */
+export function modalOpen() {
+  return ["settings", "shop", "donate"].some((id) => {
+    const el = document.getElementById(id);
+    return !!el && !el.classList.contains("hidden");
+  });
+}
+
+/**
+ * 捕获阶段标记"这次 Esc 归模态面板"。
+ *
+ * ★ 必须在捕获阶段取样：面板自己的处理器跑在冒泡阶段并且**第一件事就是把它 hidden 掉**，
+ *   等冒泡到下面那个暂停分支时 modalOpen() 已经是 false 了 —— 直接在暂停分支里查会漏。
+ *   捕获阶段先于所有冒泡处理器，此时面板还开着，取样才准。
+ */
+let escForModal = false;
+window.addEventListener(
+  "keydown",
+  (e) => {
+    if (e.code === "Escape" && modalOpen()) escForModal = true;
+  },
+  true
+);
 
 /**
  * 触摸方向键当前是否生效（触摸设备 且 在游戏中）。
@@ -37,6 +69,7 @@ function bind(e, down) {
   let c = null;
   if (e.code === "ArrowRight" || e.key === "ArrowRight" || k === "d") c = "right";
   else if (e.code === "ArrowLeft" || e.key === "ArrowLeft" || k === "a") c = "left";
+  else if (e.code === "ArrowDown" || e.key === "ArrowDown" || k === "s") c = "rev";
   if (c) key[c] = down;
 }
 
@@ -81,6 +114,12 @@ export function initInput(handlers = {}) {
       return;
     }
 
+    // 这次 Esc 已被模态面板认领：它会自己关面板，这里既不暂停也不恢复。
+    // 标记在捕获阶段置位、在本处理器开头消费（同一个事件只会走到这里一次）。
+    if (escForModal) {
+      escForModal = false;
+      return;
+    }
     if ((e.code === "Escape" || e.code === "KeyP") && (st === "play" || st === "pause")) {
       e.preventDefault();
       if (H.togglePause) H.togglePause();
@@ -94,6 +133,7 @@ export function initInput(handlers = {}) {
   window.addEventListener("blur", () => {
     key.left = false;
     key.right = false;
+    key.rev = false;
     bike.angVel = 0;
   });
 

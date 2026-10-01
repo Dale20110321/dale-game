@@ -5,6 +5,18 @@
 //  共享可变状态全部放在 core/store.js；界面动作通过 initGame(presenter) 注入，
 //  因此 game/ 永不 import ui/，彻底避免循环依赖。
 // ============================================================
+
+/**
+ * 启动标志：**必须**是本模块的第一条语句。
+ *
+ * index.html 同时挂了两个入口：dist/game.bundle.js（普通 script，发布用，也是
+ * file:// 双击唯一能跑的那个）与本模块（仅作兜底）。本模块既可能被 bundle 内联执行、
+ * 也可能被 index.html 直接 import，两条路都执行 = 整个游戏初始化两遍（两套 store、
+ * 两条主循环，却共用同一个 DOM 与同一份 localStorage），所有交互都会触发两次。
+ * index.html 的兜底逻辑据此判断：标志已置 → 打包入口已经启动，跳过。
+ */
+if (typeof window !== "undefined") window.__daleBooted = true;
+
 import { installRoundRect } from "./core/utils.js";
 import { resize } from "./core/canvas.js";
 import { START_X } from "./config/constants.js";
@@ -59,7 +71,7 @@ const stepper = new Stepper((dt) => {
 });
 startRaf((dt) => {
   stepper.advance(dt);
-  drawScene();
+  drawScene(dt); // dt 必须传下去：渲染层的逐帧累加量（天气、踏频）依赖它
 });
 
 export { stepper, startGame, restart };

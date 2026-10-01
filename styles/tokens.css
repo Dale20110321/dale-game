@@ -87,6 +87,8 @@
   /* ---- 游戏对象配色（Canvas 与 DOM 共用；场景自身配色仍走 THEMES 数据）---- */
   --obj-coin: #ffd166;
   --obj-coin-dark: #d9a400;
+  /* 下面"油桶"分组里有同名 --obj-canister（橙色）重新定义，两端都取后者；
+     obj-canister-top 仍被 audit-a11y 对比度矩阵消费，不要删。 */
   --obj-canister: #8a9098;
   --obj-canister-top: #a9aeb6;
   --obj-boost: #4cff88;
@@ -133,6 +135,7 @@
   --gold-3: #e08b22;
   --gold-glow: rgba(255,205,90,0.4);
   --gold-glow-strong: rgba(255,215,110,0.75);
+  --info-glow: rgba(124,231,255,0.4);
   --grad-progress: linear-gradient(90deg, #06d6a0, #ffd166);
   --grad-fuel: linear-gradient(90deg, #e85d04, #ffba08);
   --grad-donate: linear-gradient(135deg, #ffd166, #f0a83c 55%, #e08b22);
@@ -179,6 +182,10 @@
   --fx-shadow-faint: rgba(0,0,0,0.08);
   --fx-none-dark: rgba(0,0,0,0);
   --fx-vignette-edge: rgba(0,0,0,0.03);
+  /* 高画质的坡面受光/背光与暗角端点色（与 src/config/ui-tokens.js 逐键一致） */
+  --fx-lit-top: rgba(255,248,222,1);
+  --fx-shade-top: rgba(9,15,28,1);
+  --fx-vignette: rgba(0,0,0,0.32);
   --fx-fade-top: rgba(255,255,255,0.015);
   --fx-fade-hi-top: rgba(255,255,255,0.05);
   --fx-sun-warm: rgba(255,248,222,0.32);

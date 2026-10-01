@@ -1,6 +1,6 @@
 // 世界实体：关卡构建（金币 / 油罐 / 加速带 / 装饰）、拾取、骑尘
 import { mulberry32, clamp } from "../core/utils.js";
-import { SUB_DT, DT, REF_SPEED, DUST_V, DUST_HEAVY_V, KICK_V, KICK_MIN_V, hazardSpeed, gateSpeed } from "../config/constants.js";
+import { SUB_DT, DT, REF_SPEED, DUST_V, DUST_HEAVY_V, KICK_V, KICK_MIN_V, CAN_FUEL, hazardSpeed, gateSpeed } from "../config/constants.js";
 import { THEMES } from "../config/themes.js";
 import { token } from "../config/ui-tokens.js";
 import { levelAt, levelHillY, STEP_W, variantRule, segmentThemeAt } from "../config/levels.js";
@@ -169,7 +169,7 @@ export function buildLevel(idx) {
   // 按真实油耗模型反推，保证"够通关但不宽裕"，漏罐即有代价
   //   平均消耗 kAvg = kIdle + duty×(kFull-kIdle)，duty=0.62
   //   平均地速 vAvg = 0.78×基准极速（真实 px/s）
-  //   本关需求 need = len / range（箱）；每罐补 0.45 箱
+  //   本关需求 need = len / range（箱）；每罐补 CAN_FUEL 箱（constants.js 单一事实来源）
   //   容错余量 M：前期 1.30（撒开了跑），末关 1.05（每一罐都得吃到）
   const vh = VEHICLES[store.currentVehicle];
   const up = getUp();
@@ -183,20 +183,21 @@ export function buildLevel(idx) {
   const M = 1.30 - 0.25 * L.ramp;
   // 公式推导出的"预算油罐数"（下限 1）——变体只能改赛道上的罐数，
   // 少放的罐折算成"赛前预加油"补进油箱（总油量不变，仍可通关）
-  const budgetCans = Math.max(1, Math.min(6, Math.ceil((need * M - 1) / 0.45)));
+  const budgetCans = Math.max(1, Math.min(6, Math.ceil((need * M - 1) / CAN_FUEL)));
   const rule = variantRule(L.variant);
   const n = rule.canN === null ? budgetCans : Math.max(0, rule.canN);
   // 预加油比例（占基准油箱的比例）：仅在声明的变体上生效
-  world.prepFuel = rule.prepFuel ? Math.max(0, budgetCans - n) * 0.45 : 0;
+  world.prepFuel = rule.prepFuel ? Math.max(0, budgetCans - n) * CAN_FUEL : 0;
 
   const canisters = [];
   if (n === 1) {
     const cx = canSpot(L.len, L.len * 0.5);
     canisters.push({ x: cx, y: groundY(cx) - 26, taken: false, ph: rng() * 6.28 });
   } else if (n > 1) {
-    // 多罐关：均匀铺开在 [20%, 84%] 区间，且落在平缓处（陡坡/坡顶会被腾空飞过）
-    const x0 = L.len * 0.2;
-    const x1 = L.len * 0.84;
+    // 多罐关：均匀铺开在 [12%, 92%] 区间（比原来 [20%,84%] 更宽，间距更松），
+    // 且落在平缓处（陡坡/坡顶会被腾空飞过）
+    const x0 = L.len * 0.12;
+    const x1 = L.len * 0.92;
     for (let i = 0; i < n; i++) {
       const x = canSpot(L.len, x0 + ((x1 - x0) * i) / (n - 1));
       canisters.push({ x, y: groundY(x) - 26, taken: false, ph: rng() * 6.28 });
