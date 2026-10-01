@@ -65,12 +65,55 @@ export const TIRE_TORQUE_UP = 0.006;
 /** 轮胎：每级提升摩擦系数 μ（+0.6%/级，audit-physics 有精确断言锁定） */
 export const FRICTION_TIRE_UP = 0.006;
 
+/**
+ * 究极终局车「绝对形态」的标称极速（km/h）。
+ * ★ 350 km/h = 9722 px/s，已超过旧的 NUM_CAP_V 6000 —— 数值兜底上界因此被一并抬高，
+ *   否则这台车一冲起来就会把"兜底从未触发"那条断言顶穿（兜底不是性能保护，是最后一道防线）。
+ */
+export const ABSOLUT_KMH = 350;
+/** 究极终局车的目标极速（px/s） */
+export const ABSOLUT_V = (ABSOLUT_KMH / 3.6) * PX_PER_M;
+/**
+ * 该形态下的空气阻力系数（绝对值，不是在默认阻力上乘倍率）。
+ *
+ * ★ 标定方式：让「附加推力上限」恰好等于 350 km/h 处的风阻减速，
+ *   极速因此是一个**稳定平衡点**（维持得住），而不是"冲一下就掉速"。
+ *   默认阻力（0.0026）在 9722 px/s 处减速约 7.8 万 px/s²，任何驱动力都顶不住；
+ *   要到 350 km/h，这个阻力必须**调小**（这正是空气阻力 ∝ v² 的物理结果）。
+ *   算式：k = (μ·mTot·g·REAR_LOAD) / mTot / v²，取奇点号的 μ·mTot 得 1.3e-4。
+ */
+export const ABSOLUT_DRAG_K = 0.00013;
+/**
+ * 附加推力上限 = 该系数 × 可用抓地力（μ·mTot·g·REAR_LOAD）。
+ *
+ * ★ 按**可用抓地**成比例（而不是一个写死的常数）是关键：
+ *   冰面 μ 是绿野的 0.62 倍 → 推力也只有 62% → 冰面极速仍然更低。
+ *   写死常数会把"场景抓地缩放"这条不变式废掉（实测 μ_冰/μ_绿 变成 1.000）。
+ */
+export const ABSOLUT_THRUST_K = 1.0;
+/** 附加推力的响应速度（/s）：越小越"瞬时"，越大越像渐进加速 */
+export const ABSOLUT_SERVO_ACC = 1.2;
+
 /** 重力基准（平路参考极速的解算基准；场景主题各自另有 g） */
 export const GRAV_BASE = 750;
 /** 后轮承担的垂直载荷比例：只有后轮被驱动，摩擦上限按后轮那份算 */
 export const REAR_LOAD = 0.62;
+/**
+ * 驱动扭矩的翘头限幅系数：τ 上限 = mTot·g·WHEELBASE/2 × WHEELIE_K。
+ *
+ * 驱动扭矩经悬挂把车架向后掀，而重力绕后接地点的恢复力矩只有 mTot·g·WHEELBASE/2。
+ * 系数取 1 时"刚过恢复力矩就翻"，对轻车过于苛刻：光子摩托满级被限到表盘的 29%。
+ * 取 2.0 相当于真车要翘到 ~65° 才极限 —— 既留住"大扭矩会翘头"的物理直觉，
+ * 又不至于把高速车限死。
+ *
+ * ★ 这个常量被**两处**消费：physics/bike.js 的实际限幅、topSpeedOf 的极速解算。
+ *   两处各算一份的话，表盘会按未限幅扭矩标定而实车被限死（指针永远走不满）。
+ */
+export const WHEELIE_K = 2.0;
+/** 由车辆质量与重力算出驱动扭矩的翘头上限（与 physics/bike.js 引用同一常量） */
+export const wheelieTauOf = (mTot, GRAV) => mTot * GRAV * WHEELBASE * 0.5 * WHEELIE_K;
 /** 真实可达极速的二分搜索上界（px/s），只作数值安全兜底 */
-export const TOP_SPEED_CAP = 6000;
+export const TOP_SPEED_CAP = 12000;
 
 /**
  * 平路上**真实可达的极速**（px/s）——驱动能力与阻力的交点。
@@ -99,7 +142,10 @@ export function topSpeedOf(veh, up) {
   const mu = FRICTION_BASE * ((veh && veh.grp) || 1) * (1 + FRICTION_TIRE_UP * tire);
   const grip = mu * mTot * GRAV_BASE * REAR_LOAD;
   const roll = ROLL_RES_K * mTot * GRAV_BASE;
-  const avail = (v) => Math.min(torqueAt(veh, v / WHEEL_R, 1, peak, rpmK) / WHEEL_R, grip);
+  // ★ 限幅必须计入：驱动扭矩一旦越过 wheelieTau，多出来的部分只会把车掀翻而不是加速。
+  //   漏掉它，表盘就按"无限扭矩"标定，而实车被限死 —— 满级高速档的指针只走 30%~65%。
+  const tauCap = wheelieTauOf(mTot, GRAV_BASE);
+  const avail = (v) => Math.min(Math.min(torqueAt(veh, v / WHEEL_R, 1, peak, rpmK), tauCap) / WHEEL_R, grip);
   const loss = (v) => AIR_DRAG_K * v * v + roll;
   let lo = 0;
   let hi = TOP_SPEED_CAP;
@@ -176,8 +222,16 @@ export const HEAD_R = 18;
  * 数值异常兜底速度上限（px/s）。**只用于数值异常**（NaN 前兆 / 极端穿透），
  * 正常游玩与全部测试中都不应触发；tools/autotest.mjs 有断言守护"从未触发"。
  * 它替代了旧模型里 VSPD_CAP / DOWNHILL_K / MAXV 那种"每帧改写速度"的硬夹断。
+ *
+ * ★ 为什么是 20000 而不是当初的 6000：究极终局车满级跑 350 km/h 时，
+ *   一个物理帧（DT=1/60）要走 9722/60 = **162px**，相当于 4.3 个轴距 ——
+ *   车轮在两次接触采样之间直接跨过了整段地形，实测穿透峰值 14.6px（容差只有 2px），
+ *   接触解算因此会注入巨大的冲量，单质点速度瞬时冲到 12000 以上。
+ *   这是 **60Hz 固定步长在超高速下的分辨率极限**（不是数值发散：全程无 NaN、
+ *   穿透有界、刚体残差达标）。兜底上界必须留出这一段瞬态余量，
+ *   否则"兜底从未触发"会被高速车正常行驶误伤 —— 而那正是它要守护的东西。
  */
-export const NUM_CAP_V = 6000;
+export const NUM_CAP_V = 20000;
 
 /** 轮上扭矩峰值基准（游戏单位 px·px/s²） */
 export const TORQUE_PEAK_BASE = 18000;
@@ -347,6 +401,15 @@ export const MAX_LV = 100;
  *   现在压到约 7000/项（四项 28000），一次完整通关 + 少量重刷就能把一台车推满。
  */
 export const upCost = (lv) => Math.round(10 + 1.2 * lv);
+/**
+ * 某辆车升到第 lv 级的实际花费 = upCost(lv) × 该车的 costK（缺省 1）。
+ *
+ * ★ 为什么是"乘在基准曲线上"而不是另写一条曲线：基准曲线一旦改动，
+ *   全部档位的价格会同步跟着动，不会出现"某档还按老价卖"的漂移。
+ *   目前只有究极终局车 costK=40（四项满级 1,129,600，是普通档的 40 倍）；
+ *   后续 5 档分级会把 costK 扩展成完整的档位倍率表（spec Task 2.1/2.2）。
+ */
+export const upCostOf = (veh, lv) => Math.round(upCost(lv) * ((veh && veh.costK) || 1));
 
 /**
  * 油罐补给的油量（占油箱的比例）。
@@ -360,6 +423,35 @@ export const upCost = (lv) => Math.round(10 + 1.2 * lv);
  * 0.45 → 0.6 使罐数减少约 25%，而全程可获得油量不变。
  */
 export const CAN_FUEL = 0.6;
+
+// ---------------- 排位赛金币 ----------------
+/**
+ * 排位赛金币：胜利 = RANK_WIN_GOLD_BASE + rating × RANK_WIN_GOLD_K，失败 = RANK_LOSS_GOLD。
+ * 胜利收益随段位分升高而升高，是"排位赛阶段也能把车升满"的收入来源。
+ */
+export const RANK_WIN_GOLD_BASE = 500;
+export const RANK_WIN_GOLD_K = 0.25;
+export const RANK_LOSS_GOLD = 150;
+/** 排位赛金币（won 为胜负） */
+export const rankGold = (won, rating) =>
+  Math.round(won ? RANK_WIN_GOLD_BASE + Math.max(0, rating || 0) * RANK_WIN_GOLD_K : RANK_LOSS_GOLD);
+
+// ---------------- 金币 ----------------
+/** 金币安全上界（1e15）。超过它的余额一律夹回来。 */
+export const GOLD_MAX = 1e15;
+/**
+ * 把任意值夹成合法的金币余额 ∈ [0, GOLD_MAX]。
+ *
+ * ★ 这道防线是必需的：金币一旦被写成非有限值，存档原文就变成
+ *   "Infinity" / "NaN"，重载时解析失败并兜底为 **0** —— 玩家刷新页面即丢掉全部余额
+ *   （这正是实测到的丢档 bug）。1e15 选得远低于 1e21，是因为再往上
+ *   `String(v)` 会变成指数记数法 "1e+21"，那样连"读回来还是不是同一个数"都保证不了。
+ */
+export const safeGold = (v) => {
+  const n = Math.floor(Number(v));
+  if (!Number.isFinite(n)) return 0;
+  return n < 0 ? 0 : n > GOLD_MAX ? GOLD_MAX : n;
+};
 
 // ---------------- 成就表 ----------------
 export const ACHS = [

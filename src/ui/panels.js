@@ -19,7 +19,7 @@ import {
   listSlots, switchSlot, createSlot, deleteSlot, currentSlot, MAX_SLOTS,
 } from "../core/storage.js";
 import { showToast } from "../core/toast.js";
-import { initAudio } from "../core/audio.js";
+import { initAudio, playCoinSound } from "../core/audio.js";
 import { hasAch } from "../game/progress.js";
 import { getQuality, setQuality, QUALITY, QUALITY_LABEL } from "../render/postfx.js";
 import { getRenderScale, setRenderScalePersisted, RENDER_SCALES, RENDER_SCALE_LABEL } from "../render/postfx.js";
@@ -225,6 +225,11 @@ function onPanelClick(e) {
       return;
     case "buyUltra":
       buyUltra(+el.dataset.veh);
+      return;
+    case "buyVeh":
+      // 「立即购买并使用」：明确的花钱动作，与"点卡片只切换"区分开。
+      // 点击冒泡到卡片时已被上面 return 拦掉，这里不会重复触发。
+      buyVehicleNow(+el.dataset.veh);
       return;
     case "finaleStart":
       api.startGame("level", FINALE_INDEX);
@@ -616,10 +621,64 @@ export function renderGaragePanel() {
       interactive: true,
       selected: sel,
       attrs: `data-act="veh" data-veh="${i}"`,
-    }) + (v.ultra ? ultraBlock(v, i) : "");
+    }) + (own ? "" : buyBlock(v, i)) + (v.ultra ? ultraBlock(v, i) : "");
   }).join("")}
   <div class="panelNote" id="pnNote"></div>
   <button class="btn backBtn" data-act="back">返回</button>`);
+}
+
+/**
+ * 未拥有车辆下方的「立即购买并使用」按钮。
+ *
+ * ★ 为什么不再只靠点整张卡片：卡片右上角那行价格既小又不是按钮，
+ *   移动端点不准（金币一栏还会随屏宽被 ellipsis 截断）。这里给一个
+ *   ≥44px 高、≥120px 宽的独立按钮，热区大、文案直白、不误触。
+ */
+function buyBlock(v, i) {
+  const lack = Math.max(0, v.price - store.gold);
+  const afford = lack === 0;
+  return `<div class="buyRow">
+    <button class="btn buyNow${afford ? "" : " ghost"}" data-act="buyVeh" data-veh="${i}"
+      ${afford ? "" : 'aria-disabled="true"'}>
+      🪙 立即购买并使用 · ${v.price.toLocaleString()}
+    </button>
+    <div class="buyHint">${afford ? "点击即可购买并切换到这台车" : "还差 " + lack.toLocaleString() + " 金币"}</div>
+  </div>`;
+}
+
+/**
+ * 「立即购买并使用」的点击处理。
+ * 与 buyOrSelectVeh 分开：点卡片只是"选中/切换"，点这个按钮才是明确的"花钱买"。
+ */
+function buyVehicleNow(i) {
+  const note = () => document.getElementById("pnNote");
+  const v = VEHICLES[i];
+  if (store.ownedVehicles.includes(i)) {
+    store.currentVehicle = i;
+    save();
+    renderGaragePanel();
+    const n = note();
+    if (n) n.textContent = "已切换到 " + v.name;
+    api.applyVehicle();
+    return;
+  }
+  const lack = Math.max(0, v.price - store.gold);
+  if (lack > 0) {
+    const n = note();
+    if (n) n.textContent = "金币不足，还差 " + lack.toLocaleString() + " 🪙（需要 " + v.price.toLocaleString() + "）";
+    showToast("🪙 还差 " + lack.toLocaleString() + " 金币", 1100);
+    return;
+  }
+  store.gold -= v.price;
+  store.ownedVehicles.push(i);
+  store.currentVehicle = i;
+  save();
+  renderGaragePanel();
+  const n = note();
+  if (n) n.textContent = "🎉 购买并切换到 " + v.name;
+  api.applyVehicle();
+  showToast("🎉 已购买 " + v.name + "！", 1200);
+  playCoinSound();
 }
 
 /** 车辆全部升级（引擎/轮胎/车架/减震）是否已满级 —— 解锁特殊模式的前提 */

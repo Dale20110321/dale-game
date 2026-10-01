@@ -23,6 +23,7 @@ export default async function (ctx) {
   const { LEVELS, BRANCHES, LEVELS_PER_BRANCH, N_BRANCHES } = await imp("config/levels.js");
   const { VEHICLES } = await imp("config/vehicles.js");
   const CONST = await imp("config/constants.js");
+  const { CUR_VER } = await imp("core/storage.js");
   /** 0 级山地车的真实可达极速（MAXV 的基线，见 constants.topSpeedOf） */
   const ZERO_MAXV = CONST.topSpeedOf(VEHICLES[0], { engine: 0, tire: 0, frame: 0, susp: 0 });
   const {
@@ -103,7 +104,9 @@ export default async function (ctx) {
     [SAVE_KEYS.mute]: "1",
     [SAVE_KEYS.best]: "4321",
     [SAVE_KEYS.ach]: j(["air", "flip"]),
-    [SAVE_KEYS.ver]: "3",
+    // 版本号必须用**当前**版本：写死旧版号会在每次升版时触发迁移，
+    // 把 baseline 里的 rating/stat 当成迁移对象改掉（实测读回 0）。
+    [SAVE_KEYS.ver]: String(CUR_VER),
     [SAVE_KEYS.prog]: j({ finaleDone: true, invited: true, wins: 3, losses: 4, peak: true, freeThemes: [0, 1] }),
     [SAVE_KEYS.rating]: "1350",
     [SAVE_KEYS.stat]: j(BASE_STAT),
@@ -185,9 +188,12 @@ export default async function (ctx) {
       name: "ver", label: "存档版本号",
       // ver 没有 store 字段，用落盘后的原文作为读回值
       field: () => LS.getItem(SAVE_KEYS.ver),
-      valid: (v) => v === "3",
-      legal: (v) => isInt(parseInt(v, 10)) && parseInt(v, 10) >= 3,
-      dft: (v) => v === "3",
+      // ★ 不写死版本号：存档版本每次迁移都会 +1（3 → 4），写死会在迁移时集体变红。
+      //   口径改成"必须是正整数，且不低于 2（v2 起才有货币换算口径）"。
+      valid: (v) => /^\d+$/.test(String(v)),
+      legal: (v) => isInt(parseInt(v, 10)) && parseInt(v, 10) >= 2,
+      // 注入非法 ver 后的合法默认 = **当前**版本号（迁移会把 ver 重写成它）
+      dft: (v) => String(v) === String(CUR_VER),
     },
     {
       name: "prog", label: "进度阶梯",
@@ -308,9 +314,10 @@ export default async function (ctx) {
 
       // 7) ver 缺失 → 一次性迁移（金币乘 10，其余键被规范化为当前版本）
       if (K.name === "ver") {
-        check(`${K.label} 删除该键触发一次性版本迁移（金币乘 10、ver 提升到 3、其余键重写为规范值）（${K.name}）`,
+        check(`${K.label} 删除该键触发一次性版本迁移（金币乘 10、ver 提升到当前版本、其余键重写为规范值）（${K.name}）`,
           !r5.threw && isObj(r5.after) && r5.after[SAVE_KEYS.gold] === "12340" &&
-          r5.after[SAVE_KEYS.ver] === "3" && ALL_KEY_FIELDS.every((k) => k === SAVE_KEYS.ver || r5.after[k] !== undefined),
+          // 迁移后 ver 必须等于**当前**版本，而不是写死的 "3"（升版时这里会集体变红）
+          Number(r5.after[SAVE_KEYS.ver]) === CUR_VER && ALL_KEY_FIELDS.every((k) => k === SAVE_KEYS.ver || r5.after[k] !== undefined),
           r5.threw ? `抛异常：${r5.threw}` : `gold 1234 → ${r5.after && r5.after[SAVE_KEYS.gold]} · ver → ${r5.after && r5.after[SAVE_KEYS.ver]} · 重写键数 ${r5.after ? Object.keys(r5.after).length : 0}`);
       }
 
@@ -2028,8 +2035,13 @@ export default async function (ctx) {
     }
     const mig2 = run(() => {
       const rows = [];
-      // isLegacy20 要求长度在 1 到 20 之间且小于 72。全 3 星时 highestStarred = len-1，unlocked 提升到 len。
-      for (const [label, len, expUnlocked] of [["6 关（1 到 20 代）", 6, 6], ["20 关（1 到 20 代）", 20, 20], ["21 关（超出 1 到 20 代）", 21, 0], ["72 关（当前）", 72, 0]]) {
+      // ★ 迁移判据已改为"长度是**历史关卡总数**"（LEGACY_LEVEL_COUNTS = [20, 72]）。
+      //   72 现在也是历史总数了，所以它**要**迁移；6 和 21 从来不是任何一版的总数，不迁移。
+      //   全 3 星时 highestStarred = len-1，unlocked 随之提升到 len。
+      // ≤20 的都算 1~20 代存档（早期存过不满 20 关的中间态），72 是历史上的总数，现在也要迁移；
+      // 21 这种"从没有过的长度"与当前总数都不迁移。
+      for (const [label, len, expUnlocked] of [["6 关（1 到 20 代中间态）", 6, 6], ["20 关（历史总数）", 20, 20],
+        ["72 关（历史总数）", 72, 72], ["21 关（非历史长度）", 21, 0], [`${LEVELS.length} 关（当前总数）`, LEVELS.length, 0]]) {
         fresh();
         LS.setItem(SAVE_KEYS.gold, "500");
         LS.setItem(SAVE_KEYS.ver, "2");

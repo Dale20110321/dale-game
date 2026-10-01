@@ -245,13 +245,17 @@ sect("逐关体检（72 关）");
   // 全局不变量（汇总）
   const mono = (arr) => arr.every((v, k) => k === 0 || v >= arr[k - 1] - 1e-9);
   const monoD = (arr) => arr.every((v, k) => k === 0 || v <= arr[k - 1] + 1e-9);
-  ck("【全局】72 关 maxSlope 单调非减", mono(seenSlope));
-  ck("【全局】72 关 den3 单调非增", monoD(seenDen));
-  ck("【全局】72 关 fuelK 单调非减", mono(seenFuel));
-  ck("【全局】72 关 len 单调非减", mono(seenLen));
-  ck("【全局】72 关 mech 单调非减", mono(seenMech));
+  ck(`【全局】${LEVELS.length} 关 maxSlope 单调非减`, mono(seenSlope));
+  ck(`【全局】${LEVELS.length} 关 den3 单调非增`, monoD(seenDen));
+  ck(`【全局】${LEVELS.length} 关 fuelK 单调非减`, mono(seenFuel));
+  ck(`【全局】${LEVELS.length} 关 len 单调非减`, mono(seenLen));
+  ck(`【全局】${LEVELS.length} 关 mech 单调非减`, mono(seenMech));
   ck("【全局】72 关地形指纹全部不同", fps.size === LEVELS.length, `${fps.size}/${LEVELS.length}`);
-  ck("【全局】末关坡度 > 首关 1.5 倍", seenSlope[71] > seenSlope[0] * 1.5, `${(seenSlope[71] / seenSlope[0]).toFixed(2)}×`);
+  // ★ 下标必须是 LEVELS.length-1 而不是写死的 71：写死的话 432 关时读到的只是
+  //   "第 72 关"，比值从 2.7× 掉到 1.24×，看起来像难度曲线坏了，其实是断言自己过期了。
+  const lastSlope = seenSlope[seenSlope.length - 1];
+  ck("【全局】末关坡度 > 首关 1.5 倍", lastSlope > seenSlope[0] * 1.5,
+    `末关(第${seenSlope.length}关) ${lastSlope.toFixed(2)} / 首关 ${seenSlope[0].toFixed(2)} = ${(lastSlope / seenSlope[0]).toFixed(2)}×`);
 
   // ---- 生效中的局部地貌不得退化成"代码在、功能死" ----
   // 这条是被变异测试逼出来的：FEAT_AMP_MAX 一度被留在调试值 0，
@@ -625,17 +629,21 @@ sect("边界与鲁棒性");
   })(), "1px 步长");
 
   // 支线
-  ck("支线数 = 12", N_BRANCHES === 12 && BRANCHES.length === 12, String(BRANCHES.length));
-  ck("支线 id 唯一", new Set(BRANCHES.map((b) => b.id)).size === 12);
-  ck("支线 theme 覆盖 12 场景", new Set(BRANCHES.map((b) => b.theme)).size === 12);
+  ck("支线数 = 场景数（36 场景）", N_BRANCHES === 36 && BRANCHES.length === 36, String(BRANCHES.length));
+  ck("支线 id 唯一", new Set(BRANCHES.map((b) => b.id)).size === BRANCHES.length,
+    `${new Set(BRANCHES.map((b) => b.id)).size}/${BRANCHES.length}`);
+  ck("支线 theme 与场景 1:1 覆盖", new Set(BRANCHES.map((b) => b.theme)).size === BRANCHES.length,
+    `${new Set(BRANCHES.map((b) => b.theme)).size}/${BRANCHES.length}`);
   for (let i = 0; i < BRANCHES.length; i++) {
     const b = BRANCHES[i];
     ck(`支线 ${b.name} name 非空`, !!b.name);
     ck(`支线 ${b.name} desc 非空`, !!b.desc);
     ck(`支线 ${b.name} theme 合法`, b.theme >= 0 && b.theme < THEMES.length, String(b.theme));
-    ck(`支线 ${b.name} 恰好 6 关`, LEVELS.filter((_, k) => Math.floor(k / LEVELS_PER_BRANCH) === i).length === 6);
+    ck(`支线 ${b.name} 恰好 ${LEVELS_PER_BRANCH} 关`,
+      LEVELS.filter((_, k) => Math.floor(k / LEVELS_PER_BRANCH) === i).length === LEVELS_PER_BRANCH);
   }
-  ck("72 = 12 支线 × 6 关", LEVELS.length === N_BRANCHES * LEVELS_PER_BRANCH, `${LEVELS.length}`);
+  ck(`${LEVELS.length} = ${N_BRANCHES} 支线 × ${LEVELS_PER_BRANCH} 关`,
+    LEVELS.length === N_BRANCHES * LEVELS_PER_BRANCH, `${LEVELS.length}`);
 
   // 固定步长累加器
   const st = new Stepper(() => {});

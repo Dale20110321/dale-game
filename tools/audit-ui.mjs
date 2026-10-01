@@ -80,18 +80,25 @@ export default async function (ctx) {
     scenario([], 0);
     check("全新存档：前沿 = 第 1 条支线", frontierBrs() === 0, `前沿 = #${frontierBrs()}`);
 
+    // ★ 全部按 LEVELS_PER_BRANCH / LEVELS.length 派生，不再写死 6/12/72/11：
+    //   每支线 6→12 关、支线 12→36 条之后，这些魔法数字会集体变红，
+    //   而失败原因与"前沿判定"本身无关（是断言自己过期了）。
+    const LPB = LEVELS_PER_BRANCH;
+    const NT = LEVELS.length;
+
     // 首支线全通、第二支线打了 2 关 → 前沿必须落在第二支线
     scenario([0, 1, 2, 3, 4, 5, 6, 7], 8);
     check("首支线已全通：前沿推进到第 2 条支线", frontierBrs() === 1, `前沿 = #${frontierBrs()}`);
 
     // 前两支线全通
-    scenario([...Array(12).keys()], 12);
+    scenario([...Array(LPB * 2).keys()], LPB * 2);
     check("前两支线全通：前沿推进到第 3 条支线", frontierBrs() === 2, `前沿 = #${frontierBrs()}`);
 
     // 全部通关：不应再有前沿（front 为 false），但仍不得指向第 1 条
-    scenario([...Array(72).keys()], 71);
+    scenario([...Array(NT).keys()], NT - 1);
     check("全通关：不再有前沿标记", frontierBrs() === -1, `前沿 = #${frontierBrs()}`);
-    check("全通关：仍展开当前关卡所在支线", expandedName().startsWith(BRANCHES[11].name), expandedName());
+    check("全通关：仍展开当前关卡所在支线",
+      expandedName().startsWith(BRANCHES[BRANCHES.length - 1].name), expandedName());
   }
 
   // ---------------- 3. 关卡格四态 ----------------

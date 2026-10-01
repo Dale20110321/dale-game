@@ -3,8 +3,7 @@
 import {
   START_X, WHEELBASE, toM, toKmh, LAND_REF,
   RATING_MIN, RATING_WIN_GAIN, RATING_LOSS,
-  RATING_WIN_GAIN_ADVANCED, RATING_LOSS_ADVANCED, rankName,
-} from "../config/constants.js";
+  RATING_WIN_GAIN_ADVANCED, RATING_LOSS_ADVANCED, rankName, rankGold } from "../config/constants.js";
 import { LEVELS, levelAt, segmentThemeAt, variantRule } from "../config/levels.js";
 import { THEMES } from "../config/themes.js";
 import { store, bike, world } from "../core/store.js";
@@ -315,8 +314,13 @@ function finishLevel() {
     const before = store.progress.rating;
     const after = settleRanked(won);
     result.title = won ? "🏆 排位胜利" : "🏳 排位失利";
+    // 排位赛金币：胜利收益随段位分升高而升高（500 + rating×0.25）
+    const gain = rankGold(won, before);
+    addGold(gain);
+    result.goldGain = gain;
     result.ratingDelta = after - before;
     result.rating = after;
+    showToast((won ? "🏆 排位胜利 🪙+" : "🏳 排位失利 🪙+") + gain, 900, won ? "success" : "warn");
     result.nextLabel = "继续 →";
   } else if (store.mode === "level") {
     // 计时惩罚（摔车）计入本关用时，直接影响三星时限
@@ -329,11 +333,13 @@ function finishLevel() {
     if (store.selLevel >= store.unlocked && store.selLevel < LEVELS.length - 1) {
       store.unlocked = store.selLevel + 1;
     }
-    addGold(200); // 内部会 save()，一并写入解锁与星级
-    showToast("🏁 通关 " + "★".repeat(s) + "！🪙+200", 900, "success");
+    // 通关固定奖励随全局进度递增（280 → 1000）：写死 200 时 432 关一轮的总收入
+    // 撑不起任何一辆车的升级曲线。数值由 makeLevel 反推，见 levels.js 的注释。
+    addGold(L.goldBase); // 内部会 save()，一并写入解锁与星级
+    showToast("🏁 通关 " + "★".repeat(s) + "！🪙+" + L.goldBase, 900, "success");
     result.title = "🏁 通关";
     result.stars = s;
-    result.goldGain = 200;
+    result.goldGain = L.goldBase;
     result.time = elapsed;
     result.nextLabel = store.selLevel < LEVELS.length - 1 ? "下一关 →" : "🏠 返回菜单";
     if (!run.runCrashed) checkAch("noc");

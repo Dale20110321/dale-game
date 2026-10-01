@@ -353,9 +353,24 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
    升级车间
    ============================================================ */
 #shop {
-  position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
+  /* ★ 三个改动都是为了修"手机端必须全屏才看全"：
+   *   1. absolute → fixed：以**视口**为基准锚定。原写法以画布容器为基准，
+   *      手机浏览器地址栏收放（innerHeight 变化）时会错位。
+   *   2. 加 overflow-y: auto + -webkit-overflow-scrolling：内容高于视口时可滚动。
+   *   3. center → flex-start：裸的 justify-content:center 在内容溢出时
+   *      会让上下同时溢出而**上半部分永远滚不到**（flex 居中溢出的经典坑）。
+   *      改顶部对齐后首尾都在滚动范围内；桌面端靠 padding 保持视觉居中。
+   */
+  position: fixed; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: flex-start;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: max(var(--space-4), env(safe-area-inset-top)) var(--space-3)
+           max(var(--space-4), env(safe-area-inset-bottom));
   background: var(--scrim-strong); color: var(--text-hi); text-align: center; z-index: 30;
+}
+/* 桌面端内容较短时仍然视觉居中；内容变长则由 flex-start + 滚动接管 */
+@media (min-width: 768px) and (min-height: 720px) {
+  #shop { justify-content: center; }
 }
 #shop.hidden { display: none; }
 #shop h2 { font-size: 28px; letter-spacing: 1px; margin-bottom: var(--space-1); }
@@ -363,7 +378,9 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 .upItm {
   display: flex; align-items: center; gap: var(--space-4);
   background: var(--glass-fill); border-radius: var(--radius-card);
-  padding: var(--space-3) var(--space-4); margin: var(--space-2) 0; width: 360px; max-width: 92vw;
+  /* 宽度写死 360px 会在 320px 视口下横向溢出；min() 让它自适应 */
+  padding: var(--space-3) var(--space-4); margin: var(--space-2) 0;
+  width: min(360px, 100%);
 }
 .upT { font-size: 17px; font-weight: var(--font-title-weight); width: 66px; text-align: left; }
 .upD { font-size: var(--font-caption-size); color: var(--text-lo); flex: 1; text-align: left; }

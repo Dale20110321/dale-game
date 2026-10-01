@@ -129,9 +129,16 @@
   var ENGINE_RPM_UP = 0.018;
   var TIRE_TORQUE_UP = 0.006;
   var FRICTION_TIRE_UP = 0.006;
+  var ABSOLUT_KMH = 350;
+  var ABSOLUT_V = ABSOLUT_KMH / 3.6 * PX_PER_M;
+  var ABSOLUT_DRAG_K = 0.00013;
+  var ABSOLUT_THRUST_K = 1;
+  var ABSOLUT_SERVO_ACC = 1.2;
   var GRAV_BASE = 750;
   var REAR_LOAD = 0.62;
-  var TOP_SPEED_CAP = 6000;
+  var WHEELIE_K = 2;
+  var wheelieTauOf = (mTot, GRAV) => mTot * GRAV * WHEELBASE * 0.5 * WHEELIE_K;
+  var TOP_SPEED_CAP = 12000;
   function topSpeedOf(veh, up) {
     const p = veh && veh.phys || {};
     const u = up || {};
@@ -144,7 +151,8 @@
     const mu = FRICTION_BASE * (veh && veh.grp || 1) * (1 + FRICTION_TIRE_UP * tire);
     const grip = mu * mTot * GRAV_BASE * REAR_LOAD;
     const roll = ROLL_RES_K * mTot * GRAV_BASE;
-    const avail = (v) => Math.min(torqueAt(veh, v / WHEEL_R, 1, peak, rpmK) / WHEEL_R, grip);
+    const tauCap = wheelieTauOf(mTot, GRAV_BASE);
+    const avail = (v) => Math.min(Math.min(torqueAt(veh, v / WHEEL_R, 1, peak, rpmK), tauCap) / WHEEL_R, grip);
     const loss = (v) => AIR_DRAG_K * v * v + roll;
     let lo = 0;
     let hi = TOP_SPEED_CAP;
@@ -183,7 +191,7 @@
   var FN_MAX_K = 40;
   var PEN_TOL = 2;
   var HEAD_R = 18;
-  var NUM_CAP_V = 6000;
+  var NUM_CAP_V = 20000;
   var TORQUE_PEAK_BASE = 18000;
   var TORQUE_RPM_BASE = 18;
   var TORQUE_FADE_LO = 1.6;
@@ -265,7 +273,19 @@
   var KICK_MIN_V = 220;
   var MAX_LV = 100;
   var upCost = (lv) => Math.round(10 + 1.2 * lv);
+  var upCostOf = (veh, lv) => Math.round(upCost(lv) * (veh && veh.costK || 1));
   var CAN_FUEL = 0.6;
+  var RANK_WIN_GOLD_BASE = 500;
+  var RANK_WIN_GOLD_K = 0.25;
+  var RANK_LOSS_GOLD = 150;
+  var rankGold = (won, rating) => Math.round(won ? RANK_WIN_GOLD_BASE + Math.max(0, rating || 0) * RANK_WIN_GOLD_K : RANK_LOSS_GOLD);
+  var GOLD_MAX = 1000000000000000;
+  var safeGold = (v) => {
+    const n = Math.floor(Number(v));
+    if (!Number.isFinite(n))
+      return 0;
+    return n < 0 ? 0 : n > GOLD_MAX ? GOLD_MAX : n;
+  };
   var ACHS = [
     { id: "air", name: "腾空初体验", icon: "\uD83D\uDD4A", desc: "单次腾空 0.8 秒以上" },
     { id: "flip", name: "空翻达人", icon: "\uD83E\uDD38", desc: "完成一次空中翻转并安全落地" },
@@ -575,6 +595,45 @@
         cost: 1e6,
         desc: "光子跃迁：踩住油门持续喷射，0.7 秒逼近极速"
       }
+    },
+    {
+      id: "singularity",
+      name: "奇点号",
+      icon: "\uD83C\uDF0C",
+      desc: "究极终局：350 km/h 极速 · 摔不坏 · 全项目最强参数",
+      price: 2000000,
+      costK: 40,
+      tier: "神话",
+      drv: 2.4,
+      spd: 2.6,
+      grp: 1.9,
+      wgt: 1.2,
+      air: 0.55,
+      tank: 3.2,
+      color: "#00ff9d",
+      art: ART({
+        tire: 6.2,
+        spokes: 12,
+        spokeW: 2,
+        tube: 9,
+        topDrop: 12,
+        coil: 2.2,
+        bar: "drop",
+        saddleW: 20,
+        helmR: 6,
+        peak: true,
+        vents: 5,
+        pose: POSE(9, 9, 11, 8, 4, 7)
+      }),
+      phys: P(1.2, 1.82, 1.6, 1.5, 26, 3, 2.2),
+      ultra: {
+        name: "绝对形态",
+        icon: "\uD83C\uDF0C",
+        mode: "absolut",
+        builtin: true,
+        cost: 0,
+        desc: "免解锁：350 km/h 极速 · 怎么摔都摔不坏 · 抗摔不设上限"
+      }
     }
   ];
 
@@ -859,12 +918,967 @@
     }, 1400);
   }
 
+  // src/config/themes.js
+  var THEMES = [
+    {
+      name: "绿野",
+      g: 750,
+      traction: 1,
+      sky: ["#7ec8f7", "#cdeffd", "#eef8fc"],
+      sun: "#ffe677",
+      pal: ["#3f7d3a", "#58a24f", "#8b5e3c"],
+      ground: "#c4a882",
+      deco: ["tree", "bush", "flower"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#ffe677", accent: "#fffbe0", r: 40, x: 0.9, y: 90, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "soft", count: 6, color: "rgba(255,255,255,.75)", alpha: 0.75, parallax: 0.2, w: 120, wVar: 30, spread: 260, yBand: [60, 40] }],
+        ridges: [
+          { kind: "hills", color: "rgba(85,130,170,.42)", parallax: 0.18, y: 0.5, amp1: 46, f1: 0.0031, amp2: 18, f2: 0.0093, phase: 0.6 },
+          { kind: "hills", color: "#9cc5e0", parallax: 0.4, y: 0.62, amp1: 46, f1: 0.01, amp2: 22, f2: 0.03, phase: 0 }
+        ],
+        haze: null
+      },
+      surface: { type: "grass", color: "rgba(28,84,38,.45)", color2: "#58a24f" },
+      dust: { light: "#c4a882", heavy: "#d9c39a" },
+      ambient: { type: "pollen", color: "#eaf6c0", rate: 0.3, spd: 0.3 }
+    },
+    {
+      name: "雪原",
+      g: 750,
+      traction: 0.72,
+      sky: ["#bcd8f2", "#e6f2fd", "#fbfeff"],
+      sun: "#fff3c4",
+      pal: ["#dbe9f5", "#eef5fb", "#9fb8cc"],
+      ground: "#eef5fb",
+      deco: ["snowtree", "snowman", "icespike"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#fff3c4", accent: "#fffdf0", r: 38, x: 0.88, y: 80, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "soft", count: 7, color: "rgba(255,255,255,.8)", alpha: 0.8, parallax: 0.2, w: 130, wVar: 30, spread: 280, yBand: [55, 45] }],
+        ridges: [
+          { kind: "peaks", color: "rgba(140,170,200,.45)", parallax: 0.18, y: 0.5, amp1: 52, f1: 0.0031, amp2: 22, f2: 0.0093, phase: 0.6 },
+          { kind: "hills", color: "#dfeefb", parallax: 0.4, y: 0.62, amp1: 46, f1: 0.01, amp2: 22, f2: 0.03, phase: 0 }
+        ],
+        haze: null
+      },
+      surface: { type: "snowpuff", color: "rgba(255,255,255,.5)", color2: "rgba(190,215,235,.6)" },
+      dust: { light: "#eef5fb", heavy: "#ffffff" },
+      ambient: { type: "snow", color: "#ffffff", rate: 0.6, spd: 0.5 }
+    },
+    {
+      name: "荒漠",
+      g: 750,
+      traction: 0.88,
+      sky: ["#ffc46b", "#ffe0b0", "#fff3d8"],
+      sun: "#ffd27a",
+      pal: ["#c28b4f", "#d9a766", "#7a5a36"],
+      ground: "#e6c98f",
+      deco: ["cactus", "rock", "pebble"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#ffe0a0", accent: "#fff6d8", r: 46, x: 0.84, y: 92, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "thin", count: 3, color: "rgba(255,246,220,.55)", alpha: 0.55, parallax: 0.2, w: 150, wVar: 40, spread: 300, yBand: [50, 34] }],
+        ridges: [
+          { kind: "dunes", color: "rgba(165,115,70,.40)", parallax: 0.18, y: 0.53, amp1: 34, f1: 0.0022, amp2: 14, f2: 0.0071, phase: 0.6 },
+          { kind: "dunes", color: "#f6d9a8", parallax: 0.4, y: 0.63, amp1: 32, f1: 0.008, amp2: 16, f2: 0.026, phase: 0 }
+        ],
+        haze: { color: "rgba(255,225,175,.20)" }
+      },
+      surface: { type: "sandripple", color: "rgba(120,80,40,.30)", color2: "rgba(200,160,100,.4)" },
+      dust: { light: "#e6c98f", heavy: "#d9c39a" },
+      ambient: { type: "sand", color: "#e9c98f", rate: 0.5, spd: 0.6 }
+    },
+    {
+      name: "月面",
+      g: 350,
+      traction: 1,
+      sky: ["#05070f", "#0d1326", "#141d3a"],
+      sun: "#f6f8ff",
+      pal: ["#6a7078", "#828a94", "#4d5259"],
+      ground: "#9aa2ad",
+      deco: ["moonrock", "crater"],
+      bg: {
+        space: true,
+        celestial: { type: "earth", color: "#3b6ea5", accent: "rgba(120,205,160,.6)", r: 26, x: 0.12, y: 110, parallax: 0.06 },
+        starLayers: [{ count: 70, alpha: 0.8, rMax: 1.4, parallax: 0.15, seed: 99 }],
+        aurora: { color: "rgba(255,255,255,.14)", count: 14, parallax: 0.2, spread: 431, y0: 80, rowGap: 60, rows: 7, w: 90, wVar: 40, h: 22 },
+        cloudLayers: [],
+        ridges: [],
+        haze: null
+      },
+      surface: { type: "crater", color: "rgba(28,32,42,.35)", color2: "rgba(120,128,140,.35)" },
+      dust: { light: "#9aa2ad", heavy: "#9aa2ad" },
+      ambient: { type: "none", color: "#9aa2ad", rate: 0, spd: 0 }
+    },
+    {
+      name: "雨林",
+      g: 760,
+      traction: 0.92,
+      sky: ["#8fd0b0", "#c9ecc9", "#eaf8e2"],
+      sun: "#eaffc0",
+      pal: ["#245c30", "#3f8a3f", "#5a3a24"],
+      ground: "#6b4a2e",
+      deco: ["fern", "tree", "stump"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#eaffc0", accent: "#f7ffe0", r: 34, x: 0.86, y: 64, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "soft", count: 8, color: "rgba(240,255,240,.55)", alpha: 0.55, parallax: 0.22, w: 130, wVar: 34, spread: 270, yBand: [45, 42] }],
+        ridges: [
+          { kind: "treeLine", color: "rgba(40,90,60,.45)", parallax: 0.16, y: 0.52, amp1: 38, f1: 0.006, amp2: 20, f2: 0.017, phase: 1.2 },
+          { kind: "treeLine", color: "#2f6b3c", parallax: 0.38, y: 0.64, amp1: 30, f1: 0.012, amp2: 16, f2: 0.03, phase: 0 }
+        ],
+        haze: { color: "rgba(180,230,190,.18)" }
+      },
+      surface: { type: "moss", color: "rgba(30,80,40,.5)", color2: "rgba(90,150,70,.5)" },
+      dust: { light: "#6b4a2e", heavy: "#8a6a3a" },
+      ambient: { type: "mist", color: "#dff5e0", rate: 0.5, spd: 0.25 }
+    },
+    {
+      name: "火山",
+      g: 900,
+      traction: 0.86,
+      sky: ["#3a0f0f", "#7a2a15", "#c65a1e"],
+      sun: "#ff8a3d",
+      pal: ["#3a2b28", "#5a3a30", "#1c1412"],
+      ground: "#4a2f26",
+      deco: ["lavarock", "obsidian"],
+      bg: {
+        space: false,
+        celestial: { type: "redGiant", color: "#ff7a2a", accent: "#ffd08a", r: 52, x: 0.78, y: 110, parallax: 0.04 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "storm", count: 5, color: "rgba(60,30,30,.55)", alpha: 0.55, parallax: 0.24, w: 160, wVar: 40, spread: 320, yBand: [50, 45] }],
+        ridges: [
+          { kind: "peaks", color: "rgba(60,25,20,.6)", parallax: 0.18, y: 0.5, amp1: 70, f1: 0.004, amp2: 26, f2: 0.012, phase: 0.4 },
+          { kind: "peaks", color: "#2a1815", parallax: 0.42, y: 0.62, amp1: 55, f1: 0.008, amp2: 24, f2: 0.02, phase: 2.1 }
+        ],
+        haze: { color: "rgba(120,40,20,.18)" }
+      },
+      surface: { type: "lava", color: "rgba(255,120,40,.75)", color2: "rgba(255,200,80,.55)" },
+      dust: { light: "#4a2f26", heavy: "#8a5a3a" },
+      ambient: { type: "ember", color: "#ff9040", rate: 0.7, spd: 0.5 }
+    },
+    {
+      name: "冰川",
+      g: 740,
+      traction: 0.62,
+      sky: ["#9fd4f0", "#d8f0fb", "#f4fbff"],
+      sun: "#ffffff",
+      pal: ["#bfe0ee", "#e6f6fd", "#7ba8c4"],
+      ground: "#dff2fa",
+      deco: ["iceberg", "icespike", "crystal"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#eaf7ff", accent: "#ffffff", r: 34, x: 0.16, y: 80, parallax: 0.05 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "thin", count: 5, color: "rgba(255,255,255,.6)", alpha: 0.6, parallax: 0.2, w: 170, wVar: 40, spread: 310, yBand: [50, 46] }],
+        ridges: [
+          { kind: "iceberg", color: "rgba(150,190,215,.5)", parallax: 0.16, y: 0.5, amp1: 58, f1: 0.0032, amp2: 22, f2: 0.009, phase: 0.9 },
+          { kind: "iceberg", color: "#dff2fa", parallax: 0.4, y: 0.62, amp1: 48, f1: 0.009, amp2: 24, f2: 0.026, phase: 0 }
+        ],
+        haze: null
+      },
+      surface: { type: "frost", color: "rgba(255,255,255,.6)", color2: "rgba(160,215,245,.5)" },
+      dust: { light: "#dff2fa", heavy: "#ffffff" },
+      ambient: { type: "snow", color: "#dff2fa", rate: 0.5, spd: 0.5 }
+    },
+    {
+      name: "红岩峡谷",
+      g: 760,
+      traction: 0.9,
+      sky: ["#f2a15c", "#f7c98a", "#fbe3bd"],
+      sun: "#ffd68a",
+      pal: ["#9c4a2a", "#c26a3a", "#5a2f1c"],
+      ground: "#b5643a",
+      deco: ["mesarock", "rock"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#ffe0a0", accent: "#fff2cf", r: 38, x: 0.88, y: 100, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "thin", count: 3, color: "rgba(255,235,210,.5)", alpha: 0.5, parallax: 0.2, w: 160, wVar: 40, spread: 300, yBand: [48, 40] }],
+        ridges: [
+          { kind: "mesa", color: "rgba(150,80,45,.45)", parallax: 0.18, y: 0.5, amp1: 52, f1: 0.0035, amp2: 20, f2: 0.01, phase: 1.5 },
+          { kind: "mesa", color: "#d98a5a", parallax: 0.42, y: 0.62, amp1: 44, f1: 0.008, amp2: 22, f2: 0.024, phase: 0 }
+        ],
+        haze: { color: "rgba(240,180,130,.16)" }
+      },
+      surface: { type: "strata", color: "rgba(90,45,25,.35)", color2: "rgba(200,130,90,.4)" },
+      dust: { light: "#b5643a", heavy: "#d98a5a" },
+      ambient: { type: "sand", color: "#d98a5a", rate: 0.4, spd: 0.5 }
+    },
+    {
+      name: "沼泽",
+      g: 720,
+      traction: 0.7,
+      sky: ["#6d7f6a", "#9fb39a", "#c9d6c2"],
+      sun: "#e6e7b0",
+      pal: ["#3e4a32", "#556843", "#2a3324"],
+      ground: "#4a5238",
+      deco: ["reed", "stump"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#e6e7b0", accent: "#f2f2cc", r: 30, x: 0.2, y: 90, parallax: 0.05 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "storm", count: 6, color: "rgba(150,160,150,.5)", alpha: 0.5, parallax: 0.22, w: 150, wVar: 36, spread: 300, yBand: [45, 40] }],
+        ridges: [
+          { kind: "treeLine", color: "rgba(60,70,55,.5)", parallax: 0.16, y: 0.52, amp1: 30, f1: 0.005, amp2: 14, f2: 0.015, phase: 0.7 },
+          { kind: "hills", color: "#556843", parallax: 0.4, y: 0.64, amp1: 26, f1: 0.01, amp2: 12, f2: 0.028, phase: 0 }
+        ],
+        haze: { color: "rgba(180,190,170,.22)" }
+      },
+      surface: { type: "puddle", color: "rgba(40,60,50,.45)", color2: "rgba(120,160,150,.4)" },
+      dust: { light: "#4a5238", heavy: "#6a7a50" },
+      ambient: { type: "mist", color: "#c9d6c2", rate: 0.6, spd: 0.2 }
+    },
+    {
+      name: "城市废墟",
+      g: 780,
+      traction: 1,
+      sky: ["#8a93a8", "#b9c0d0", "#dfe3ec"],
+      sun: "#f4f6ff",
+      pal: ["#6a6e76", "#8a9098", "#4a4e56"],
+      ground: "#7a7f88",
+      deco: ["ruin", "rubble", "pillar"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#f4f6ff", accent: "#ffffff", r: 30, x: 0.8, y: 70, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "thin", count: 4, color: "rgba(255,255,255,.5)", alpha: 0.5, parallax: 0.2, w: 160, wVar: 36, spread: 300, yBand: [50, 40] }],
+        ridges: [
+          { kind: "ruin", color: "rgba(80,85,95,.55)", parallax: 0.16, y: 0.5, amp1: 60, f1: 0.004, amp2: 24, f2: 0.012, phase: 2.4 },
+          { kind: "ruin", color: "#aab0bc", parallax: 0.4, y: 0.62, amp1: 50, f1: 0.008, amp2: 22, f2: 0.024, phase: 0 }
+        ],
+        haze: { color: "rgba(200,205,215,.14)" }
+      },
+      surface: { type: "debris", color: "rgba(50,52,60,.4)", color2: "rgba(150,152,162,.45)" },
+      dust: { light: "#7a7f88", heavy: "#a0a4ac" },
+      ambient: { type: "dust", color: "#b0b4bc", rate: 0.4, spd: 0.4 }
+    },
+    {
+      name: "天空浮岛",
+      g: 520,
+      traction: 1,
+      sky: ["#5aa8e6", "#a8d8f5", "#eaf6ff"],
+      sun: "#fff4c8",
+      pal: ["#6aa86a", "#9ccb7a", "#b9a98a"],
+      ground: "#cfe3a0",
+      deco: ["cloudpuff", "bush"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#fff4c8", accent: "#fffbe8", r: 44, x: 0.85, y: 80, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [
+          { kind: "soft", count: 10, color: "rgba(255,255,255,.85)", alpha: 0.85, parallax: 0.24, w: 140, wVar: 40, spread: 300, yBand: [60, 60] },
+          { kind: "thin", count: 6, color: "rgba(255,255,255,.5)", alpha: 0.5, parallax: 0.12, w: 190, wVar: 50, spread: 360, yBand: [40, 30] }
+        ],
+        ridges: [
+          { kind: "island", color: "rgba(120,160,190,.4)", parallax: 0.18, y: 0.5, amp1: 60, f1: 0.003, amp2: 26, f2: 0.009, phase: 1.1 },
+          { kind: "island", color: "#cfe3a0", parallax: 0.42, y: 0.64, amp1: 50, f1: 0.008, amp2: 24, f2: 0.022, phase: 0 }
+        ],
+        haze: { color: "rgba(220,240,255,.18)" }
+      },
+      surface: { type: "cloudtuft", color: "rgba(255,255,255,.5)", color2: "#9ccb7a" },
+      dust: { light: "#eaf6ff", heavy: "#ffffff" },
+      ambient: { type: "none", color: "#ffffff", rate: 0, spd: 0 }
+    },
+    {
+      name: "极夜星空",
+      g: 740,
+      traction: 0.8,
+      sky: ["#04060e", "#0a1424", "#10203a"],
+      sun: "#cfe0ff",
+      pal: ["#3a4a5a", "#4f6478", "#2a3642"],
+      ground: "#5a6a7a",
+      deco: ["pine", "crystal"],
+      bg: {
+        space: true,
+        celestial: { type: "moon", color: "#dfe8ff", accent: "rgba(160,180,210,.6)", r: 34, x: 0.82, y: 80, parallax: 0.05 },
+        starLayers: [
+          { count: 90, alpha: 0.85, rMax: 1.5, parallax: 0.12, seed: 2024 },
+          { count: 40, alpha: 0.5, rMax: 2.2, parallax: 0.06, seed: 777 }
+        ],
+        aurora: { color: "rgba(110,255,190,.16)", count: 8, parallax: 0.08, spread: 260, y0: 60, rowGap: 40, rows: 4, w: 130, wVar: 50, h: 18 },
+        cloudLayers: [],
+        ridges: [
+          { kind: "peaks", color: "rgba(40,55,75,.6)", parallax: 0.16, y: 0.5, amp1: 64, f1: 0.0035, amp2: 24, f2: 0.011, phase: 1.9 },
+          { kind: "peaks", color: "#2a3a4a", parallax: 0.4, y: 0.62, amp1: 50, f1: 0.009, amp2: 22, f2: 0.026, phase: 0 }
+        ],
+        haze: { color: "rgba(60,90,140,.12)" }
+      },
+      surface: { type: "iceglow", color: "rgba(140,200,255,.5)", color2: "rgba(90,150,220,.4)" },
+      dust: { light: "#5a6a7a", heavy: "#8ab0d0" },
+      ambient: { type: "snow", color: "#bfe0ff", rate: 0.6, spd: 0.5 }
+    },
+    {
+      name: "雾都",
+      g: 780,
+      traction: 0.94,
+      sky: ["#6d7684", "#9aa4b0", "#cdd4dc"],
+      sun: "#eef2f7",
+      pal: ["#4e545e", "#6a7078", "#33373e"],
+      ground: "#7a808a",
+      deco: ["pillar", "ruin", "rubble"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#e8eef4", accent: "#ffffff", r: 24, x: 0.8, y: 58, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [
+          { kind: "storm", count: 8, color: "rgba(150,160,172,.55)", alpha: 0.55, parallax: 0.16, w: 190, wVar: 46, spread: 340, yBand: [40, 40] },
+          { kind: "soft", count: 5, color: "rgba(210,216,224,.45)", alpha: 0.45, parallax: 0.24, w: 210, wVar: 50, spread: 380, yBand: [96, 42] }
+        ],
+        ridges: [
+          { kind: "ruin", color: "rgba(92,98,108,.55)", parallax: 0.15, y: 0.5, amp1: 66, f1: 0.0042, amp2: 26, f2: 0.012, phase: 1.7 },
+          { kind: "ruin", color: "#b3bcc7", parallax: 0.38, y: 0.62, amp1: 52, f1: 0.0084, amp2: 22, f2: 0.023, phase: 0 }
+        ],
+        haze: { color: "rgba(200,208,218,.30)" }
+      },
+      surface: { type: "debris", color: "rgba(48,52,60,.42)", color2: "rgba(158,164,174,.45)" },
+      dust: { light: "#7a808a", heavy: "#a6acb6" },
+      ambient: { type: "mist", color: "#dbe1e9", rate: 0.7, spd: 0.16 }
+    },
+    {
+      name: "稻田",
+      g: 750,
+      traction: 0.86,
+      sky: ["#8fc8dc", "#cce8dc", "#f2f8e4"],
+      sun: "#f6ffd4",
+      pal: ["#3e7038", "#5c9042", "#5e4a28"],
+      ground: "#8aa05c",
+      deco: ["reed", "fern", "bush"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#f2ffcc", accent: "#fbffe8", r: 32, x: 0.24, y: 72, parallax: 0.04 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "soft", count: 7, color: "rgba(255,255,255,.6)", alpha: 0.6, parallax: 0.2, w: 150, wVar: 34, spread: 300, yBand: [44, 38] }],
+        ridges: [
+          { kind: "hills", color: "rgba(120,146,100,.42)", parallax: 0.17, y: 0.51, amp1: 28, f1: 0.0025, amp2: 13, f2: 0.0074, phase: 1.4 },
+          { kind: "hills", color: "#a6cf7e", parallax: 0.4, y: 0.63, amp1: 24, f1: 0.0078, amp2: 12, f2: 0.026, phase: 0 }
+        ],
+        haze: { color: "rgba(226,238,208,.22)" }
+      },
+      surface: { type: "puddle", color: "rgba(46,76,40,.38)", color2: "rgba(150,186,110,.42)" },
+      dust: { light: "#8aa05c", heavy: "#b4c88a" },
+      ambient: { type: "mist", color: "#e4f2d4", rate: 0.5, spd: 0.14 }
+    },
+    {
+      name: "石林",
+      g: 762,
+      traction: 0.88,
+      sky: ["#7fb6c8", "#bcdcd8", "#e8f4ee"],
+      sun: "#f0ffe0",
+      pal: ["#2f5c48", "#457a5e", "#24402f"],
+      ground: "#7d9686",
+      deco: ["mesarock", "rock", "pebble"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#ecffe0", accent: "#faffec", r: 30, x: 0.82, y: 68, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "thin", count: 6, color: "rgba(255,255,255,.5)", alpha: 0.5, parallax: 0.2, w: 165, wVar: 40, spread: 310, yBand: [48, 34] }],
+        ridges: [
+          { kind: "peaks", color: "rgba(74,110,90,.46)", parallax: 0.16, y: 0.5, amp1: 70, f1: 0.0036, amp2: 26, f2: 0.011, phase: 0.9 },
+          { kind: "peaks", color: "#7ba78c", parallax: 0.38, y: 0.62, amp1: 52, f1: 0.0088, amp2: 22, f2: 0.025, phase: 0 }
+        ],
+        haze: { color: "rgba(200,226,214,.22)" }
+      },
+      surface: { type: "strata", color: "rgba(38,70,52,.36)", color2: "rgba(150,190,164,.4)" },
+      dust: { light: "#7d9686", heavy: "#a8c2ac" },
+      ambient: { type: "pollen", color: "#e6f6c8", rate: 0.35, spd: 0.28 }
+    },
+    {
+      name: "湖岸",
+      g: 745,
+      traction: 1.05,
+      sky: ["#5aa6e0", "#a8d8f0", "#e8f8ff"],
+      sun: "#fff2c0",
+      pal: ["#26584e", "#3d8070", "#1c4238"],
+      ground: "#a08e66",
+      deco: ["bush", "tree", "pebble"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#fff0bc", accent: "#fffae4", r: 36, x: 0.88, y: 86, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "soft", count: 6, color: "rgba(255,255,255,.72)", alpha: 0.72, parallax: 0.2, w: 145, wVar: 34, spread: 295, yBand: [50, 36] }],
+        ridges: [
+          { kind: "hills", color: "rgba(96,142,150,.4)", parallax: 0.17, y: 0.51, amp1: 42, f1: 0.003, amp2: 18, f2: 0.009, phase: 2.3 },
+          { kind: "hills", color: "#84c8c4", parallax: 0.4, y: 0.63, amp1: 32, f1: 0.009, amp2: 15, f2: 0.027, phase: 0 }
+        ],
+        haze: { color: "rgba(210,236,244,.22)" }
+      },
+      surface: { type: "puddle", color: "rgba(28,72,68,.36)", color2: "rgba(140,200,205,.42)" },
+      dust: { light: "#a08e66", heavy: "#cbb68e" },
+      ambient: { type: "pollen", color: "#eef8d4", rate: 0.3, spd: 0.24 }
+    },
+    {
+      name: "高原",
+      g: 872,
+      traction: 1,
+      sky: ["#3a7ec8", "#8cbcec", "#e2ecf8"],
+      sun: "#fffce4",
+      pal: ["#6a6440", "#8c8252", "#463e26"],
+      ground: "#b0a478",
+      deco: ["rock", "bush", "pebble"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#fffae0", accent: "#fffff8", r: 40, x: 0.82, y: 56, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [
+          { kind: "soft", count: 8, color: "rgba(255,255,255,.8)", alpha: 0.8, parallax: 0.22, w: 135, wVar: 32, spread: 285, yBand: [40, 40] },
+          { kind: "thin", count: 4, color: "rgba(255,255,255,.5)", alpha: 0.5, parallax: 0.12, w: 200, wVar: 50, spread: 360, yBand: [98, 30] }
+        ],
+        ridges: [
+          { kind: "hills", color: "rgba(126,118,86,.4)", parallax: 0.15, y: 0.52, amp1: 38, f1: 0.0022, amp2: 16, f2: 0.0065, phase: 1.9 },
+          { kind: "hills", color: "#cbb478", parallax: 0.36, y: 0.64, amp1: 30, f1: 0.0072, amp2: 13, f2: 0.023, phase: 0 }
+        ],
+        haze: { color: "rgba(228,226,240,.24)" }
+      },
+      surface: { type: "grass", color: "rgba(92,88,44,.35)", color2: "#8c8252" },
+      dust: { light: "#b0a478", heavy: "#d6c89c" },
+      ambient: { type: "dust", color: "#e2dcc2", rate: 0.4, spd: 0.42 }
+    },
+    {
+      name: "熔岩台地",
+      g: 860,
+      traction: 0.9,
+      sky: ["#280e12", "#5a1a16", "#a83c1c"],
+      sun: "#ff7028",
+      pal: ["#2c2224", "#463633", "#181214"],
+      ground: "#3a2f2d",
+      deco: ["obsidian", "lavarock"],
+      bg: {
+        space: false,
+        celestial: { type: "redGiant", color: "#ff6a1e", accent: "#ffc078", r: 44, x: 0.7, y: 112, parallax: 0.04 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "storm", count: 6, color: "rgba(48,24,24,.6)", alpha: 0.6, parallax: 0.22, w: 175, wVar: 42, spread: 330, yBand: [46, 42] }],
+        ridges: [
+          { kind: "mesa", color: "rgba(46,20,18,.62)", parallax: 0.16, y: 0.5, amp1: 68, f1: 0.0032, amp2: 24, f2: 0.0098, phase: 0.5 },
+          { kind: "mesa", color: "#2a1614", parallax: 0.4, y: 0.62, amp1: 50, f1: 0.0082, amp2: 22, f2: 0.023, phase: 0 }
+        ],
+        haze: { color: "rgba(112,36,22,.22)" }
+      },
+      surface: { type: "lava", color: "rgba(255,110,40,.7)", color2: "rgba(255,190,80,.5)" },
+      dust: { light: "#3a2f2d", heavy: "#7a5240" },
+      ambient: { type: "ember", color: "#ff7c34", rate: 0.7, spd: 0.45 }
+    },
+    {
+      name: "盐湖",
+      g: 748,
+      traction: 1.12,
+      sky: ["#8ec2e2", "#cfe2f0", "#fbfdff"],
+      sun: "#ffffff",
+      pal: ["#dce4ea", "#eef2f6", "#a8b2bc"],
+      ground: "#f2f5f8",
+      deco: ["rock", "pebble", "crater"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#ffffff", accent: "#ffffff", r: 48, x: 0.88, y: 100, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "thin", count: 3, color: "rgba(255,255,255,.5)", alpha: 0.5, parallax: 0.18, w: 195, wVar: 46, spread: 345, yBand: [52, 30] }],
+        ridges: [
+          { kind: "hills", color: "rgba(162,182,198,.32)", parallax: 0.14, y: 0.54, amp1: 20, f1: 0.002, amp2: 10, f2: 0.006, phase: 0.6 },
+          { kind: "hills", color: "#dbe6ee", parallax: 0.36, y: 0.66, amp1: 16, f1: 0.007, amp2: 9, f2: 0.022, phase: 0 }
+        ],
+        haze: { color: "rgba(255,255,255,.26)" }
+      },
+      surface: { type: "frost", color: "rgba(255,255,255,.55)", color2: "rgba(178,200,220,.45)" },
+      dust: { light: "#f2f5f8", heavy: "#ffffff" },
+      ambient: { type: "dust", color: "#ffffff", rate: 0.3, spd: 0.55 }
+    },
+    {
+      name: "赛博都市",
+      g: 792,
+      traction: 1.08,
+      sky: ["#160a2e", "#3c1466", "#6a2a8a"],
+      sun: "#ff5ad8",
+      pal: ["#2e2450", "#483a6e", "#181430"],
+      ground: "#4a4470",
+      deco: ["pillar", "ruin", "obsidian"],
+      bg: {
+        space: false,
+        celestial: { type: "ringed", color: "#ff6ad8", accent: "#7ae8ff", r: 30, x: 0.24, y: 68, parallax: 0.06 },
+        starLayers: [],
+        aurora: { color: "rgba(120,220,255,.12)", count: 7, parallax: 0.1, spread: 280, y0: 56, rowGap: 40, rows: 4, w: 130, wVar: 50, h: 18 },
+        cloudLayers: [{ kind: "storm", count: 6, color: "rgba(70,26,96,.55)", alpha: 0.55, parallax: 0.24, w: 175, wVar: 44, spread: 330, yBand: [42, 40] }],
+        ridges: [
+          { kind: "ruin", color: "rgba(46,22,70,.6)", parallax: 0.15, y: 0.5, amp1: 78, f1: 0.0044, amp2: 28, f2: 0.013, phase: 1.1 },
+          { kind: "ruin", color: "#6a4a92", parallax: 0.38, y: 0.62, amp1: 56, f1: 0.0086, amp2: 24, f2: 0.024, phase: 0 }
+        ],
+        haze: { color: "rgba(96,36,130,.24)" }
+      },
+      surface: { type: "debris", color: "rgba(26,18,44,.45)", color2: "rgba(140,96,220,.42)" },
+      dust: { light: "#4a4470", heavy: "#7a6aa8" },
+      ambient: { type: "rain", color: "#8ad8ff", rate: 0.6, spd: 0.6 }
+    },
+    {
+      name: "云海日出",
+      g: 700,
+      traction: 1,
+      sky: ["#e07a5c", "#f7b489", "#ffeed6"],
+      sun: "#ffd28a",
+      pal: ["#8a7a8a", "#b8a2ae", "#5e5266"],
+      ground: "#e0c8c0",
+      deco: ["cloudpuff", "bush"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#ffcf86", accent: "#fff0d0", r: 50, x: 0.78, y: 94, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [
+          { kind: "soft", count: 12, color: "rgba(255,238,226,.85)", alpha: 0.85, parallax: 0.26, w: 155, wVar: 44, spread: 310, yBand: [86, 54] },
+          { kind: "thin", count: 5, color: "rgba(255,220,190,.5)", alpha: 0.5, parallax: 0.12, w: 210, wVar: 52, spread: 380, yBand: [40, 30] }
+        ],
+        ridges: [
+          { kind: "island", color: "rgba(170,140,150,.36)", parallax: 0.16, y: 0.52, amp1: 58, f1: 0.0028, amp2: 24, f2: 0.0086, phase: 0.7 },
+          { kind: "island", color: "#f2d6c4", parallax: 0.4, y: 0.65, amp1: 46, f1: 0.008, amp2: 22, f2: 0.023, phase: 0 }
+        ],
+        haze: { color: "rgba(255,225,205,.22)" }
+      },
+      surface: { type: "cloudtuft", color: "rgba(255,255,255,.55)", color2: "#b8a2ae" },
+      dust: { light: "#e0c8c0", heavy: "#f8ece4" },
+      ambient: { type: "mist", color: "#ffece0", rate: 0.6, spd: 0.14 }
+    },
+    {
+      name: "苔原",
+      g: 742,
+      traction: 0.74,
+      sky: ["#93a8b4", "#c2d2d6", "#eaf2f2"],
+      sun: "#f4faf6",
+      pal: ["#4e5c48", "#6c7c60", "#33402e"],
+      ground: "#7f8c74",
+      deco: ["snowtree", "pine", "rock"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#eef6f4", accent: "#ffffff", r: 26, x: 0.2, y: 62, parallax: 0.05 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "storm", count: 7, color: "rgba(180,196,198,.48)", alpha: 0.48, parallax: 0.2, w: 160, wVar: 38, spread: 305, yBand: [44, 40] }],
+        ridges: [
+          { kind: "hills", color: "rgba(96,112,98,.42)", parallax: 0.16, y: 0.52, amp1: 34, f1: 0.0026, amp2: 15, f2: 0.0078, phase: 2.6 },
+          { kind: "hills", color: "#b6c6b8", parallax: 0.38, y: 0.64, amp1: 28, f1: 0.0082, amp2: 13, f2: 0.026, phase: 0 }
+        ],
+        haze: { color: "rgba(210,222,218,.24)" }
+      },
+      surface: { type: "moss", color: "rgba(52,72,48,.45)", color2: "rgba(130,160,120,.45)" },
+      dust: { light: "#7f8c74", heavy: "#a8b4a0" },
+      ambient: { type: "snow", color: "#f4fbf8", rate: 0.4, spd: 0.4 }
+    },
+    {
+      name: "戈壁滩",
+      g: 756,
+      traction: 0.9,
+      sky: ["#d9b07a", "#eecf9e", "#fbeccd"],
+      sun: "#ffdc9a",
+      pal: ["#9a7a4e", "#b89a66", "#6a5030"],
+      ground: "#c8ac78",
+      deco: ["rock", "pebble", "flower"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#ffe8b4", accent: "#fff8e0", r: 42, x: 0.84, y: 96, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "thin", count: 4, color: "rgba(255,245,220,.5)", alpha: 0.5, parallax: 0.2, w: 175, wVar: 44, spread: 320, yBand: [50, 32] }],
+        ridges: [
+          { kind: "dunes", color: "rgba(150,110,70,.36)", parallax: 0.17, y: 0.52, amp1: 30, f1: 0.0021, amp2: 13, f2: 0.0068, phase: 1.2 },
+          { kind: "dunes", color: "#d8c49a", parallax: 0.4, y: 0.64, amp1: 26, f1: 0.0076, amp2: 12, f2: 0.025, phase: 0 }
+        ],
+        haze: { color: "rgba(240,215,175,.22)" }
+      },
+      surface: { type: "sandripple", color: "rgba(110,80,50,.28)", color2: "rgba(200,175,130,.38)" },
+      dust: { light: "#c8ac78", heavy: "#ddc596" },
+      ambient: { type: "sand", color: "#e2c894", rate: 0.55, spd: 0.68 }
+    },
+    {
+      name: "雪谷",
+      g: 768,
+      traction: 0.66,
+      sky: ["#a8c6e2", "#d8e8f6", "#fbfdff"],
+      sun: "#f4f8ff",
+      pal: ["#c8dcec", "#e6f0fa", "#8fa8c0"],
+      ground: "#dcecf8",
+      deco: ["snowtree", "icespike", "snowman"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#eef6ff", accent: "#ffffff", r: 30, x: 0.3, y: 54, parallax: 0.06 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "storm", count: 6, color: "rgba(240,248,255,.6)", alpha: 0.6, parallax: 0.2, w: 170, wVar: 40, spread: 320, yBand: [46, 38] }],
+        ridges: [
+          { kind: "peaks", color: "rgba(130,158,188,.46)", parallax: 0.15, y: 0.5, amp1: 84, f1: 0.0032, amp2: 28, f2: 0.0096, phase: 1.3 },
+          { kind: "peaks", color: "#cfdfef", parallax: 0.36, y: 0.62, amp1: 58, f1: 0.0082, amp2: 24, f2: 0.025, phase: 0 }
+        ],
+        haze: { color: "rgba(225,240,252,.26)" }
+      },
+      surface: { type: "snowpuff", color: "rgba(255,255,255,.55)", color2: "rgba(186,212,236,.55)" },
+      dust: { light: "#dcecf8", heavy: "#ffffff" },
+      ambient: { type: "snow", color: "#ffffff", rate: 0.65, spd: 0.5 }
+    },
+    {
+      name: "冰晶湖",
+      g: 734,
+      traction: 0.64,
+      sky: ["#081428", "#123050", "#245070"],
+      sun: "#cfe8ff",
+      pal: ["#3c6a86", "#6ea8c4", "#2a4a5e"],
+      ground: "#b8dcec",
+      deco: ["crystal", "iceberg", "icespike"],
+      bg: {
+        space: true,
+        celestial: { type: "moon", color: "#e2f2ff", accent: "rgba(150,196,226,.6)", r: 32, x: 0.78, y: 66, parallax: 0.05 },
+        starLayers: [
+          { count: 80, alpha: 0.82, rMax: 1.5, parallax: 0.12, seed: 5050 },
+          { count: 34, alpha: 0.45, rMax: 2.2, parallax: 0.06, seed: 1616 }
+        ],
+        aurora: { color: "rgba(120,220,255,.13)", count: 7, parallax: 0.09, spread: 280, y0: 58, rowGap: 38, rows: 4, w: 140, wVar: 52, h: 18 },
+        cloudLayers: [],
+        ridges: [
+          { kind: "island", color: "rgba(60,110,150,.48)", parallax: 0.16, y: 0.5, amp1: 52, f1: 0.003, amp2: 22, f2: 0.009, phase: 2.4 },
+          { kind: "island", color: "#9ec8dc", parallax: 0.38, y: 0.62, amp1: 44, f1: 0.0084, amp2: 20, f2: 0.025, phase: 0 }
+        ],
+        haze: { color: "rgba(56,108,150,.16)" }
+      },
+      surface: { type: "iceglow", color: "rgba(150,220,255,.5)", color2: "rgba(80,150,210,.4)" },
+      dust: { light: "#b8dcec", heavy: "#8ac0e0" },
+      ambient: { type: "snow", color: "#d8f0ff", rate: 0.5, spd: 0.42 }
+    },
+    {
+      name: "草原",
+      g: 750,
+      traction: 1.05,
+      sky: ["#6ab0e8", "#b6d8f2", "#f4f8dc"],
+      sun: "#fff4b0",
+      pal: ["#5c8438", "#82a84c", "#6a4e28"],
+      ground: "#a8b866",
+      deco: ["bush", "flower", "tree"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#fff0a4", accent: "#fffbe0", r: 40, x: 0.9, y: 88, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "soft", count: 6, color: "rgba(255,255,255,.7)", alpha: 0.7, parallax: 0.2, w: 155, wVar: 36, spread: 300, yBand: [48, 36] }],
+        ridges: [
+          { kind: "hills", color: "rgba(130,155,90,.4)", parallax: 0.17, y: 0.51, amp1: 28, f1: 0.0024, amp2: 13, f2: 0.0074, phase: 0.4 },
+          { kind: "hills", color: "#c4d486", parallax: 0.4, y: 0.63, amp1: 24, f1: 0.0078, amp2: 12, f2: 0.025, phase: 0 }
+        ],
+        haze: { color: "rgba(235,240,205,.2)" }
+      },
+      surface: { type: "grass", color: "rgba(70,96,34,.42)", color2: "#82a84c" },
+      dust: { light: "#a8b866", heavy: "#ccd894" },
+      ambient: { type: "pollen", color: "#f4f8bc", rate: 0.45, spd: 0.35 }
+    },
+    {
+      name: "热泉阶地",
+      g: 748,
+      traction: 0.7,
+      sky: ["#8ca8a0", "#c4dcd0", "#eef6ec"],
+      sun: "#fff0c8",
+      pal: ["#3c5a44", "#5a7a58", "#6a4436"],
+      ground: "#8a9478",
+      deco: ["reed", "bush", "stump"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#ffeec4", accent: "#fffbe4", r: 32, x: 0.26, y: 76, parallax: 0.04 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "soft", count: 8, color: "rgba(250,255,248,.6)", alpha: 0.6, parallax: 0.22, w: 165, wVar: 40, spread: 310, yBand: [46, 38] }],
+        ridges: [
+          { kind: "hills", color: "rgba(90,120,100,.44)", parallax: 0.16, y: 0.52, amp1: 42, f1: 0.0034, amp2: 18, f2: 0.01, phase: 2 },
+          { kind: "hills", color: "#a9c4a2", parallax: 0.38, y: 0.64, amp1: 34, f1: 0.0088, amp2: 16, f2: 0.026, phase: 0 }
+        ],
+        haze: { color: "rgba(225,238,222,.28)" }
+      },
+      surface: { type: "puddle", color: "rgba(40,66,52,.38)", color2: "rgba(150,200,160,.42)" },
+      dust: { light: "#8a9478", heavy: "#b0b896" },
+      ambient: { type: "mist", color: "#e8f4e4", rate: 0.65, spd: 0.2 }
+    },
+    {
+      name: "溪谷",
+      g: 754,
+      traction: 0.82,
+      sky: ["#7ab0c8", "#bcdcd8", "#e8f6ea"],
+      sun: "#f4ffdc",
+      pal: ["#2c5a38", "#427e44", "#4f3a24"],
+      ground: "#6f7a52",
+      deco: ["fern", "tree", "stump"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#eefcdc", accent: "#f8ffe8", r: 32, x: 0.22, y: 70, parallax: 0.05 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "storm", count: 7, color: "rgba(200,225,220,.5)", alpha: 0.5, parallax: 0.22, w: 150, wVar: 36, spread: 300, yBand: [42, 38] }],
+        ridges: [
+          { kind: "treeLine", color: "rgba(40,86,54,.46)", parallax: 0.16, y: 0.52, amp1: 42, f1: 0.0044, amp2: 20, f2: 0.014, phase: 1.6 },
+          { kind: "treeLine", color: "#3f7a4a", parallax: 0.38, y: 0.64, amp1: 34, f1: 0.0098, amp2: 17, f2: 0.028, phase: 0 }
+        ],
+        haze: { color: "rgba(200,228,210,.24)" }
+      },
+      surface: { type: "puddle", color: "rgba(30,70,50,.4)", color2: "rgba(150,200,190,.42)" },
+      dust: { light: "#6f7a52", heavy: "#94a074" },
+      ambient: { type: "rain", color: "#d8f0e4", rate: 0.6, spd: 0.55 }
+    },
+    {
+      name: "孤峰",
+      g: 864,
+      traction: 0.93,
+      sky: ["#6a9fd0", "#b6d0e8", "#f8efdc"],
+      sun: "#fff0c8",
+      pal: ["#9c4c2e", "#c46e42", "#5e2e1c"],
+      ground: "#b06840",
+      deco: ["mesarock", "cactus", "rock"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#ffe8b8", accent: "#fff8e0", r: 36, x: 0.88, y: 102, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "thin", count: 4, color: "rgba(255,250,235,.55)", alpha: 0.55, parallax: 0.2, w: 165, wVar: 42, spread: 310, yBand: [48, 36] }],
+        ridges: [
+          { kind: "mesa", color: "rgba(160,88,50,.42)", parallax: 0.16, y: 0.5, amp1: 74, f1: 0.0034, amp2: 24, f2: 0.01, phase: 0.2 },
+          { kind: "mesa", color: "#c98a5e", parallax: 0.4, y: 0.62, amp1: 56, f1: 0.0084, amp2: 22, f2: 0.024, phase: 0 }
+        ],
+        haze: { color: "rgba(240,200,160,.18)" }
+      },
+      surface: { type: "strata", color: "rgba(96,44,24,.36)", color2: "rgba(210,140,96,.4)" },
+      dust: { light: "#b06840", heavy: "#d69a72" },
+      ambient: { type: "dust", color: "#e8c8a4", rate: 0.45, spd: 0.5 }
+    },
+    {
+      name: "珊瑚浅滩",
+      g: 800,
+      traction: 0.68,
+      sky: ["#0e6a86", "#2fa0b4", "#8fd8d8"],
+      sun: "#e8fff4",
+      pal: ["#1a5a68", "#2e8c94", "#0e3c48"],
+      ground: "#e0d8bc",
+      deco: ["crystal", "iceberg", "pebble"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#d8fff0", accent: "#f0fff8", r: 44, x: 0.7, y: 46, parallax: 0.04 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "soft", count: 9, color: "rgba(200,255,250,.4)", alpha: 0.4, parallax: 0.24, w: 170, wVar: 46, spread: 330, yBand: [30, 44] }],
+        ridges: [
+          { kind: "island", color: "rgba(30,110,124,.4)", parallax: 0.16, y: 0.52, amp1: 44, f1: 0.0028, amp2: 20, f2: 0.0084, phase: 1.8 },
+          { kind: "island", color: "#63c2c8", parallax: 0.4, y: 0.64, amp1: 38, f1: 0.0082, amp2: 18, f2: 0.024, phase: 0 }
+        ],
+        haze: { color: "rgba(120,220,220,.30)" }
+      },
+      surface: { type: "frost", color: "rgba(200,250,250,.4)", color2: "rgba(90,190,200,.4)" },
+      dust: { light: "#e0d8bc", heavy: "#f0ece0" },
+      ambient: { type: "mist", color: "#c8f0ee", rate: 0.55, spd: 0.2 }
+    },
+    {
+      name: "雾松林",
+      g: 742,
+      traction: 0.8,
+      sky: ["#7a8c8a", "#b0c4bc", "#dce8e2"],
+      sun: "#eaf2e6",
+      pal: ["#2e4a38", "#436a4c", "#24382a"],
+      ground: "#5f6e50",
+      deco: ["pine", "fern", "stump"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#e6f0e2", accent: "#f6fcf2", r: 26, x: 0.2, y: 60, parallax: 0.05 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [
+          { kind: "soft", count: 8, color: "rgba(220,232,226,.55)", alpha: 0.55, parallax: 0.2, w: 175, wVar: 44, spread: 320, yBand: [42, 38] },
+          { kind: "storm", count: 4, color: "rgba(190,204,198,.4)", alpha: 0.4, parallax: 0.1, w: 210, wVar: 50, spread: 370, yBand: [100, 32] }
+        ],
+        ridges: [
+          { kind: "treeLine", color: "rgba(40,66,48,.5)", parallax: 0.15, y: 0.52, amp1: 36, f1: 0.0052, amp2: 18, f2: 0.015, phase: 2.8 },
+          { kind: "treeLine", color: "#4a6b52", parallax: 0.38, y: 0.64, amp1: 30, f1: 0.0104, amp2: 15, f2: 0.029, phase: 0 }
+        ],
+        haze: { color: "rgba(214,228,220,.30)" }
+      },
+      surface: { type: "moss", color: "rgba(34,60,40,.48)", color2: "rgba(100,140,96,.48)" },
+      dust: { light: "#5f6e50", heavy: "#849278" },
+      ambient: { type: "mist", color: "#dceae0", rate: 0.7, spd: 0.15 }
+    },
+    {
+      name: "麦浪",
+      g: 748,
+      traction: 0.96,
+      sky: ["#7ab4e4", "#c8dcf0", "#fdf3d8"],
+      sun: "#ffe89a",
+      pal: ["#8a7030", "#b89a48", "#6a5028"],
+      ground: "#d4b868",
+      deco: ["flower", "bush", "tree"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#ffe49a", accent: "#fff8d8", r: 44, x: 0.86, y: 92, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "soft", count: 6, color: "rgba(255,252,236,.68)", alpha: 0.68, parallax: 0.2, w: 150, wVar: 36, spread: 300, yBand: [46, 36] }],
+        ridges: [
+          { kind: "hills", color: "rgba(170,145,80,.4)", parallax: 0.17, y: 0.51, amp1: 26, f1: 0.0022, amp2: 12, f2: 0.007, phase: 2.2 },
+          { kind: "hills", color: "#e0c476", parallax: 0.4, y: 0.63, amp1: 22, f1: 0.0074, amp2: 11, f2: 0.024, phase: 0 }
+        ],
+        haze: { color: "rgba(250,235,190,.22)" }
+      },
+      surface: { type: "grass", color: "rgba(120,96,34,.35)", color2: "#b89a48" },
+      dust: { light: "#d4b868", heavy: "#eed590" },
+      ambient: { type: "pollen", color: "#fff0b0", rate: 0.55, spd: 0.4 }
+    },
+    {
+      name: "梯田",
+      g: 752,
+      traction: 0.9,
+      sky: ["#8ec4d8", "#cfe8d4", "#f2f8e4"],
+      sun: "#fff4c0",
+      pal: ["#38684a", "#52885a", "#5e4830"],
+      ground: "#7fa06a",
+      deco: ["reed", "bush", "fern"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#fef2bc", accent: "#fffce4", r: 34, x: 0.82, y: 72, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "soft", count: 7, color: "rgba(255,255,255,.66)", alpha: 0.66, parallax: 0.2, w: 150, wVar: 36, spread: 300, yBand: [48, 36] }],
+        ridges: [
+          { kind: "hills", color: "rgba(100,140,100,.44)", parallax: 0.16, y: 0.51, amp1: 36, f1: 0.003, amp2: 16, f2: 0.009, phase: 0.8 },
+          { kind: "hills", color: "#9ec77e", parallax: 0.38, y: 0.63, amp1: 30, f1: 0.0086, amp2: 14, f2: 0.026, phase: 0 }
+        ],
+        haze: { color: "rgba(220,238,214,.22)" }
+      },
+      surface: { type: "grass", color: "rgba(48,92,52,.42)", color2: "#52885a" },
+      dust: { light: "#7fa06a", heavy: "#a6c094" },
+      ambient: { type: "mist", color: "#e6f4de", rate: 0.45, spd: 0.18 }
+    },
+    {
+      name: "黑沙滩",
+      g: 748,
+      traction: 1.06,
+      sky: ["#4a5a70", "#8294a8", "#c4d0dc"],
+      sun: "#e8eef8",
+      pal: ["#22262e", "#353a44", "#14161c"],
+      ground: "#3a3f48",
+      deco: ["rock", "pebble", "obsidian"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#dde6f4", accent: "#f4f8ff", r: 30, x: 0.28, y: 68, parallax: 0.04 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "storm", count: 7, color: "rgba(120,136,158,.5)", alpha: 0.5, parallax: 0.22, w: 180, wVar: 44, spread: 330, yBand: [44, 40] }],
+        ridges: [
+          { kind: "island", color: "rgba(52,60,74,.5)", parallax: 0.16, y: 0.52, amp1: 56, f1: 0.003, amp2: 24, f2: 0.009, phase: 2.5 },
+          { kind: "island", color: "#4e5560", parallax: 0.4, y: 0.64, amp1: 46, f1: 0.0084, amp2: 20, f2: 0.025, phase: 0 }
+        ],
+        haze: { color: "rgba(160,178,200,.24)" }
+      },
+      surface: { type: "debris", color: "rgba(16,18,24,.5)", color2: "rgba(120,128,142,.42)" },
+      dust: { light: "#3a3f48", heavy: "#646a76" },
+      ambient: { type: "rain", color: "#c4d2e4", rate: 0.55, spd: 0.5 }
+    },
+    {
+      name: "观星台",
+      g: 760,
+      traction: 1,
+      sky: ["#04060f", "#0b1428", "#16223e"],
+      sun: "#e6ecff",
+      pal: ["#44506a", "#5c6a86", "#2c3448"],
+      ground: "#6e788e",
+      deco: ["pillar", "crystal", "ruin"],
+      bg: {
+        space: true,
+        celestial: { type: "ringed", color: "#f0e6d2", accent: "rgba(200,220,255,.75)", r: 30, x: 0.8, y: 58, parallax: 0.07 },
+        starLayers: [
+          { count: 120, alpha: 0.9, rMax: 1.6, parallax: 0.1, seed: 3131 },
+          { count: 50, alpha: 0.5, rMax: 2.4, parallax: 0.05, seed: 9090 },
+          { count: 20, alpha: 0.3, rMax: 3.2, parallax: 0.02, seed: 2020 }
+        ],
+        aurora: null,
+        cloudLayers: [],
+        ridges: [
+          { kind: "peaks", color: "rgba(34,44,66,.6)", parallax: 0.15, y: 0.5, amp1: 68, f1: 0.0034, amp2: 24, f2: 0.01, phase: 2.2 },
+          { kind: "peaks", color: "#3e4a6e", parallax: 0.4, y: 0.62, amp1: 50, f1: 0.0088, amp2: 22, f2: 0.026, phase: 0 }
+        ],
+        haze: { color: "rgba(52,74,120,.14)" }
+      },
+      surface: { type: "strata", color: "rgba(24,30,46,.42)", color2: "rgba(150,168,205,.4)" },
+      dust: { light: "#6e788e", heavy: "#98a6c4" },
+      ambient: { type: "none", color: "#c8d6f0", rate: 0, spd: 0 }
+    },
+    {
+      name: "盐沼",
+      g: 752,
+      traction: 1,
+      sky: ["#a8c0c4", "#d8e4dc", "#f4f8ec"],
+      sun: "#fff8d8",
+      pal: ["#5e6a4e", "#828e64", "#3e4634"],
+      ground: "#b0b494",
+      deco: ["reed", "fern", "bush"],
+      bg: {
+        space: false,
+        celestial: { type: "sun", color: "#fdf6d4", accent: "#fffff0", r: 38, x: 0.86, y: 88, parallax: 0 },
+        starLayers: [],
+        aurora: null,
+        cloudLayers: [{ kind: "soft", count: 8, color: "rgba(255,255,255,.6)", alpha: 0.6, parallax: 0.22, w: 165, wVar: 40, spread: 315, yBand: [46, 38] }],
+        ridges: [
+          { kind: "hills", color: "rgba(120,138,118,.4)", parallax: 0.17, y: 0.52, amp1: 30, f1: 0.0026, amp2: 14, f2: 0.0078, phase: 1.6 },
+          { kind: "hills", color: "#b6c9b0", parallax: 0.4, y: 0.64, amp1: 25, f1: 0.008, amp2: 12, f2: 0.026, phase: 0 }
+        ],
+        haze: { color: "rgba(232,240,228,.24)" }
+      },
+      surface: { type: "puddle", color: "rgba(60,72,50,.34)", color2: "rgba(210,220,190,.42)" },
+      dust: { light: "#b0b494", heavy: "#d0d2b4" },
+      ambient: { type: "mist", color: "#eef4e4", rate: 0.5, spd: 0.17 }
+    }
+  ];
+  var DECO_COLORS = {
+    tree: ["#5b3a1e", "#2f7a35", "rgba(255,255,255,.12)"],
+    bush: ["#37703a"],
+    snowman: ["#f7fbff", "#c9dcec", "#e8622a"],
+    icespike: ["rgba(190,220,245,.85)"],
+    rock: ["#8a8f98", "#a9aeb6"],
+    cactus: ["#3d7a44"],
+    crater: ["rgba(28,32,42,.35)"],
+    moonrock: ["#7e848d", "#9aa1aa"],
+    flower: ["#2f7a35", "#e8557a", "#ffd166"],
+    snowtree: ["#6b4a30", "#2f6b4a", "rgba(255,255,255,.8)"],
+    pebble: ["rgba(0,0,0,.12)", "#b09a78"],
+    fern: ["#2f8a4a", "rgba(0,0,0,.12)"],
+    stump: ["#6b4a2a", "#8a6a44", "rgba(60,40,20,.5)"],
+    lavarock: ["#2a201e", "#ff7a2a"],
+    obsidian: ["#141018", "rgba(180,150,220,.35)"],
+    iceberg: ["rgba(0,0,0,.12)", "#cfe9f7", "rgba(255,255,255,.6)"],
+    crystal: ["rgba(140,200,255,.25)", "#a8ddff", "rgba(255,255,255,.6)"],
+    mesarock: ["#8a4526", "#c26a3a", "rgba(0,0,0,.15)"],
+    reed: ["#6f8a3a", "#a9863a"],
+    ruin: ["#6a6e76", "rgba(0,0,0,.18)"],
+    rubble: ["rgba(0,0,0,.12)", "#7a7f88", "#9aa0aa"],
+    pillar: ["#8a9098", "#aab0bc", "rgba(0,0,0,.18)"],
+    cloudpuff: ["rgba(255,255,255,.9)", "rgba(180,210,235,.5)"],
+    pine: ["#4a3520", "#1f4a34"],
+    __default: ["#8a8f98"]
+  };
+
   // src/config/levels.js
   var STEP_W = 150;
   var RUN_IN = 430;
-  var LEVELS_PER_BRANCH = 6;
-  var N_BRANCHES = 12;
+  var FINISH_PAD = 900;
+  var LEVELS_PER_BRANCH = 12;
+  var N_BRANCHES = 36;
   var TOTAL = N_BRANCHES * LEVELS_PER_BRANCH;
+  var SPECIAL_SLOTS = [2, 4, 6, 8, 10];
   var SPECIALS = ["sprint", "gauntlet", "airtime", "fuelrun", "downhill"];
   var VARIANT_INFO = {
     normal: { name: "常规", icon: "\uD83D\uDEA9", desc: "标准赛道" },
@@ -885,7 +1899,7 @@
   function variantRule(v) {
     return VARIANT_RULES[v] || VARIANT_RULES.normal;
   }
-  var BRANCHES = [
+  var BRANCH_SEED = [
     { id: "green", name: "翠野乡道", theme: 0, desc: "平缓草甸，热身上路" },
     { id: "snow", name: "极寒雪原", theme: 1, desc: "积雪打滑，稳住节奏" },
     { id: "desert", name: "流沙荒漠", theme: 2, desc: "沙丘连绵，酷热耗油" },
@@ -899,6 +1913,18 @@
     { id: "sky", name: "天空浮岛", theme: 10, desc: "浮空群岛，轻若无物" },
     { id: "night", name: "极夜星空", theme: 11, desc: "极夜寒星，终极试炼" }
   ];
+  function deriveBranch(i) {
+    const t = THEMES[i] || { name: "场景 " + (i + 1), g: 750, traction: 1 };
+    const grip = t.traction <= 0.7 ? "极滑抓地" : t.traction <= 0.85 ? "湿滑路面" : "抓地良好";
+    const grav = t.g < 600 ? "低重力" : t.g > 820 ? "高重力" : "标准重力";
+    return {
+      id: "s" + i,
+      name: t.name,
+      theme: i,
+      desc: `${grav} · ${grip}`
+    };
+  }
+  var BRANCHES = Array.from({ length: N_BRANCHES }, (_, i) => BRANCH_SEED[i] || deriveBranch(i));
   var TERRAIN_MOODS = [
     {
       id: "rolling",
@@ -1045,6 +2071,22 @@
   var RAMP_GRADE = 0.34;
   var LAUNCH_PAD = 150;
   function levelHillY(L, x) {
+    const t = finishT(L, x);
+    if (t <= 0)
+      return hillRaw(L, x);
+    const a = finishAnchor(L);
+    return hillRaw(L, a) + (hillRaw(L, x) - hillRaw(L, a)) * (1 - t);
+  }
+  function finishT(L, x) {
+    const a = finishAnchor(L);
+    if (x <= a)
+      return 0;
+    return ss((x - a) / RUN_IN);
+  }
+  function finishAnchor(L) {
+    return L.len - FINISH_PAD;
+  }
+  function hillRaw(L, x) {
     let y = 300;
     let relief = 0;
     for (const w of L.waves)
@@ -1205,10 +2247,13 @@
     const gN = gi / (TOTAL - 1);
     const bi = Math.floor(gi / LEVELS_PER_BRANCH);
     const k = gi % LEVELS_PER_BRANCH;
-    const variant = k === 2 ? SPECIALS[bi % SPECIALS.length] : k === 4 ? SPECIALS[(bi + 2) % SPECIALS.length] : "normal";
+    const slotIdx = SPECIAL_SLOTS.indexOf(k);
+    const variant = slotIdx >= 0 ? SPECIALS[(bi * 2 + slotIdx) % SPECIALS.length] : "normal";
     const ramp = Math.pow(clamp(gN, 0, 1), 1.15);
     const len = Math.round(4200 + gN * 9000);
-    const coinN = Math.round(16 + gN * 40);
+    const coinN = Math.round(24 + gN * 48);
+    const goldBase = Math.round(280 + 720 * gN);
+    const coinVal = Math.round(30 + 30 * gN);
     const mood = TERRAIN_MOODS[bi % TERRAIN_MOODS.length];
     const rng = mulberry32(20973 + gi * 2654435761);
     const L = {
@@ -1218,6 +2263,8 @@
       steps: buildSteps(mood, ramp, gN, len, rng),
       feats: buildFeats(mood, ramp, len, rng),
       coinN,
+      goldBase,
+      coinVal,
       ramp,
       den3: REF_SPEED * (0.72 - 0.22 * ramp),
       fuelK: 1 + 3.1 * ramp,
@@ -1323,7 +2370,7 @@
   }
 
   // src/core/storage.js
-  var CUR_VER = 3;
+  var CUR_VER = 4;
   var ALL_KEYS = Object.values(SAVE_KEYS);
   var available = true;
   function isStorageAvailable() {
@@ -1541,8 +2588,10 @@
     }
   }
   function intOr(v) {
-    const n = parseInt(v, 10);
-    return Number.isFinite(n) ? n : 0;
+    if (typeof v === "boolean" || v === null || v === undefined)
+      return 0;
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.trunc(n) : 0;
   }
   function clampLv(v) {
     const n = Math.round(Number(v));
@@ -1589,7 +2638,8 @@
     lsSet(SAVE_KEYS.ach, JSON.stringify(store.achGot));
   }
   function save() {
-    lsSet(SAVE_KEYS.gold, store.gold);
+    store.gold = safeGold(store.gold);
+    lsSet(SAVE_KEYS.gold, String(store.gold));
     lsSet(SAVE_KEYS.up, JSON.stringify(store.upgrades));
     lsSet(SAVE_KEYS.unlocked, store.unlocked);
     lsSet(SAVE_KEYS.stars, JSON.stringify(store.stars));
@@ -1753,8 +2803,11 @@
     }
     return autoSaveTimer;
   }
-  function isLegacy20(arr) {
-    return Array.isArray(arr) && arr.length > 0 && arr.length < LEVELS.length && arr.length <= 20;
+  var LEGACY_LEVEL_COUNTS = [20, 72];
+  function isLegacyStars(arr) {
+    if (!Array.isArray(arr) || arr.length === 0)
+      return false;
+    return arr.length <= 20 || LEGACY_LEVEL_COUNTS.includes(arr.length);
   }
   function highestStarred(arr) {
     let hi = -1;
@@ -1806,7 +2859,7 @@
       }
       let migrated = false;
       let stars = starsArr;
-      if (ver < 3 && isLegacy20(starsArr)) {
+      if (ver < CUR_VER && isLegacyStars(starsArr)) {
         migrated = true;
         stars = starsArr.slice(0, LEVELS.length);
         const hi = highestStarred(stars);
@@ -1821,6 +2874,7 @@
         if (migrated)
           store.progress.branchCleared = deriveBranchCleared();
         lsSet(SAVE_KEYS.ver, String(CUR_VER));
+        loadProgress();
         save();
       }
       if (lsGet("bike_trial") === "1") {
@@ -2190,340 +3244,6 @@
     requestAnimationFrame(tick);
   }
 
-  // src/config/themes.js
-  var THEMES = [
-    {
-      name: "绿野",
-      g: 750,
-      traction: 1,
-      sky: ["#7ec8f7", "#cdeffd", "#eef8fc"],
-      sun: "#ffe677",
-      pal: ["#3f7d3a", "#58a24f", "#8b5e3c"],
-      ground: "#c4a882",
-      deco: ["tree", "bush", "flower"],
-      bg: {
-        space: false,
-        celestial: { type: "sun", color: "#ffe677", accent: "#fffbe0", r: 40, x: 0.9, y: 90, parallax: 0 },
-        starLayers: [],
-        aurora: null,
-        cloudLayers: [{ kind: "soft", count: 6, color: "rgba(255,255,255,.75)", alpha: 0.75, parallax: 0.2, w: 120, wVar: 30, spread: 260, yBand: [60, 40] }],
-        ridges: [
-          { kind: "hills", color: "rgba(85,130,170,.42)", parallax: 0.18, y: 0.5, amp1: 46, f1: 0.0031, amp2: 18, f2: 0.0093, phase: 0.6 },
-          { kind: "hills", color: "#9cc5e0", parallax: 0.4, y: 0.62, amp1: 46, f1: 0.01, amp2: 22, f2: 0.03, phase: 0 }
-        ],
-        haze: null
-      },
-      surface: { type: "grass", color: "rgba(28,84,38,.45)", color2: "#58a24f" },
-      dust: { light: "#c4a882", heavy: "#d9c39a" },
-      ambient: { type: "pollen", color: "#eaf6c0", rate: 0.3, spd: 0.3 }
-    },
-    {
-      name: "雪原",
-      g: 750,
-      traction: 0.72,
-      sky: ["#bcd8f2", "#e6f2fd", "#fbfeff"],
-      sun: "#fff3c4",
-      pal: ["#dbe9f5", "#eef5fb", "#9fb8cc"],
-      ground: "#eef5fb",
-      deco: ["snowtree", "snowman", "icespike"],
-      bg: {
-        space: false,
-        celestial: { type: "sun", color: "#fff3c4", accent: "#fffdf0", r: 38, x: 0.88, y: 80, parallax: 0 },
-        starLayers: [],
-        aurora: null,
-        cloudLayers: [{ kind: "soft", count: 7, color: "rgba(255,255,255,.8)", alpha: 0.8, parallax: 0.2, w: 130, wVar: 30, spread: 280, yBand: [55, 45] }],
-        ridges: [
-          { kind: "peaks", color: "rgba(140,170,200,.45)", parallax: 0.18, y: 0.5, amp1: 52, f1: 0.0031, amp2: 22, f2: 0.0093, phase: 0.6 },
-          { kind: "hills", color: "#dfeefb", parallax: 0.4, y: 0.62, amp1: 46, f1: 0.01, amp2: 22, f2: 0.03, phase: 0 }
-        ],
-        haze: null
-      },
-      surface: { type: "snowpuff", color: "rgba(255,255,255,.5)", color2: "rgba(190,215,235,.6)" },
-      dust: { light: "#eef5fb", heavy: "#ffffff" },
-      ambient: { type: "snow", color: "#ffffff", rate: 0.6, spd: 0.5 }
-    },
-    {
-      name: "荒漠",
-      g: 750,
-      traction: 0.88,
-      sky: ["#ffc46b", "#ffe0b0", "#fff3d8"],
-      sun: "#ffd27a",
-      pal: ["#c28b4f", "#d9a766", "#7a5a36"],
-      ground: "#e6c98f",
-      deco: ["cactus", "rock", "pebble"],
-      bg: {
-        space: false,
-        celestial: { type: "sun", color: "#ffe0a0", accent: "#fff6d8", r: 46, x: 0.84, y: 92, parallax: 0 },
-        starLayers: [],
-        aurora: null,
-        cloudLayers: [{ kind: "thin", count: 3, color: "rgba(255,246,220,.55)", alpha: 0.55, parallax: 0.2, w: 150, wVar: 40, spread: 300, yBand: [50, 34] }],
-        ridges: [
-          { kind: "dunes", color: "rgba(165,115,70,.40)", parallax: 0.18, y: 0.53, amp1: 34, f1: 0.0022, amp2: 14, f2: 0.0071, phase: 0.6 },
-          { kind: "dunes", color: "#f6d9a8", parallax: 0.4, y: 0.63, amp1: 32, f1: 0.008, amp2: 16, f2: 0.026, phase: 0 }
-        ],
-        haze: { color: "rgba(255,225,175,.20)" }
-      },
-      surface: { type: "sandripple", color: "rgba(120,80,40,.30)", color2: "rgba(200,160,100,.4)" },
-      dust: { light: "#e6c98f", heavy: "#d9c39a" },
-      ambient: { type: "sand", color: "#e9c98f", rate: 0.5, spd: 0.6 }
-    },
-    {
-      name: "月面",
-      g: 350,
-      traction: 1,
-      sky: ["#05070f", "#0d1326", "#141d3a"],
-      sun: "#f6f8ff",
-      pal: ["#6a7078", "#828a94", "#4d5259"],
-      ground: "#9aa2ad",
-      deco: ["moonrock", "crater"],
-      bg: {
-        space: true,
-        celestial: { type: "earth", color: "#3b6ea5", accent: "rgba(120,205,160,.6)", r: 26, x: 0.12, y: 110, parallax: 0.06 },
-        starLayers: [{ count: 70, alpha: 0.8, rMax: 1.4, parallax: 0.15, seed: 99 }],
-        aurora: { color: "rgba(255,255,255,.14)", count: 14, parallax: 0.2, spread: 431, y0: 80, rowGap: 60, rows: 7, w: 90, wVar: 40, h: 22 },
-        cloudLayers: [],
-        ridges: [],
-        haze: null
-      },
-      surface: { type: "crater", color: "rgba(28,32,42,.35)", color2: "rgba(120,128,140,.35)" },
-      dust: { light: "#9aa2ad", heavy: "#9aa2ad" },
-      ambient: { type: "none", color: "#9aa2ad", rate: 0, spd: 0 }
-    },
-    {
-      name: "雨林",
-      g: 760,
-      traction: 0.92,
-      sky: ["#8fd0b0", "#c9ecc9", "#eaf8e2"],
-      sun: "#eaffc0",
-      pal: ["#245c30", "#3f8a3f", "#5a3a24"],
-      ground: "#6b4a2e",
-      deco: ["fern", "tree", "stump"],
-      bg: {
-        space: false,
-        celestial: { type: "sun", color: "#eaffc0", accent: "#f7ffe0", r: 34, x: 0.86, y: 64, parallax: 0 },
-        starLayers: [],
-        aurora: null,
-        cloudLayers: [{ kind: "soft", count: 8, color: "rgba(240,255,240,.55)", alpha: 0.55, parallax: 0.22, w: 130, wVar: 34, spread: 270, yBand: [45, 42] }],
-        ridges: [
-          { kind: "treeLine", color: "rgba(40,90,60,.45)", parallax: 0.16, y: 0.52, amp1: 38, f1: 0.006, amp2: 20, f2: 0.017, phase: 1.2 },
-          { kind: "treeLine", color: "#2f6b3c", parallax: 0.38, y: 0.64, amp1: 30, f1: 0.012, amp2: 16, f2: 0.03, phase: 0 }
-        ],
-        haze: { color: "rgba(180,230,190,.18)" }
-      },
-      surface: { type: "moss", color: "rgba(30,80,40,.5)", color2: "rgba(90,150,70,.5)" },
-      dust: { light: "#6b4a2e", heavy: "#8a6a3a" },
-      ambient: { type: "mist", color: "#dff5e0", rate: 0.5, spd: 0.25 }
-    },
-    {
-      name: "火山",
-      g: 900,
-      traction: 0.86,
-      sky: ["#3a0f0f", "#7a2a15", "#c65a1e"],
-      sun: "#ff8a3d",
-      pal: ["#3a2b28", "#5a3a30", "#1c1412"],
-      ground: "#4a2f26",
-      deco: ["lavarock", "obsidian"],
-      bg: {
-        space: false,
-        celestial: { type: "redGiant", color: "#ff7a2a", accent: "#ffd08a", r: 52, x: 0.78, y: 110, parallax: 0.04 },
-        starLayers: [],
-        aurora: null,
-        cloudLayers: [{ kind: "storm", count: 5, color: "rgba(60,30,30,.55)", alpha: 0.55, parallax: 0.24, w: 160, wVar: 40, spread: 320, yBand: [50, 45] }],
-        ridges: [
-          { kind: "peaks", color: "rgba(60,25,20,.6)", parallax: 0.18, y: 0.5, amp1: 70, f1: 0.004, amp2: 26, f2: 0.012, phase: 0.4 },
-          { kind: "peaks", color: "#2a1815", parallax: 0.42, y: 0.62, amp1: 55, f1: 0.008, amp2: 24, f2: 0.02, phase: 2.1 }
-        ],
-        haze: { color: "rgba(120,40,20,.18)" }
-      },
-      surface: { type: "lava", color: "rgba(255,120,40,.75)", color2: "rgba(255,200,80,.55)" },
-      dust: { light: "#4a2f26", heavy: "#8a5a3a" },
-      ambient: { type: "ember", color: "#ff9040", rate: 0.7, spd: 0.5 }
-    },
-    {
-      name: "冰川",
-      g: 740,
-      traction: 0.62,
-      sky: ["#9fd4f0", "#d8f0fb", "#f4fbff"],
-      sun: "#ffffff",
-      pal: ["#bfe0ee", "#e6f6fd", "#7ba8c4"],
-      ground: "#dff2fa",
-      deco: ["iceberg", "icespike", "crystal"],
-      bg: {
-        space: false,
-        celestial: { type: "sun", color: "#eaf7ff", accent: "#ffffff", r: 34, x: 0.16, y: 80, parallax: 0.05 },
-        starLayers: [],
-        aurora: null,
-        cloudLayers: [{ kind: "thin", count: 5, color: "rgba(255,255,255,.6)", alpha: 0.6, parallax: 0.2, w: 170, wVar: 40, spread: 310, yBand: [50, 46] }],
-        ridges: [
-          { kind: "iceberg", color: "rgba(150,190,215,.5)", parallax: 0.16, y: 0.5, amp1: 58, f1: 0.0032, amp2: 22, f2: 0.009, phase: 0.9 },
-          { kind: "iceberg", color: "#dff2fa", parallax: 0.4, y: 0.62, amp1: 48, f1: 0.009, amp2: 24, f2: 0.026, phase: 0 }
-        ],
-        haze: null
-      },
-      surface: { type: "frost", color: "rgba(255,255,255,.6)", color2: "rgba(160,215,245,.5)" },
-      dust: { light: "#dff2fa", heavy: "#ffffff" },
-      ambient: { type: "snow", color: "#dff2fa", rate: 0.5, spd: 0.5 }
-    },
-    {
-      name: "红岩峡谷",
-      g: 760,
-      traction: 0.9,
-      sky: ["#f2a15c", "#f7c98a", "#fbe3bd"],
-      sun: "#ffd68a",
-      pal: ["#9c4a2a", "#c26a3a", "#5a2f1c"],
-      ground: "#b5643a",
-      deco: ["mesarock", "rock"],
-      bg: {
-        space: false,
-        celestial: { type: "sun", color: "#ffe0a0", accent: "#fff2cf", r: 38, x: 0.88, y: 100, parallax: 0 },
-        starLayers: [],
-        aurora: null,
-        cloudLayers: [{ kind: "thin", count: 3, color: "rgba(255,235,210,.5)", alpha: 0.5, parallax: 0.2, w: 160, wVar: 40, spread: 300, yBand: [48, 40] }],
-        ridges: [
-          { kind: "mesa", color: "rgba(150,80,45,.45)", parallax: 0.18, y: 0.5, amp1: 52, f1: 0.0035, amp2: 20, f2: 0.01, phase: 1.5 },
-          { kind: "mesa", color: "#d98a5a", parallax: 0.42, y: 0.62, amp1: 44, f1: 0.008, amp2: 22, f2: 0.024, phase: 0 }
-        ],
-        haze: { color: "rgba(240,180,130,.16)" }
-      },
-      surface: { type: "strata", color: "rgba(90,45,25,.35)", color2: "rgba(200,130,90,.4)" },
-      dust: { light: "#b5643a", heavy: "#d98a5a" },
-      ambient: { type: "sand", color: "#d98a5a", rate: 0.4, spd: 0.5 }
-    },
-    {
-      name: "沼泽",
-      g: 720,
-      traction: 0.7,
-      sky: ["#6d7f6a", "#9fb39a", "#c9d6c2"],
-      sun: "#e6e7b0",
-      pal: ["#3e4a32", "#556843", "#2a3324"],
-      ground: "#4a5238",
-      deco: ["reed", "stump"],
-      bg: {
-        space: false,
-        celestial: { type: "sun", color: "#e6e7b0", accent: "#f2f2cc", r: 30, x: 0.2, y: 90, parallax: 0.05 },
-        starLayers: [],
-        aurora: null,
-        cloudLayers: [{ kind: "storm", count: 6, color: "rgba(150,160,150,.5)", alpha: 0.5, parallax: 0.22, w: 150, wVar: 36, spread: 300, yBand: [45, 40] }],
-        ridges: [
-          { kind: "treeLine", color: "rgba(60,70,55,.5)", parallax: 0.16, y: 0.52, amp1: 30, f1: 0.005, amp2: 14, f2: 0.015, phase: 0.7 },
-          { kind: "hills", color: "#556843", parallax: 0.4, y: 0.64, amp1: 26, f1: 0.01, amp2: 12, f2: 0.028, phase: 0 }
-        ],
-        haze: { color: "rgba(180,190,170,.22)" }
-      },
-      surface: { type: "puddle", color: "rgba(40,60,50,.45)", color2: "rgba(120,160,150,.4)" },
-      dust: { light: "#4a5238", heavy: "#6a7a50" },
-      ambient: { type: "mist", color: "#c9d6c2", rate: 0.6, spd: 0.2 }
-    },
-    {
-      name: "城市废墟",
-      g: 780,
-      traction: 1,
-      sky: ["#8a93a8", "#b9c0d0", "#dfe3ec"],
-      sun: "#f4f6ff",
-      pal: ["#6a6e76", "#8a9098", "#4a4e56"],
-      ground: "#7a7f88",
-      deco: ["ruin", "rubble", "pillar"],
-      bg: {
-        space: false,
-        celestial: { type: "sun", color: "#f4f6ff", accent: "#ffffff", r: 30, x: 0.8, y: 70, parallax: 0 },
-        starLayers: [],
-        aurora: null,
-        cloudLayers: [{ kind: "thin", count: 4, color: "rgba(255,255,255,.5)", alpha: 0.5, parallax: 0.2, w: 160, wVar: 36, spread: 300, yBand: [50, 40] }],
-        ridges: [
-          { kind: "ruin", color: "rgba(80,85,95,.55)", parallax: 0.16, y: 0.5, amp1: 60, f1: 0.004, amp2: 24, f2: 0.012, phase: 2.4 },
-          { kind: "ruin", color: "#aab0bc", parallax: 0.4, y: 0.62, amp1: 50, f1: 0.008, amp2: 22, f2: 0.024, phase: 0 }
-        ],
-        haze: { color: "rgba(200,205,215,.14)" }
-      },
-      surface: { type: "debris", color: "rgba(50,52,60,.4)", color2: "rgba(150,152,162,.45)" },
-      dust: { light: "#7a7f88", heavy: "#a0a4ac" },
-      ambient: { type: "dust", color: "#b0b4bc", rate: 0.4, spd: 0.4 }
-    },
-    {
-      name: "天空浮岛",
-      g: 520,
-      traction: 1,
-      sky: ["#5aa8e6", "#a8d8f5", "#eaf6ff"],
-      sun: "#fff4c8",
-      pal: ["#6aa86a", "#9ccb7a", "#b9a98a"],
-      ground: "#cfe3a0",
-      deco: ["cloudpuff", "bush"],
-      bg: {
-        space: false,
-        celestial: { type: "sun", color: "#fff4c8", accent: "#fffbe8", r: 44, x: 0.85, y: 80, parallax: 0 },
-        starLayers: [],
-        aurora: null,
-        cloudLayers: [
-          { kind: "soft", count: 10, color: "rgba(255,255,255,.85)", alpha: 0.85, parallax: 0.24, w: 140, wVar: 40, spread: 300, yBand: [60, 60] },
-          { kind: "thin", count: 6, color: "rgba(255,255,255,.5)", alpha: 0.5, parallax: 0.12, w: 190, wVar: 50, spread: 360, yBand: [40, 30] }
-        ],
-        ridges: [
-          { kind: "island", color: "rgba(120,160,190,.4)", parallax: 0.18, y: 0.5, amp1: 60, f1: 0.003, amp2: 26, f2: 0.009, phase: 1.1 },
-          { kind: "island", color: "#cfe3a0", parallax: 0.42, y: 0.64, amp1: 50, f1: 0.008, amp2: 24, f2: 0.022, phase: 0 }
-        ],
-        haze: { color: "rgba(220,240,255,.18)" }
-      },
-      surface: { type: "cloudtuft", color: "rgba(255,255,255,.5)", color2: "#9ccb7a" },
-      dust: { light: "#eaf6ff", heavy: "#ffffff" },
-      ambient: { type: "none", color: "#ffffff", rate: 0, spd: 0 }
-    },
-    {
-      name: "极夜星空",
-      g: 740,
-      traction: 0.8,
-      sky: ["#04060e", "#0a1424", "#10203a"],
-      sun: "#cfe0ff",
-      pal: ["#3a4a5a", "#4f6478", "#2a3642"],
-      ground: "#5a6a7a",
-      deco: ["pine", "crystal"],
-      bg: {
-        space: true,
-        celestial: { type: "moon", color: "#dfe8ff", accent: "rgba(160,180,210,.6)", r: 34, x: 0.82, y: 80, parallax: 0.05 },
-        starLayers: [
-          { count: 90, alpha: 0.85, rMax: 1.5, parallax: 0.12, seed: 2024 },
-          { count: 40, alpha: 0.5, rMax: 2.2, parallax: 0.06, seed: 777 }
-        ],
-        aurora: { color: "rgba(110,255,190,.16)", count: 8, parallax: 0.08, spread: 260, y0: 60, rowGap: 40, rows: 4, w: 130, wVar: 50, h: 18 },
-        cloudLayers: [],
-        ridges: [
-          { kind: "peaks", color: "rgba(40,55,75,.6)", parallax: 0.16, y: 0.5, amp1: 64, f1: 0.0035, amp2: 24, f2: 0.011, phase: 1.9 },
-          { kind: "peaks", color: "#2a3a4a", parallax: 0.4, y: 0.62, amp1: 50, f1: 0.009, amp2: 22, f2: 0.026, phase: 0 }
-        ],
-        haze: { color: "rgba(60,90,140,.12)" }
-      },
-      surface: { type: "iceglow", color: "rgba(140,200,255,.5)", color2: "rgba(90,150,220,.4)" },
-      dust: { light: "#5a6a7a", heavy: "#8ab0d0" },
-      ambient: { type: "snow", color: "#bfe0ff", rate: 0.6, spd: 0.5 }
-    }
-  ];
-  var DECO_COLORS = {
-    tree: ["#5b3a1e", "#2f7a35", "rgba(255,255,255,.12)"],
-    bush: ["#37703a"],
-    snowman: ["#f7fbff", "#c9dcec", "#e8622a"],
-    icespike: ["rgba(190,220,245,.85)"],
-    rock: ["#8a8f98", "#a9aeb6"],
-    cactus: ["#3d7a44"],
-    crater: ["rgba(28,32,42,.35)"],
-    moonrock: ["#7e848d", "#9aa1aa"],
-    flower: ["#2f7a35", "#e8557a", "#ffd166"],
-    snowtree: ["#6b4a30", "#2f6b4a", "rgba(255,255,255,.8)"],
-    pebble: ["rgba(0,0,0,.12)", "#b09a78"],
-    fern: ["#2f8a4a", "rgba(0,0,0,.12)"],
-    stump: ["#6b4a2a", "#8a6a44", "rgba(60,40,20,.5)"],
-    lavarock: ["#2a201e", "#ff7a2a"],
-    obsidian: ["#141018", "rgba(180,150,220,.35)"],
-    iceberg: ["rgba(0,0,0,.12)", "#cfe9f7", "rgba(255,255,255,.6)"],
-    crystal: ["rgba(140,200,255,.25)", "#a8ddff", "rgba(255,255,255,.6)"],
-    mesarock: ["#8a4526", "#c26a3a", "rgba(0,0,0,.15)"],
-    reed: ["#6f8a3a", "#a9863a"],
-    ruin: ["#6a6e76", "rgba(0,0,0,.18)"],
-    rubble: ["rgba(0,0,0,.12)", "#7a7f88", "#9aa0aa"],
-    pillar: ["#8a9098", "#aab0bc", "rgba(0,0,0,.18)"],
-    cloudpuff: ["rgba(255,255,255,.9)", "rgba(180,210,235,.5)"],
-    pine: ["#4a3520", "#1f4a34"],
-    __default: ["#8a8f98"]
-  };
-
   // src/config/ui-tokens.js
   var TOKENS = Object.freeze({
     "surface-0": "#070f18",
@@ -2788,16 +3508,18 @@
   var WARP_V_CAP = 90;
   function activeMode(veh) {
     const v = veh || VEHICLES[store.currentVehicle];
-    if (!v || !v.ultra || store.ultra[v.id] !== true)
+    if (!v || !v.ultra || !v.ultra.mode)
       return "";
-    return v.ultra.mode || "";
+    if (v.ultra.builtin === true)
+      return v.ultra.mode;
+    return store.ultra[v.id] === true ? v.ultra.mode : "";
   }
   function isUltraStable() {
     return activeMode() === "stable";
   }
   function isCrashImmune() {
     const m = activeMode();
-    return m === "shield" || m === "phase" || m === "stable";
+    return m === "shield" || m === "phase" || m === "stable" || m === "absolut";
   }
   function pinToGround() {
     const b = bike;
@@ -2843,6 +3565,9 @@
       store.phys.mu = Math.max(store.phys.mu, 3.4);
       store.phys.airDragK = AIR_DRAG_K * 0.2;
       store.phys.MAXV = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N;
+    } else if (mode === "absolut") {
+      store.phys.MAXV = ABSOLUT_V;
+      store.phys.airDragK = ABSOLUT_DRAG_K;
     } else if (mode === "warp") {
       store.phys.MAXV = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N * 1.6;
       store.phys.rpmK *= 2;
@@ -3034,7 +3759,7 @@
     }
     const veh = VEHICLES[store.currentVehicle];
     const IW = P.wheelI || wheelInertia(P.rb.mW);
-    const wheelieTau = P.rb.mTot * P.GRAV * WHEELBASE * 0.5;
+    const wheelieTau = wheelieTauOf(P.rb.mTot, P.GRAV);
     for (const wk of WHEELS) {
       let w = b.wheelRot[wk];
       let tau = 0;
@@ -3401,7 +4126,9 @@
     const revReady = revK && systemVel(b).vx < REV_ENTER_V;
     const brkK = (key.left || revK && !revReady) && !run.crashed ? 1 : 0;
     const rev = revReady ? 1 : 0;
-    const warp = activeMode() === "warp";
+    const mode0 = activeMode();
+    const warp = mode0 === "warp";
+    const absolut = mode0 === "absolut";
     const prevGrounded = b.grounded;
     const prevSpin = { rear: b.wheelRot.rear, front: b.wheelRot.front };
     const ang0 = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
@@ -3418,10 +4145,15 @@
       applySuspension(b, SUS, sub);
       applyDrive(b, P, sub, drvK, brkK, rev);
       applyDrag(b, P, sub);
-      if (warp && drvK && !run.crashed) {
-        const tgt = P.MAXV * 0.98;
+      if ((warp || absolut) && drvK && !run.crashed) {
         const svw = systemVel(b);
-        const add = clamp((tgt - svw.vx) * WARP_ACC * sub, 0, WARP_V_CAP * sub);
+        let add;
+        if (warp) {
+          add = clamp((P.MAXV * 0.98 - svw.vx) * WARP_ACC * sub, 0, WARP_V_CAP * sub);
+        } else {
+          const grip = P.mu * P.rb.mTot * P.GRAV * REAR_LOAD;
+          add = clamp((P.MAXV - svw.vx) * ABSOLUT_SERVO_ACC * sub, 0, grip * ABSOLUT_THRUST_K * sub);
+        }
         for (const p of b.pts)
           p._vx += add;
       }
@@ -3587,7 +4319,7 @@
   function addGold(n) {
     if (!n)
       return;
-    store.gold += n;
+    store.gold = safeGold(store.gold + n);
     save();
     if (store.gold >= 5000)
       checkAch("rich");
@@ -3798,7 +4530,7 @@
     const coins = [];
     for (let i = 0;i < L.coinN; i++) {
       const cx = L.len * 0.15 + i * (L.len * 0.75) / (L.coinN - 1);
-      coins.push({ x: cx, y: groundY(cx) - 35, taken: false, ph: rng() * 6.28 });
+      coins.push({ x: cx, y: groundY(cx) - 35, taken: false, ph: rng() * 6.28, coinVal: L.coinVal || 30 });
     }
     const vh = VEHICLES[store.currentVehicle];
     const up = getUp();
@@ -3921,7 +4653,13 @@
       const gy = groundY(x);
       if (gy !== Infinity) {
         if (rng() < 0.85 - diffS * 0.4) {
-          world.coins.push({ x, y: gy - 30, taken: false, ph: rng() * 6.28 });
+          world.coins.push({
+            x,
+            y: gy - 30,
+            taken: false,
+            ph: rng() * 6.28,
+            coinVal: Math.round(30 + 30 * diffS)
+          });
         }
         if (rng() < 0.11) {
           world.canisters.push({ x, y: gy - 26, taken: false, ph: rng() * 6.28 });
@@ -3987,7 +4725,7 @@
       if (Math.hypot(c.x - mx, c.y - my) < 45) {
         c.taken = true;
         store.run.coinGot++;
-        addGold(30);
+        addGold(c.coinVal || 30);
         playCoinSound();
         emitParticles(c.x, c.y, 12, { color: token("obj-coin"), spd: 2.5, life: 30, size: 3, grav: 0.03 });
       }
@@ -4334,8 +5072,12 @@
       const before = store.progress.rating;
       const after = settleRanked(won);
       result.title = won ? "\uD83C\uDFC6 排位胜利" : "\uD83C\uDFF3 排位失利";
+      const gain = rankGold(won, before);
+      addGold(gain);
+      result.goldGain = gain;
       result.ratingDelta = after - before;
       result.rating = after;
+      showToast((won ? "\uD83C\uDFC6 排位胜利 \uD83E\uDE99+" : "\uD83C\uDFF3 排位失利 \uD83E\uDE99+") + gain, 900, won ? "success" : "warn");
       result.nextLabel = "继续 →";
     } else if (store.mode === "level") {
       const elapsed = store.time - run.levelStartTime + run.penaltyTime;
@@ -4349,11 +5091,11 @@
       if (store.selLevel >= store.unlocked && store.selLevel < LEVELS.length - 1) {
         store.unlocked = store.selLevel + 1;
       }
-      addGold(200);
-      showToast("\uD83C\uDFC1 通关 " + "★".repeat(s) + "！\uD83E\uDE99+200", 900, "success");
+      addGold(L.goldBase);
+      showToast("\uD83C\uDFC1 通关 " + "★".repeat(s) + "！\uD83E\uDE99+" + L.goldBase, 900, "success");
       result.title = "\uD83C\uDFC1 通关";
       result.stars = s;
-      result.goldGain = 200;
+      result.goldGain = L.goldBase;
       result.time = elapsed;
       result.nextLabel = store.selLevel < LEVELS.length - 1 ? "下一关 →" : "\uD83C\uDFE0 返回菜单";
       if (!run.runCrashed)
@@ -7250,6 +7992,9 @@
       case "buyUltra":
         buyUltra(+el.dataset.veh);
         return;
+      case "buyVeh":
+        buyVehicleNow(+el.dataset.veh);
+        return;
       case "finaleStart":
         api.startGame("level", FINALE_INDEX);
         return;
@@ -7551,10 +8296,54 @@
         interactive: true,
         selected: sel,
         attrs: `data-act="veh" data-veh="${i}"`
-      }) + (v.ultra ? ultraBlock(v, i) : "");
+      }) + (own ? "" : buyBlock(v, i)) + (v.ultra ? ultraBlock(v, i) : "");
     }).join("")}
   <div class="panelNote" id="pnNote"></div>
   <button class="btn backBtn" data-act="back">返回</button>`);
+  }
+  function buyBlock(v, i) {
+    const lack = Math.max(0, v.price - store.gold);
+    const afford = lack === 0;
+    return `<div class="buyRow">
+    <button class="btn buyNow${afford ? "" : " ghost"}" data-act="buyVeh" data-veh="${i}"
+      ${afford ? "" : 'aria-disabled="true"'}>
+      \uD83E\uDE99 立即购买并使用 · ${v.price.toLocaleString()}
+    </button>
+    <div class="buyHint">${afford ? "点击即可购买并切换到这台车" : "还差 " + lack.toLocaleString() + " 金币"}</div>
+  </div>`;
+  }
+  function buyVehicleNow(i) {
+    const note = () => document.getElementById("pnNote");
+    const v = VEHICLES[i];
+    if (store.ownedVehicles.includes(i)) {
+      store.currentVehicle = i;
+      save();
+      renderGaragePanel();
+      const n = note();
+      if (n)
+        n.textContent = "已切换到 " + v.name;
+      api.applyVehicle();
+      return;
+    }
+    const lack = Math.max(0, v.price - store.gold);
+    if (lack > 0) {
+      const n = note();
+      if (n)
+        n.textContent = "金币不足，还差 " + lack.toLocaleString() + " \uD83E\uDE99（需要 " + v.price.toLocaleString() + "）";
+      showToast("\uD83E\uDE99 还差 " + lack.toLocaleString() + " 金币", 1100);
+      return;
+    }
+    store.gold -= v.price;
+    store.ownedVehicles.push(i);
+    store.currentVehicle = i;
+    save();
+    renderGaragePanel();
+    const n = note();
+    if (n)
+      n.textContent = "\uD83C\uDF89 购买并切换到 " + v.name;
+    api.applyVehicle();
+    showToast("\uD83C\uDF89 已购买 " + v.name + "！", 1200);
+    playCoinSound();
   }
   function allMaxed(id) {
     const u = store.upgrades[id];
@@ -7929,15 +8718,20 @@
     if (ultraEl) {
       const v = VEHICLES[store.currentVehicle];
       if (v.ultra) {
-        const got = store.ultra[v.id] === true;
-        const full4 = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= MAX_LV);
-        ultraEl.className = "upUltra" + (got ? " got" : full4 ? " canBuy" : "");
-        if (got) {
-          ultraEl.textContent = v.ultra.icon + " 特殊模式「" + v.ultra.name + "」已开启 · " + v.ultra.desc;
-        } else if (full4) {
-          ultraEl.textContent = "⭐ 已全部升满！到车库花 " + v.ultra.cost.toLocaleString() + " \uD83E\uDE99 解锁「" + v.ultra.name + "」";
+        if (v.ultra.builtin === true) {
+          ultraEl.className = "upUltra got";
+          ultraEl.textContent = v.ultra.icon + " 「" + v.ultra.name + "」已内置生效 · " + v.ultra.desc;
         } else {
-          ultraEl.textContent = "\uD83D\uDD12 全部升级升到 Lv" + MAX_LV + " 后可解锁特殊模式「" + v.ultra.name + "」：" + v.ultra.desc;
+          const got = store.ultra[v.id] === true;
+          const full4 = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= MAX_LV);
+          ultraEl.className = "upUltra" + (got ? " got" : full4 ? " canBuy" : "");
+          if (got) {
+            ultraEl.textContent = v.ultra.icon + " 特殊模式「" + v.ultra.name + "」已开启 · " + v.ultra.desc;
+          } else if (full4) {
+            ultraEl.textContent = "⭐ 已全部升满！到车库花 " + v.ultra.cost.toLocaleString() + " \uD83E\uDE99 解锁「" + v.ultra.name + "」";
+          } else {
+            ultraEl.textContent = "\uD83D\uDD12 全部升级升到 Lv" + MAX_LV + " 后可解锁特殊模式「" + v.ultra.name + "」：" + v.ultra.desc;
+          }
         }
       } else {
         ultraEl.className = "upUltra";
@@ -7970,7 +8764,7 @@
         btn.disabled = true;
         btn.style.opacity = 0.5;
       } else {
-        const c = upCost(lv + 1);
+        const c = upCostOf(VEHICLES[store.currentVehicle], lv + 1);
         btn.textContent = "升级 " + c + " \uD83E\uDE99";
         btn.disabled = store.gold < c;
         btn.style.opacity = 1;
@@ -7982,7 +8776,7 @@
     const lv = u[k] || 0;
     if (lv >= MAX_LV)
       return;
-    const c = upCost(lv + 1);
+    const c = upCostOf(VEHICLES[store.currentVehicle], lv + 1);
     const note = document.getElementById("shopNote");
     if (store.gold < c) {
       if (note)
