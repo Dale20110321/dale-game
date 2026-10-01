@@ -23,12 +23,14 @@ const SURFACE_PAINTERS = {
   // 草叶
   grass(s, cx, cy) {
     ctx.strokeStyle = s.color;
-    ctx.lineWidth = 2;
-    eachGround(cx, cy, 12, (x, gy, wx) => {
-      const h = 4 + Math.abs(Math.sin(wx * 0.37)) * 7;
+    ctx.lineWidth = 1.6;
+    // 间距 12→20px、高 4~11→3~8px、倾角 2.5→1.6px：原参数沿地表织出一条密集的浅色
+    // "栅栏"，和真石头混在一起被读成"路中间一排障碍"，是"石头过不去"错觉的一大来源。
+    eachGround(cx, cy, 20, (x, gy, wx) => {
+      const h = 3 + Math.abs(Math.sin(wx * 0.37)) * 5;
       ctx.beginPath();
       ctx.moveTo(x, gy - 1);
-      ctx.lineTo(x + 2.5, gy - 1 - h);
+      ctx.lineTo(x + 1.6, gy - 1 - h);
       ctx.stroke();
     });
   },

@@ -284,6 +284,8 @@ export const SAVE_KEYS = {
   stat: "bike_stat",
   // 特殊终极模式：各车是否已解锁（{ vehicleId: true }）
   ultra: "bike_ultra",
+  // 当前关卡下标：此前只存在内存里，刷新页面后 HUD 与排位赛面板会谎报"第 1 关"
+  sel: "bike_sel",
 };
 
 // ---------------- 进度阶梯阈值 ----------------

@@ -28,22 +28,17 @@ export function drawDeco(cx, cy) {
     }
     drawDecoItem(sx, t.y - cy, t.kind, t.s, t.ph);
   }
+  // 背景层：岩石 / 灌木 / 花 / 瓦砾等 —— 缩小 + 降对比 + 不画投影。
+  // 原实现给它们画椭圆投影、再被 drawTerrain 盖住下半截、轮廓又是高对比，
+  // 三者叠加让纯装饰看上去就是"嵌在路面里的实心障碍"，玩家据此认定撞上必摔
+  // （实际零碰撞，车直接穿过）。这里只改视觉层级，**不加任何碰撞体**。
+  ctx.globalAlpha = 0.62;
   for (const r of world.decoRock) {
     const sx = r.x - cx;
     if (sx < -60 || sx > view.W + 60) continue;
-    if (shade) {
-      ctx.fillStyle = token("obj-shadow");
-      ctx.beginPath();
-      ctx.ellipse(sx + 2, r.y - cy + 3, 12 * r.s, 3.8 * r.s, 0, 0, 7);
-      ctx.fill();
-      if (q === "high") {
-        ctx.beginPath();
-        ctx.ellipse(sx + 1, r.y - cy + 1.5, 7 * r.s, 2 * r.s, 0, 0, 7);
-        ctx.fill();
-      }
-    }
-    drawDecoItem(sx, r.y - cy, r.kind, r.s, r.ph);
+    drawDecoItem(sx, r.y - cy, r.kind, r.s * 0.8, r.ph);
   }
+  ctx.globalAlpha = 1;
 }
 
 function drawDecoItem(sx, y, kind, s, ph) {
@@ -430,8 +425,7 @@ export function drawCoins(cx, cy) {
     const sx = c.x - cx;
     if (sx < -20 || sx > view.W + 20) continue;
     const y = c.y - cy;
-    const sxr = Math.sin(c.ph) * 6;
-    c.ph += 0.05;
+    const sxr = Math.sin(c.ph) * 6; // ph 由固定步推进（updateCoins），渲染层只读不写
     ctx.fillStyle = token("obj-coin");
     ctx.strokeStyle = token("obj-coin-dark");
     ctx.lineWidth = 2;
@@ -452,8 +446,7 @@ export function drawCanisters(cx, cy) {
     const sx = c.x - cx;
     if (sx < -30 || sx > view.W + 30) continue;
     const y = c.y - cy;
-    const bob = Math.sin(c.ph) * 3;
-    c.ph += 0.05;
+    const bob = Math.sin(c.ph) * 3; // ph 由固定步推进（updateCanisters），渲染层只读不写
     ctx.fillStyle = token("obj-canister-glow");
     ctx.beginPath();
     ctx.arc(sx, y + bob, 16, 0, 7);

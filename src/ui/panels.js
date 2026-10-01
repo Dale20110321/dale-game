@@ -12,7 +12,7 @@ import {
   branchLevel, globalIndexOf, branchProgress, starTime, VARIANT_INFO,
 } from "../config/levels.js";
 import { VEHICLES } from "../config/vehicles.js";
-import { store } from "../core/store.js";
+import { store, uiHooks } from "../core/store.js";
 import {
   save, downloadSave, parseSave, importSave, resetSave,
   isStorageAvailable, availableFreeThemes, isAdvancedUnlocked,
@@ -21,13 +21,15 @@ import { showToast } from "../core/toast.js";
 import { initAudio } from "../core/audio.js";
 import { hasAch } from "../game/progress.js";
 import { getQuality, setQuality, QUALITY, QUALITY_LABEL } from "../render/postfx.js";
-import { showPanel, showMenu, refreshMenuButtons } from "./menu.js";
+import { showPanel, hidePanel, showMenu, refreshMenuButtons } from "./menu.js";
 import { card, chip, badge, statRow, emptyState, themeVars } from "./components.js";
 
 let api = {};
 /** 支线墙面板：当前展开的支线下标（-1 = 全部收起）与面板种类（level | race） */
 let openBranch = -1;
 let panelKind = "level";
+/** 主页面容器（关卡地图）：菜单态显示，面板态隐藏 —— 与 #modePanel 是"一屏一视图"关系 */
+const homeView = document.getElementById("homeView");
 /** 存档面板的临时视图状态（导入待确认数据 / 对比摘要 / 提示 / 二次确认） */
 const saveView = { pending: null, summary: null, error: "", note: "", confirmReset: false };
 
@@ -42,14 +44,20 @@ export function initPanels(a) {
       if (store.state === "menu") fn();
     });
   };
-  bind("btnLevels", () => renderLevelsPanel());
-  bind("btnRace", () => renderRacePanel());
-  bind("btnFinale", renderFinalePanel);
-  bind("btnRanked", renderRankedPanel);
-  bind("btnFree", renderFreePanel);
   bind("btnGarage", renderGaragePanel);
   bind("btnAch", renderAchPanel);
   bind("btnSave", openSavePanel);
+
+  // 玩法切换：闯关 / 比赛 / 排位 / 无限
+  const tabs = document.getElementById("modeTabs");
+  if (tabs) {
+    tabs.addEventListener("click", (e) => {
+      const el = e.target && e.target.closest ? e.target.closest("[data-mode]") : null;
+      if (!el) return;
+      initAudio();
+      if (store.state === "menu") selectMode(el.dataset.mode);
+    });
+  }
 
   const panel = document.getElementById("modePanel");
   if (panel) {
@@ -58,7 +66,88 @@ export function initPanels(a) {
     // 可访问性（Task 9.1）：带 role=button 的卡片支持 Enter / 空格触发
     panel.addEventListener("keydown", onPanelKeydown);
   }
+  // 主页面（关卡地图）与弹出面板共用同一套 data-act 委托
+  const home = document.getElementById("homeView");
+  if (home) {
+    home.addEventListener("click", onPanelClick);
+    home.addEventListener("keydown", onPanelKeydown);
+  }
+  // menu.js 的 showMenu() 也要重画主页面；panels 已 import menu，反向 import 会成环，
+  // 故经 store 的钩子槽单向接线（见 core/store.js 的 uiHooks 注释）。
+  uiHooks.onHome = () => { openBranch = -1; selectMode("level"); };
+  uiHooks.onHome(); // 首屏就要有关卡地图：#homeView 在 HTML 里是空的
   refreshMenuButtons();
+}
+
+/** 玩法 tab 切换：闯关/比赛渲染关卡地图；排位/无限走全屏面板 */
+export function selectMode(mode) {
+  const m = mode === "race" || mode === "ranked" || mode === "free" ? mode : "level";
+  for (const b of document.querySelectorAll("#modeTabs .mtab")) {
+    const on = b.dataset.mode === m;
+    b.classList.toggle("is-on", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  }
+  if (m === "level" || m === "race") {
+    // 从"排位/无限"切回地图时，上一个面板还开着，必须先收起来，
+    // 否则 modePanel 会盖住刚渲染好的关卡地图。
+    hidePanel();
+    if (homeView) homeView.style.display = "";
+    renderHomeView(m);
+  } else {
+    if (homeView) homeView.style.display = "none";
+    if (m === "ranked") renderRankedPanel();
+    else renderFreePanel();
+  }
+}
+
+/**
+ * 主页面视图：最终任务 + 12 条支线的关卡地图。
+ *
+ * 旧版是"点开「闯关」才看得到、且 12 张卡默认全收起"，玩家得逐张扫读才能找到自己那条。
+ * 这里直接展开**当前前沿支线**，并在卡片上标「▶ 继续 第 N 关」，
+ * 让"我在第几关 / 下一关是什么 / 还剩多少"在一屏内自明。
+ */
+export function renderHomeView(mode) {
+  const host = document.getElementById("homeView");
+  if (!host) return;
+  panelKind = mode === "race" ? "race" : "level";
+  if (openBranch < 0 || !branchOpen(openBranch)) openBranch = frontierBranch();
+  // 顺序：最终任务 → 当前支线的 6 个关卡 → 12 支线总览。
+  // 关卡格排在总览之前，玩家进主页面第一眼看到的是"现在打哪一关"，而不是先扫一遍 12 张卡。
+  host.innerHTML =
+    finaleTile() +
+    (openBranch >= 0 ? levelBlock() : "") +
+    `<div class="branchWall">${BRANCHES.map((_, i) => branchCard(i)).join("")}</div>`;
+}
+
+/** 当前前沿支线：已开放且尚未全部通关的第一条（全部通关时回落到最后一条） */
+function frontierBranch() {
+  for (let i = 0; i < N_BRANCHES; i++) {
+    if (branchOpen(i) && firstLockedK(i) < LEVELS_PER_BRANCH) return i;
+  }
+  const last = Math.floor(unlockFrontier() / LEVELS_PER_BRANCH);
+  return Math.max(0, Math.min(N_BRANCHES - 1, last));
+}
+
+/** 主页面顶部的最终任务卡：锁定时也显示进度，给出终极目标感 */
+function finaleTile() {
+  const done = clearedCount();
+  const total = LEVELS.length;
+  const unlocked = done >= total;
+  const cleared = store.progress.finaleDone === true;
+  return card({
+    cls: "vehCard finaleTile",
+    icon: unlocked ? "🎯" : "🔒",
+    title: FINALE.name,
+    sub: `${Math.round(toM(FINALE.len))}m · 依次穿越 6 个场景 · 坡度 ${Math.round(FINALE.maxSlope)}°`,
+    meta: cleared ? "✅ 已通关，可重复挑战"
+      : unlocked ? "已解锁 · 点击开始"
+        : `通关全部 ${total} 关后解锁`,
+    right: unlocked ? "▶" : `${done}/${total}`,
+    interactive: unlocked,
+    locked: !unlocked,
+    attrs: unlocked ? 'data-act="finaleStart"' : "",
+  });
 }
 
 /** 键盘激活面板内的伪按钮（真按钮由浏览器原生处理） */
@@ -161,6 +250,9 @@ function onPanelChange(e) {
 
 /** 重绘当前支线墙面板（保持展开状态） */
 function rerender() {
+  // 主页面（关卡地图）与弹出面板各有自己的宿主，重绘到对的那个
+  const home = document.getElementById("homeView");
+  if (home && home.innerHTML) { renderHomeView(panelKind === "race" ? "race" : "level"); return; }
   if (panelKind === "race") renderRacePanel(openBranch);
   else renderLevelsPanel(openBranch);
 }
@@ -248,11 +340,17 @@ function branchCard(bi) {
     stars += s;
   }
   const done = cleared >= LEVELS_PER_BRANCH;
+  const nextK = firstLockedK(bi);
+  // 前沿 = 已开放、未全通、且还有未通关卡 → 标「▶ 继续 第 N 关」
+  // 这是"玩家不知道自己在第几关"的直接解药：不用再逐张扫 12 张同构卡片去找自己那条。
+  const front = open && !done && nextK < LEVELS_PER_BRANCH;
   return card({
-    cls: "branchCard",
+    cls: "branchCard" + (front ? " frontier" : ""),
     icon: `<div class="brThumb"></div>`,
     title: `${open ? "" : "🔒 "}${b.name}`,
-    sub: `场景「${th.name}」 · ${b.desc}`,
+    sub: front
+      ? `▶ 继续 第 ${nextK + 1} 关 · 场景「${th.name}」`
+      : `场景「${th.name}」 · ${b.desc}`,
     meta: chip(`★ ${stars}/${LEVELS_PER_BRANCH * 3}`, "gold") +
       (done ? " " + badge("已通关", "success") : ""),
     right: `<div class="brDone">${cleared}/${LEVELS_PER_BRANCH}${done ? "<br>✅" : ""}</div>`,
@@ -270,11 +368,13 @@ function levelCell(bi, k) {
   const v = VARIANT_INFO[L.variant] || VARIANT_INFO.normal;
   const locked = !levelUnlocked(bi, k);
   const st = store.stars[gi] || 0;
+  // next = 支线内第一个未通关且已解锁的关卡，也就是"该你打的下一关"，给它最醒目的样式
+  const isNext = !locked && st === 0;
   const stars = locked ? "🔒 未解锁" : st > 0 ? "★".repeat(st) + "☆".repeat(3 - st) : "☆☆☆";
-  const label = `${BRANCHES[bi].name} 第${k + 1}关 ${v.name} 坡度${Math.round(L.maxSlope)}度 三星时限${Math.round(starTime(L))}秒 ${locked ? "未解锁" : st + "星"}`;
-  return `<div class="lvCell${locked ? " locked" : st > 0 ? " done" : ""}" data-act="play" data-gi="${gi}"
+  const label = `${BRANCHES[bi].name} 第${k + 1}关 ${v.name} 坡度${Math.round(L.maxSlope)}度 三星时限${Math.round(starTime(L))}秒 ${locked ? "未解锁" : st + "星"}${isNext ? "，下一关" : ""}`;
+  return `<div class="lvCell${locked ? " locked" : st > 0 ? " done" : " next"}" data-act="play" data-gi="${gi}"
       role="button" tabindex="0" aria-label="${label}">
-    <div>第${k + 1}关</div>
+    <div>${isNext ? '<span class="lvNext">▶ 下一关</span>' : "第" + (k + 1) + "关"}</div>
     <div class="thm">${badge(v.icon + " " + v.name, "variant")}</div>
     <div class="thm">坡度 ${Math.round(L.maxSlope)}° · ${Math.round(toM(L.len))}m</div>
     <div class="thm">三星 ≤ ${fmtClock(starTime(L))}</div>
@@ -282,16 +382,24 @@ function levelCell(bi, k) {
   </div>`;
 }
 
-/** 展开支线的 6 个关卡格（只有点开才渲染，首屏不会一次铺 72 个） */
-function levelBlock() {
+/**
+ * 展开支线的 6 个关卡格。
+ * @param {boolean} [withClose] 是否带"收起"按钮。面板模式（renderLevelsPanel /
+ *   renderRacePanel）需要它切回卡片墙；主页面（renderHomeView）下方本就紧跟 12 支线
+ *   总览，再放一个"收起"只会挤占首屏。
+ */
+function levelBlock(withClose) {
   const b = BRANCHES[openBranch];
   const th = THEMES[b.theme] || THEMES[0];
   const cells = Array.from({ length: LEVELS_PER_BRANCH }, (_, k) => levelCell(openBranch, k)).join("");
+  const note = withClose
+    ? `${b.desc} · ${VARIANT_INFO.normal.icon} 常规关为 🚩；第 3、5 关为特殊变体`
+    : b.desc;
   return `<div class="branchLevels">
     <div class="brHead">${b.name} · 场景「${th.name}」 · 6 关</div>
     <div class="lvGrid">${cells}</div>
-    <div class="panelNote">${b.desc} · ${VARIANT_INFO.normal.icon} 常规关为 🚩；第 3、5 关为特殊变体</div>
-    <button class="btn sm ghost" data-act="branchClose">收起</button>
+    <div class="panelNote">${note}</div>
+    ${withClose ? '<button class="btn sm ghost" data-act="branchClose">收起</button>' : ""}
   </div>`;
 }
 
@@ -301,7 +409,7 @@ export function renderLevelsPanel(openBi) {
   openBranch = Number.isInteger(openBi) && branchOpen(openBi) ? openBi : -1;
   showPanel(`<div class="modeTitle">🏁 闯关模式 · 支线任务</div>
   <div class="branchWall">${BRANCHES.map((_, i) => branchCard(i)).join("")}</div>
-  ${openBranch >= 0 ? levelBlock() : ""}
+  ${openBranch >= 0 ? levelBlock(true) : ""}
   <div class="panelNote">星级：通关 1★ · 金币 70% 以上 2★ · 快速通关 3★ ｜ 支线内链式解锁，支线之间可并行推进</div>
   <button class="btn backBtn" data-act="back">返回</button>`);
 }
@@ -312,7 +420,7 @@ export function renderRacePanel(openBi) {
   openBranch = Number.isInteger(openBi) && branchOpen(openBi) ? openBi : -1;
   showPanel(`<div class="modeTitle">🏆 比赛模式 · 与 AI 竞速</div>
   <div class="branchWall">${BRANCHES.map((_, i) => branchCard(i)).join("")}</div>
-  ${openBranch >= 0 ? levelBlock() : ""}
+  ${openBranch >= 0 ? levelBlock(true) : ""}
   <div class="panelNote">先到终点赢 300 🪙（赛道需已解锁）</div>
   <button class="btn backBtn" data-act="back">返回</button>`);
 }

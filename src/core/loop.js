@@ -5,7 +5,7 @@ import { DT } from "../config/constants.js";
 
 /** 时间累加器：把任意帧间隔切成整数个固定步 */
 export class Stepper {
-  constructor(step, fixed = DT, maxSteps = 3) {
+  constructor(step, fixed = DT, maxSteps = 15) {
     this.step = step;
     this.fixed = fixed;
     this.maxSteps = maxSteps;
@@ -28,7 +28,10 @@ export class Stepper {
       this.acc -= this.fixed;
       n++;
     }
-    if (n >= this.maxSteps) this.acc = 0; // 丢弃积压，避免"死亡螺旋"
+    // maxSteps(15) 恰好覆盖上面 0.25s 的累积上限（0.25 / DT = 15），因此 4~240Hz
+    // 全区间都能追平真实时间。原实现 maxSteps=3 只覆盖 0.05s，帧率低于 20fps 时每帧
+    // 都丢弃积压 → 游戏永久慢动作且无法自愈（三星计时、燃料、限时门随之全部失真）。
+    if (n >= this.maxSteps) this.acc = 0; // 兜底丢弃积压，避免"死亡螺旋"
     this.lastSteps = n;
     return n;
   }

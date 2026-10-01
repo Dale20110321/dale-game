@@ -9,6 +9,29 @@ import { save } from "./storage.js";
 /** 左右键状态（加速 / 刹车；空中为转体） */
 export const key = { left: false, right: false };
 
+/** 用户是否希望显示触摸方向键（🎮 手动开关的持久状态，与设备无关） */
+let touchWanted = false;
+
+/**
+ * 触摸方向键当前是否生效（触摸设备 且 在游戏中）。
+ * 以活绑定导出：HUD 布局（render/hud.js）据此把速度表从右下角让开，
+ * 否则会被油门键整个盖住。改这里不用动 hud.js。
+ */
+export let touchActive = false;
+
+/**
+ * 触摸方向键的可见性 = 用户开关 × 是否在游戏中。
+ * 菜单 / 结算 / 面板里不该出现操作键：既无意义，又会在主页面挡住底部图标栏。
+ * 由 menu.js 在 hideOverlay / showMenu 时调用。
+ */
+export function syncTouchVisibility() {
+  const el = document.getElementById("touch");
+  if (!el) return;
+  const playing = store.state === "play" || store.state === "pause";
+  touchActive = !!(touchWanted && playing);
+  el.classList.toggle("hidden", !touchActive);
+}
+
 function bind(e, down) {
   const k = (e.key || "").toLowerCase();
   let c = null;
@@ -77,15 +100,25 @@ export function initInput(handlers = {}) {
   // ---------------- 触摸控制 ----------------
   const touchEl = document.getElementById("touch");
   const touchBtn = document.getElementById("touchBtn");
-  const isTouch = "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
-  if (isTouch && touchEl && touchBtn) {
-    touchEl.classList.remove("hidden");
-    touchBtn.classList.add("on");
+  // 判定用 (pointer: coarse) 而不是 "ontouchstart" in window —— 触屏笔记本两者都成立，
+  // 会让桌面端凭空冒出左右方向键。pointer: coarse 才代表"主输入就是手指"。
+  let isTouch = false;
+  try {
+    isTouch = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches)
+      || ("ontouchstart" in window && (navigator.maxTouchPoints || 0) > 1);
+  } catch (e) {
+    isTouch = "ontouchstart" in window;
   }
-  if (touchBtn && touchEl) {
+  // 用户手动开关（🎮）与"是否在游戏中"共同决定可见性：菜单/面板里出现操作键
+  // 既无意义又挡住视线，此前只看 isTouch，导致桌面端和菜单界面全程常驻。
+  touchWanted = isTouch;
+  syncTouchVisibility();
+  if (touchBtn) {
+    touchBtn.classList.toggle("on", touchWanted);
     touchBtn.addEventListener("click", () => {
-      touchEl.classList.toggle("hidden");
-      touchBtn.classList.toggle("on", !touchEl.classList.contains("hidden"));
+      touchWanted = !touchWanted;
+      touchBtn.classList.toggle("on", touchWanted);
+      syncTouchVisibility();
     });
   }
 

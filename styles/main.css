@@ -13,6 +13,9 @@ html, body {
   height: 100%;
   height: 100dvh; /* 移动端地址栏不再截断画面 */
   overflow: hidden;
+  /* 挡下拉刷新 / 前进后退手势：它们会直接打断游戏 */
+  overscroll-behavior: none;
+  touch-action: none;
   background: var(--surface-1);
   color: var(--text-hi);
   font-family: var(--font-family);
@@ -32,7 +35,11 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; }
   min-height: 44px;
 }
 .chip.interactive, .stat.interactive { min-width: 44px; }
-.lvCell { display: flex; flex-direction: column; justify-content: center; }
+.lvCell {
+  display: flex; flex-direction: column; justify-content: center;
+  /* 锁定态把 "☆☆☆" 换成 "🔒 未解锁"（行更高），不加 gap 会让变体徽标与锁标签糊在一起 */
+  gap: 3px;
+}
 
 /* ---- 浮层容器 ---- */
 .glass-sheet {
@@ -58,7 +65,11 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; }
 .card.interactive:active { background: var(--glass-fill-strong); }
 .card.interactive.selected { border-color: var(--success); background: var(--success-soft); }
 .card[aria-disabled="true"], .card.locked { opacity: .45; cursor: not-allowed; }
-.cardHead { display: flex; align-items: center; gap: var(--space-3); }
+/* min-width:0 —— 卡片（.card / .branchCard / .vehCard）是 flex 容器，.cardHead 作为
+   flex item 的默认 min-width:auto 会让它撑到 min-content，导致卡片内容区被顶破
+   （实测 3 列时 cardHead 310px > 卡片内容区 267px，右侧文字被裁）。置 0 后由 .cardBody
+   的 min-width:0 接手收缩，内部文字的 text-overflow:ellipsis 才会真正生效。 */
+.cardHead { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 .cardIcon { font-size: 24px; line-height: 1; }
 .cardBody { flex: 1; min-width: 0; }
 .cardRight { text-align: right; flex: none; }
@@ -218,11 +229,11 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   align-items: center;
   justify-content: center;      /* 老浏览器兜底 */
   justify-content: safe center; /* 内容溢出时不把顶部挤出屏幕（否则面板/按钮点不到） */
-  background: var(--scrim-strong); color: var(--text-hi); text-align: center;
+  background: var(--scrim-menu); color: var(--text-hi); text-align: center;
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px); /* Safari */
   z-index: 20;
-  overflow-y: auto; /* 小屏/横屏时按钮不再被裁掉 */
+  overflow-y: auto; overflow-x: hidden; /* 小屏/横屏时按钮不再被裁掉；横向一律不滚 */
   padding: var(--space-4) var(--space-4) var(--space-5);
 }
 #overlay.hidden { display: none; }
@@ -231,7 +242,6 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 #overlay .keys { font-size: var(--font-caption-size); color: var(--text-lo); margin-bottom: 0; }
 
 .btn.sm { margin: 0; }
-.menuGroups { display: flex; flex-direction: column; align-items: center; }
 
 #modePanel {
   position: relative; z-index: 2; /* 高于 #menuBg 渐晕层 */
@@ -251,7 +261,7 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 }
 #modePanel.enter { opacity: 0; transform: translateY(8px); }
 
-/* ---- 暂停操作条（overlay 顶层，避开 menuGroups 的隐藏逻辑） ---- */
+/* ---- 暂停操作条（overlay 顶层，避开关卡地图的显示切换） ---- */
 #pauseBar {
   position: relative; z-index: 2; /* 高于 #menuBg 渐晕层 */
   display: flex; gap: var(--space-2); margin-top: var(--space-3); flex-wrap: wrap;
@@ -270,7 +280,7 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 }
 .resultCard .statGrid { text-align: left; margin-top: var(--space-3); }
 .resultCard .row2 { margin-top: var(--space-4); }
-.modeTitle { font-size: 17px; font-weight: var(--font-title-weight); margin-bottom: var(--space-3); color: var(--info); text-align: center; }
+.modeTitle { font-size: 22px; font-weight: var(--font-title-weight); margin-bottom: var(--space-3); color: var(--info); text-align: center; }
 .lvGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-2); }
 .lvCell {
   padding: 9px var(--space-1); background: var(--glass-fill-strong); border-radius: var(--radius-chip);
@@ -279,6 +289,18 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 .lvCell:hover { background: var(--glass-hover); }
 .lvCell.locked { color: var(--text-lo); cursor: not-allowed; }
 .lvCell.done { background: var(--success-soft); }
+/* 「该打的下一关」：金色描边，和"已通关(绿)" / "未解锁(灰)"三态一眼可分 */
+.lvCell.next {
+  background: var(--gold-soft);
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold-glow), var(--glass-shadow-out);
+}
+.lvCell.next .lvNext {
+  color: var(--gold);
+  font-size: var(--font-caption-size);
+  font-weight: var(--font-title-weight);
+  letter-spacing: .5px;
+}
 .lvCell .stars { color: var(--gold); font-size: var(--font-micro-size); letter-spacing: 1px; }
 .lvCell .thm { font-size: var(--font-micro-size); color: var(--text-lo); }
 
@@ -314,7 +336,7 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   background: var(--scrim-strong); color: var(--text-hi); text-align: center; z-index: 30;
 }
 #shop.hidden { display: none; }
-#shop h2 { font-size: 30px; letter-spacing: 1px; margin-bottom: var(--space-1); }
+#shop h2 { font-size: 28px; letter-spacing: 1px; margin-bottom: var(--space-1); }
 #shop .upGold { font-size: 22px; color: var(--gold); margin: var(--space-2) 0 var(--space-3); }
 .upItm {
   display: flex; align-items: center; gap: var(--space-4);
@@ -346,7 +368,7 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   z-index: 31; padding: var(--space-4); overflow-y: auto;
 }
 #settings.hidden { display: none; }
-#settings h2 { font-size: 30px; letter-spacing: 1px; margin-bottom: var(--space-3); }
+#settings h2 { font-size: 28px; letter-spacing: 1px; margin-bottom: var(--space-3); }
 .setGrp {
   margin: var(--space-3) 0 var(--space-2);
   font-size: var(--font-micro-size); font-weight: var(--font-micro-weight);
@@ -386,27 +408,54 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 /* ============================================================
    触摸控制
    ============================================================ */
-#touch { position: absolute; inset: 0; pointer-events: none; z-index: 25; }
+/* z-index 必须低于 #overlay(20)：原实现给 25/26，导致触屏上触摸键压住主菜单按钮、
+   暂停遮罩上多出一个浮着的「🏠」、菜单态方向键仍能响应。 */
+#touch { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
 #touch.hidden { display: none; }
 .tbtn {
-  pointer-events: auto; position: absolute; bottom: 42px; width: 74px; height: 74px;
+  pointer-events: auto; position: absolute;
+  /* env(safe-area-inset-*)：index.html 声明了 viewport-fit=cover，不吃 inset 的话
+     iOS 的 home indicator 会压住左右方向键 */
+  bottom: calc(42px + env(safe-area-inset-bottom, 0px));
+  width: 74px; height: 74px;
   border-radius: var(--radius-pill);
   background: var(--glass-fill-strong); color: var(--text-hi); font-size: 28px;
   border: 2px solid var(--glass-highlight);
   user-select: none; -webkit-user-select: none; touch-action: none;
   display: flex; align-items: center; justify-content: center; font-family: var(--font-family);
 }
-.tleft { left: var(--space-4); }
-.tright { right: var(--space-4); }
-.tfull { position: absolute; top: var(--space-2); right: var(--space-2); z-index: 26; bottom: auto; width: 44px; height: 44px; font-size: 15px; opacity: .5; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
-.ttoggle { position: absolute; top: 56px; right: var(--space-2); z-index: 26; bottom: auto; width: 44px; height: 44px; font-size: 14px; background: var(--glass-fill); opacity: .5; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
+.tleft { left: calc(var(--space-4) + env(safe-area-inset-left, 0px)); }
+.tright { right: calc(var(--space-4) + env(safe-area-inset-right, 0px)); }
+.tfull { position: absolute; top: calc(var(--space-2) + env(safe-area-inset-top, 0px)); right: calc(var(--space-4) + env(safe-area-inset-right, 0px)); z-index: 10; bottom: auto; width: 44px; height: 44px; font-size: 15px; opacity: .5; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
+.ttoggle { position: absolute; top: calc(56px + env(safe-area-inset-top, 0px)); right: calc(var(--space-4) + env(safe-area-inset-right, 0px)); z-index: 10; bottom: auto; width: 44px; height: 44px; font-size: 14px; background: var(--glass-fill); opacity: .5; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
 /* 游戏画面内的"返回主页"按钮：只在游玩时由 menu.js 显示 */
-.thome { position: absolute; top: 104px; right: var(--space-2); z-index: 26; bottom: auto; width: 44px; height: 44px; font-size: 16px; background: var(--glass-fill); opacity: .5; display: none; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
+.thome { position: absolute; top: calc(104px + env(safe-area-inset-top, 0px)); right: calc(var(--space-4) + env(safe-area-inset-right, 0px)); z-index: 10; bottom: auto; width: 44px; height: 44px; font-size: 16px; background: var(--glass-fill); opacity: .5; display: none; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
 .thome:hover, .thome:active { opacity: 1; }
 .tfull:hover, .ttoggle:hover, .tfull:active, .ttoggle:active { opacity: 1; }
 .ttoggle.on { background: var(--toggle-on); border-color: var(--toggle-on-border); }
-.tbtn:active { background: var(--press); }
+/* Apple HIG「Game controls」：必须有 visible press state，且手指遮住控件时仍要看得见。
+   原来只改背景色 —— 指腹压上去后整个按钮被盖住，玩家看不到任何反馈。
+   改为"按钮自身缩放 + 一圈外扩光晕"：光晕在按钮外缘，手指盖住按钮时仍可见。 */
+.tbtn {
+  transition: background var(--dur-base) var(--ease-std),
+              transform var(--dur-fast) var(--ease-std),
+              box-shadow var(--dur-base) var(--ease-std);
+}
+.tbtn[data-k]:active {
+  background: var(--press);
+  transform: scale(0.92);
+  box-shadow: 0 0 0 4px var(--accent-glow), 0 0 22px 6px var(--accent-glow);
+}
 .tbtn:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+/* 右上三个浮按钮：原先 opacity .5 压在任意场景背景上（亮雪原 / 暗月面都算），
+   实测在绿野的太阳位置几乎不可辨。提到 .72 并补毛玻璃 + 投影，让它从背景里浮起来；
+   hover / active 仍回到 1。 */
+.tfull, .ttoggle, .thome {
+  opacity: .72;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: var(--glass-shadow-out);
+}
 
 /* ============================================================
    打赏
@@ -425,7 +474,7 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   margin-top: var(--space-4); width: 220px; height: 220px; border-radius: var(--radius-card);
   background: var(--text-hi); display: flex; align-items: center; justify-content: center; overflow: hidden;
 }
-.qrBox span { color: var(--muted); font-size: var(--font-caption-size); line-height: 1.8; padding: var(--space-4); }
+.qrBox span { color: var(--text-mid); font-size: var(--font-caption-size); line-height: 1.8; padding: var(--space-4); }
 .qrBox img { width: 100%; height: 100%; object-fit: contain; display: none; }
 .qrBox.filled img { display: block; }
 .qrBox.filled span { display: none; }
@@ -450,6 +499,10 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   background: var(--glass-fill); border-radius: var(--radius-card);
   padding: var(--space-2) var(--space-3); cursor: pointer;
   border: 2px solid transparent; border-left: 4px solid var(--theme-accent, var(--success));
+  /* grid item 的 min-width 默认是 auto，会按 min-content 定列宽；卡片文字是 nowrap，
+     min-content = 文字完整宽度，于是 3 列各撑到 368px（容器仅 918px）→ 右侧溢出被裁。
+     置 0 后列宽回到 1fr 的 297px，省略号才真正生效。 */
+  min-width: 0;
 }
 .branchCard:hover { background: var(--glass-hover); }
 .branchCard.open { background: var(--success-soft); border-color: var(--success); }
@@ -521,7 +574,10 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
    ============================================================ */
 #menuBg {
   position: absolute; inset: 0; z-index: 0; pointer-events: none;
-  opacity: .32;
+  /* .glow 靠 drift 动画的 translate3d 移动，动画中途会飘出视口并把整页撑出
+     横向滚动条（旧布局里一直存在的那个底部横条就是它）。装饰层一律裁掉。 */
+  overflow: hidden;
+  opacity: .5;
   background:
     radial-gradient(60% 45% at 18% 12%, var(--accent-glow), transparent 70%),
     radial-gradient(50% 40% at 82% 78%, var(--gold-glow), transparent 72%);
@@ -538,24 +594,6 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   to { transform: translate3d(58vw, 42vh, 0) scale(1.25); }
 }
 #overlay .hero { position: relative; z-index: 1; width: 100%; max-width: 680px; }
-#overlay .menuGroups { position: relative; z-index: 1; }
-.heroSummary { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); justify-content: center; margin-bottom: var(--space-2); }
-/* 两组并排 + 主玩法通栏：把纵向高度压到视口内（高度不够时下面的说明文字自动隐藏） */
-.menuGroups {
-  display: grid; grid-template-columns: 1fr 1fr;
-  gap: var(--space-3); align-items: start; width: 100%; max-width: 680px;
-}
-.menuGroup[data-group="main"] { grid-column: 1 / -1; }
-.menuGroup[data-group="support"] .grpBtns .btn { grid-column: 1 / -1; }
-.menuGroup { margin-top: 0; }
-.menuGroup .grpHead {
-  font-size: var(--font-micro-size); font-weight: var(--font-micro-weight);
-  letter-spacing: 2px; color: var(--text-lo); margin-bottom: var(--space-1); text-align: center;
-}
-/* 等宽网格：按钮对齐，不再参差不齐 */
-.grpBtns { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-2); width: 100%; }
-.grpBtns .btn { width: 100%; min-height: 44px; padding: 8px var(--space-3); font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.grpBtns .btn.lg { grid-column: 1 / -1; min-height: 52px; font-size: 17px; }
 
 /* ============================================================
    小屏 / 横屏适配
@@ -568,14 +606,32 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
      ④ 横屏矮屏 H<480：压缩垂直空间
    另附 ≤519px 细分档（HUD 同步按 W<520 切紧凑布局）
    ============================================================ */
+/* 宽屏（≥1180px）：原先内容恒定 680px 居中，1920 屏上两侧留出大片空白，
+   且 6 个关卡格只能排成 4+2。这里把版面加宽并让 6 关一行排完。
+   选择器统一带 #overlay 前缀：下方主页面基础样式块写在本媒体查询之后，
+   同优先级下"后写的赢"，不加前缀会被 680px 覆盖掉。 */
+@media (min-width: 1180px) {
+  #overlay .hero, #overlay .modeTabs, #overlay .homeView, #overlay .menuFoot { max-width: 940px; }
+  #overlay .homeView { max-height: min(66vh, 640px); }
+  #overlay .homeView .lvGrid { grid-template-columns: repeat(6, 1fr); }
+  #overlay .homeView .branchWall { grid-template-columns: repeat(3, 1fr); }
+  #overlay .modeTabs { padding: var(--space-1) var(--space-2); }
+  #overlay .mtab { font-size: var(--font-body-size); min-height: 42px; }
+}
 @media (max-width: 1023px) {
   #modePanel { max-width: 92vw; }
 }
 @media (max-width: 767px) {
   .lvGrid { grid-template-columns: repeat(3, 1fr); }
   .statGrid { grid-template-columns: 1fr; }
-  .menuGroups { grid-template-columns: 1fr; }
   .branchWall { grid-template-columns: 1fr; }
+  /* 手机竖屏：锁定的最终任务卡原本独占首屏约 1/5，信息价值却最低（只有一句
+     "通关全部 72 关后解锁"）。去掉它的描述行、收紧支线卡，并把地图区放高，
+     让「▶ 下一关 + 本支线 6 关」尽量落在首屏内。 */
+  .homeView { max-height: min(70vh, 600px); }
+  .homeView .finaleTile.locked .vdesc { display: none; }
+  .homeView .branchCard { padding: var(--space-2); gap: var(--space-1); }
+  .homeView .branchCard .brThumb { width: 38px; height: 30px; }
 }
 /* 视口不够高时收起说明文字，保证 10 个入口全部落在视口内（否则点不到） */
 @media (max-height: 820px) {
@@ -584,16 +640,38 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 @media (max-width: 519px) {
   .lvGrid { grid-template-columns: repeat(2, 1fr); }
   .btn { padding: 10px var(--space-5); font-size: 16px; }
-  .grpBtns { grid-template-columns: 1fr; }
 }
 @media (max-height: 480px) {
   #overlay { justify-content: flex-start; }
   #overlay h1 { font-size: 24px; margin-bottom: var(--space-1); }
   #overlay .sub { display: none; }
-  .btn { margin-top: var(--space-2); padding: var(--space-2) var(--space-5); font-size: 15px; }
-  .menuGroup { margin-top: var(--space-2); }
-  .menuGroup .grpHead { display: none; }
+  .btn { padding: var(--space-2) var(--space-5); font-size: 15px; }
   #modePanel { max-height: 44vh; }
+}
+
+/* 手机横放（宽度够、高度只有 ~390px）：竖屏那套「大标题 + 大 tab + 图标栏」会把高度吃光，
+   关卡格整个被推出视口。这里把纵向元素逐级压扁，并让 6 个关卡横排一行。
+   最终任务卡只压成一行而**不隐藏** —— 隐藏会让 72 关通关后失去该入口。 */
+@media (max-height: 480px) and (min-width: 700px) {
+  #overlay { padding: var(--space-2) 0; }
+  #overlay .hero h1 { font-size: 20px; margin-bottom: 2px; }
+  #overlay .heroStat { margin-bottom: var(--space-1); }
+  #overlay .heroStat .chip { font-size: var(--font-caption-size); }
+  #overlay .modeTabs { margin-bottom: var(--space-2); padding: 2px; }
+  #overlay .mtab { min-height: 32px; font-size: var(--font-caption-size); }
+  /* 390px 高度里，标题 28 + 状态条 28 + tab 44 + 底部图标栏 46 + 上下 padding 16 = 162px，
+     地图区可拿到约 220px —— 正好容纳「支线标题 + 一行 6 个关卡格」的完整高度。 */
+  #overlay .homeView { max-height: min(60vh, 240px); gap: var(--space-1); }
+  #overlay .homeView .finaleTile { padding: var(--space-1) var(--space-2); }
+  #overlay .homeView .finaleTile .vdesc { display: none; }
+  #overlay .homeView .brHead { margin-bottom: var(--space-1); }
+  #overlay .homeView .lvGrid { grid-template-columns: repeat(6, 1fr); }
+  #overlay .homeView .lvCell { padding: var(--space-1); }
+  #overlay .homeView .lvCell .thm { font-size: 10px; }
+  #overlay .homeView .branchWall { grid-template-columns: repeat(4, 1fr); }
+  #overlay .menuFoot { margin-top: var(--space-2); }
+  #overlay .fbtn { min-height: 38px; }
+  #overlay .fbtn b { font-size: 15px; }
 }
 
 /* ============================================================
@@ -606,3 +684,75 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   .resultStars .badge.star { animation: none !important; }
   #modePanel.enter { transform: none; }
 }
+
+/* ============================================================
+   主页面：玩法 tab + 关卡地图 + 底部图标栏
+   （取代原来的「11 个按钮 + 3 个分组」按钮墙）
+   ============================================================ */
+/* Hero 状态条：只留「通关 n/72」与「🪙 金币」两个数（原为 6 个 chip，挤掉主视觉） */
+.heroStat {
+  position: relative; z-index: 1;
+  display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2);
+  justify-content: center; align-items: center; margin-bottom: var(--space-2);
+}
+.heroStat .chip { font-size: var(--font-body-size); }
+
+/* 蒙层变浅后（--scrim-menu 0.60）Canvas 场景透上来，标题/说明需要自带投影压住亮背景 */
+#overlay .hero h1 { text-shadow: 0 2px 12px var(--shadow-text-strong); }
+#overlay .modeTabs, #overlay .menuFoot { box-shadow: var(--glass-shadow-out); }
+#overlay .homeView { box-shadow: none; }
+.homeView .modeTitle, .homeView .brHead { text-shadow: 0 1px 6px var(--shadow-text); }
+.modeTabs {
+  position: relative; z-index: 1; display: flex; gap: var(--space-1);
+  padding: var(--space-1); margin: 0 auto var(--space-3);
+  background: var(--glass-fill); border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill); width: 100%; max-width: 680px;
+}
+.mtab {
+  flex: 1; min-height: 38px; padding: 6px var(--space-2);
+  border: 0; border-radius: var(--radius-pill); background: transparent;
+  color: var(--text-mid); font-family: var(--font-family);
+  font-size: var(--font-caption-size); font-weight: var(--font-title-weight);
+  white-space: nowrap; cursor: pointer;
+  transition: background var(--dur-base) var(--ease-std), color var(--dur-base) var(--ease-std);
+}
+.mtab:hover { background: var(--glass-hover); }
+.mtab.is-on {
+  background: var(--glass-fill-strong); color: var(--text-hi);
+  box-shadow: var(--glass-shadow-in);
+}
+.homeView {
+  position: relative; z-index: 1; width: 100%; max-width: 680px;
+  display: flex; flex-direction: column; gap: var(--space-2);
+  /* 一屏一视图：地图自己滚动，底部图标栏与 tab 始终可见 */
+  max-height: min(56vh, 440px); overflow-y: auto; overflow-x: hidden;
+  padding: var(--space-1) var(--space-2) var(--space-2);
+  -webkit-overflow-scrolling: touch;
+}
+.homeView::-webkit-scrollbar { width: 6px; }
+.homeView::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 3px; }
+.homeView .branchWall { min-width: 0; }
+
+.menuFoot {
+  position: relative; z-index: 1; display: flex; gap: var(--space-1);
+  margin: var(--space-3) auto 0; width: 100%; max-width: 680px;
+}
+.fbtn {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  min-height: 48px; padding: 6px 2px; border: 1px solid var(--glass-border);
+  border-radius: var(--radius-chip); background: var(--glass-fill);
+  color: var(--text-mid); font-family: var(--font-family);
+  font-size: var(--font-micro-size); cursor: pointer;
+  transition: background var(--dur-base) var(--ease-std);
+}
+.fbtn b { font-size: 18px; font-weight: 400; line-height: 1; }
+.fbtn:hover { background: var(--glass-hover); }
+.fbtn.lockedBtn { opacity: .55; }
+
+/* 前沿支线（当前该打的那条）：一眼可辨 */
+.branchCard.frontier { border-color: var(--success); }
+.branchCard.frontier .vname { color: var(--success); }
+
+/* 主页面顶部的最终任务卡（锁定时也显示进度，给出终极目标感） */
+.finaleTile { width: 100%; }
+.finaleTile .cardHead { width: 100%; }

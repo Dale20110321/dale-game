@@ -1,10 +1,9 @@
 // 主菜单 / 暂停 / 面板容器
 //  · 信息架构：Hero（标题 + 状态摘要 + 活体背景）+ 三组入口（主玩法 / 养成与进度 / 支持）
 //  · 键盘导航：方向键在入口间移动、Enter 触发（按钮原生）、Esc 关闭面板
-import { store } from "../core/store.js";
-import { LEVELS, BRANCHES } from "../config/levels.js";
-import { rankName } from "../config/constants.js";
-import { VEHICLES } from "../config/vehicles.js";
+import { store, uiHooks } from "../core/store.js";
+import { syncTouchVisibility } from "../core/input.js";
+import { LEVELS } from "../config/levels.js";
 import { isStorageAvailable } from "../core/storage.js";
 import { statRow, badge, chip } from "./components.js";
 import { nextLevel } from "../game/game.js";
@@ -12,9 +11,9 @@ import { nextLevel } from "../game/game.js";
 const overlay = document.getElementById("overlay");
 const ovTitle = document.getElementById("ovTitle");
 const ovSub = document.getElementById("ovSub");
-const ovKeys = document.getElementById("ovKeys");
-const menuGroups = document.getElementById("menuGroups");
 const heroSummary = document.getElementById("heroSummary");
+const homeView = document.getElementById("homeView");
+const modeTabs = document.getElementById("modeTabs");
 const modePanel = document.getElementById("modePanel");
 
 // 暂停操作条（overlay 顶层容器）：包含「继续」与「返回主页」。
@@ -62,35 +61,26 @@ function clearedCount() {
 }
 
 /** 总星数（只统计 72 个支线关，不含最终任务槽位） */
-function totalStars() {
-  let n = 0;
-  for (let i = 0; i < LEVELS.length; i++) n += store.stars[i] || 0;
-  return n;
-}
+
 
 /**
- * Hero 区状态摘要（车辆 / 金币 / 通关进度 / 总星 / 段位 / 无限最佳）。
+ * Hero 区状态摘要：只留「通关 n/72」与「金币」两个数。
  * 结算后回到菜单会重新调用，因此数值始终与 store 一致（无需刷新页面）。
  */
 export function renderHeroSummary() {
   if (!heroSummary) return;
-  const veh = VEHICLES[store.currentVehicle] || VEHICLES[0];
-  const P = store.progress || {};
-  const rating = P.rating || 0;
-  // 紧凑一行 chips（比 6 个大数字块省高度，也不会把菜单撑出视口）
+  // 主页面只保留真正驱动决策的两个数：能打多少关、手里有多少钱。
+  // 车辆 / 总星 / 段位 / 无限最佳都收进各自面板（车库 / 存档 / 排位 / 无限），
+  // 不再在首屏堆六个 chip 把主视觉挤掉。
   heroSummary.innerHTML = [
-    chip("🚲 车辆 " + veh.name),
-    chip("金币 " + store.gold, "gold"),
-    chip("通关进度 " + clearedCount() + "/" + LEVELS.length),
-    chip("总星 " + totalStars() + "/" + LEVELS.length * 3, "gold"),
-    chip(P.invited === true ? "段位 " + rankName(rating) + " " + rating : "段位 未受邀"),
-    chip("无限最佳 " + (store.best || 0) + "m"),
+    chip("通关 " + clearedCount() + "/" + LEVELS.length),
+    chip("🪙 " + store.gold, "gold"),
   ].join("");
 }
 
+/** 菜单态显示关卡地图 / 面板态隐藏它（一屏一视图，避免叠在一起把顶部挤出视口） */
 function setMenuGroupsVisible(v) {
-  const g = document.getElementById("menuGroups");
-  if (g) g.style.display = v ? "" : "none";
+  if (homeView) homeView.style.display = v ? "" : "none";
 }
 
 /**
@@ -98,62 +88,20 @@ function setMenuGroupsVisible(v) {
  * 完整的解锁条件写在 aria-label / title，并在点开的面板里给出明确说明。
  */
 export function refreshMenuButtons() {
-  const total = LEVELS.length;
-  const done = clearedCount();
-  const P = store.progress || {};
-
-  const btnFinale = document.getElementById("btnFinale");
-  if (btnFinale) {
-    const unlocked = done >= total;
-    const cond = "通关全部 " + total + " 关后解锁（当前 " + done + "/" + total + "）";
-    btnFinale.textContent = unlocked
-      ? (P.finaleDone ? "🎯 最终任务 ✅" : "🎯 最终任务")
-      : "🎯 最终任务 🔒 " + done + "/" + total;
-    btnFinale.classList.toggle("lockedBtn", !unlocked);
-    const label = unlocked ? (P.finaleDone ? "最终任务（已通关，可重复挑战）" : "最终任务（已解锁）") : "最终任务：" + cond;
-    btnFinale.setAttribute("aria-label", label);
-    btnFinale.setAttribute("title", label);
-  }
-
-  const btnRanked = document.getElementById("btnRanked");
-  if (btnRanked) {
-    const rating = P.rating || 0;
-    const unlocked = P.invited === true;
-    const cond = "通关「最终任务」后解锁排位赛";
-    btnRanked.textContent = unlocked
-      ? "🏆 排位 " + rankName(rating) + " " + rating
-      : "🏆 排位赛 🔒";
-    btnRanked.classList.toggle("lockedBtn", !unlocked);
-    const label = unlocked ? "排位赛：段位 " + rankName(rating) + " " + rating : "排位赛：" + cond;
-    btnRanked.setAttribute("aria-label", label);
-    btnRanked.setAttribute("title", label);
-  }
-
-  const btnFree = document.getElementById("btnFree");
-  if (btnFree) {
-    btnFree.textContent = P.peak === true ? "♾️ 无限 · 可选图" : "♾️ 无限模式";
-    const label = P.peak === true ? "无限模式：已登顶，可自选场景" : "无限模式：随机地形";
-    btnFree.setAttribute("aria-label", label);
-    btnFree.setAttribute("title", label);
-  }
-
+  renderHeroSummary();
+  // 主页面入口是图标按钮，没有文字行可写解锁条件 —— 存储可用性改用 title / 锁定态表达；
+  // 完整解锁条件由 finaleTile（主页面卡片）与排位 / 无限面板各自呈现。
   const btnSave = document.getElementById("btnSave");
   if (btnSave) {
-    btnSave.textContent = isStorageAvailable() ? "💾 存档" : "💾 存档（不可用）";
+    const okSave = isStorageAvailable();
+    btnSave.title = okSave ? "存档管理" : "存档（浏览器存储不可用）";
+    btnSave.classList.toggle("lockedBtn", !okSave);
   }
-
-  const btnLevels = document.getElementById("btnLevels");
-  if (btnLevels && !P.finaleDone) {
-    const clearedBranches = (P.branchCleared || []).length;
-    btnLevels.textContent = "🏁 闯关 · " + clearedBranches + "/" + BRANCHES.length + " 支线";
-    btnLevels.classList.remove("lockedBtn");
-  }
-  renderHeroSummary();
 }
 
 /** 当前可见的入口按钮（键盘导航用） */
 function visibleEntries() {
-  if (!menuGroups) return [];
+  if (!homeView) return [];
   const btns = [];
   // 暂停态：pauseBar 内的「继续 / 返回主页」可见
   if (store.state === "pause" && pauseBar) {
@@ -163,8 +111,8 @@ function visibleEntries() {
   }
   if (resumeBtn.style.display !== "none") btns.push(resumeBtn);
   // 分组被隐藏（暂停态）时不要在里面游走焦点
-  if (menuGroups.style.display === "none") return btns;
-  for (const el of menuGroups.querySelectorAll("button[data-entry]")) {
+  if (homeView.style.display === "none") return btns;
+  for (const el of document.querySelectorAll(".mtab, .menuFoot button[data-entry]")) {
     if (el.disabled) continue;
     if (el.offsetParent === null) continue; // 浏览器中：被 display:none 隐藏的祖先
     btns.push(el);
@@ -202,7 +150,7 @@ if (typeof window !== "undefined" && window.addEventListener) {
 function focusDefault() {
   const target = store.state === "pause"
     ? resumeBtn
-    : document.getElementById("btnLevels");
+    : (modeTabs && modeTabs.querySelector(".mtab.is-on")) || modeTabs;
   if (target && typeof target.focus === "function") {
     try { target.focus({ preventScroll: true }); } catch (err) { target.focus(); }
   }
@@ -210,13 +158,14 @@ function focusDefault() {
 
 export function setMenuChrome() {
   ovTitle.textContent = "🚲 越野自行车";
-  ovSub.textContent = "物理引擎越野：支线任务 · 最终任务 · 排位赛 · 无限模式";
-  ovKeys.textContent =
-    "→/D 加速(空中顺时针转)  ←/A 刹车(空中逆时针转)  P/Esc 暂停  R 重开  M 静音  ↑↓←→ 选择";
-  if (menuGroups) menuGroups.style.display = "";
+  // 副标题不再复述模式名（模式名已由下方 tab 表达）
+  if (ovSub) ovSub.hidden = true;
+  if (homeView) homeView.style.display = "";
   resumeBtn.style.display = "none";
   if (pauseBar) pauseBar.style.display = "none";
   refreshMenuButtons();
+  // 主页面 = 关卡地图，交给 panels.js 重画（它是唯一持有支线/解锁逻辑的地方）
+  if (uiHooks.onHome) uiHooks.onHome();
   focusDefault();
 }
 
@@ -224,6 +173,7 @@ export function hideOverlay() {
   overlay.classList.add("hidden");
   // 悬浮返回按钮用内联 flex 覆盖 CSS 的 display:none（设 "" 会被 CSS 默认值盖住而不显示）
   if (homeFloat) homeFloat.style.display = "flex";
+  syncTouchVisibility(); // 进游戏：触摸方向键该出现了
 }
 
 export function showPanel(html) {
@@ -258,6 +208,7 @@ export function showMenu() {
   if (homeFloat) homeFloat.style.display = "none";
   setMenuChrome();
   overlay.classList.remove("hidden");
+  syncTouchVisibility(); // 回菜单：收掉操作键，别挡住底部图标栏
 }
 
 /**
@@ -351,9 +302,11 @@ export function togglePause() {
   if (store.state === "play") {
     store.state = "pause";
     ovTitle.textContent = "⏸ 已暂停";
-    ovSub.textContent = "休息一下，随时继续，或返回主页";
-    ovKeys.textContent = "";
-    if (menuGroups) menuGroups.style.display = "none";
+    if (ovSub) { ovSub.hidden = false; ovSub.textContent = "休息一下，随时继续，或返回主页"; }
+    if (homeView) homeView.style.display = "none";
+    // 浮按钮的 z-index 已降到 #overlay 之下（否则会压住主菜单与暂停遮罩），
+    // 但遮罩是半透明的，仍会透出轮廓 —— 暂停时直接不显示。
+    if (homeFloat) homeFloat.style.display = "none";
     if (pauseBar) pauseBar.style.display = "";
     resumeBtn.style.display = "";
     homeBtn.style.display = "";
@@ -362,5 +315,6 @@ export function togglePause() {
   } else if (store.state === "pause") {
     store.state = "play";
     overlay.classList.add("hidden");
+    if (homeFloat) homeFloat.style.display = "flex"; // 恢复「🏠 返回主页」
   }
 }
