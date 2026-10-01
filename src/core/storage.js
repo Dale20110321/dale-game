@@ -7,13 +7,17 @@
 //  · 任一 bike_* 键缺失或 JSON 损坏 → 回退默认值，不崩溃。
 import {
   SAVE_KEYS, MAX_LV, RATING_ADVANCED, RATING_PEAK, SAVE_APP, SAVE_FORMAT,
+  safeGold,
 } from "../config/constants.js";
 import { VEHICLES } from "../config/vehicles.js";
 import { LEVELS, BRANCHES, LEVELS_PER_BRANCH } from "../config/levels.js";
 import { store } from "./store.js";
 
-/** 当前存档结构版本：3 = 已完成"20 关 → 72 关"迁移（2 = 货币换算） */
-const CUR_VER = 3;
+/**
+ * 当前存档结构版本：
+ *   2 = 货币换算；3 = "20 关 → 72 关" 迁移；4 = "72 关 → 432 关" 迁移（36 场景 × 12 关）
+ */
+export const CUR_VER = 4;
 
 /** 全部受管理的存档键（导入/导出/重置都基于这份清单） */
 const ALL_KEYS = Object.values(SAVE_KEYS);
@@ -253,10 +257,23 @@ function jsonOr(raw, fallback) {
   }
 }
 
-/** 安全地解析非负整数，失败返回 0 */
+/**
+ * 安全地解析存档里的数值，失败返回 0。
+ *
+ * ★ 必须用 `Number()` 而不是 `parseInt()`，这是实测到的丢档 bug 的正解：
+ *   · 余额 ≥ 1e21 时 `String(v)` 写成指数记数法 `"1e+21"`，
+ *     `parseInt("1e+21", 10)` 返回 **1** —— 玩家的两千亿凭空变成 1 金币。
+ *     `Number("1e+21")` 则正确返回 1e21。
+ *   · 余额是 `Infinity` / `NaN` 时落盘原文是 `"Infinity"` / `"NaN"`，
+ *     `parseInt` 得 NaN → 兜底 **0**，刷新即清零（这正是玩家遇到的症状）。
+ *     这里对非有限值一律返回 0，并且写入侧还有 `safeGold` 提前拦一道。
+ */
 function intOr(v) {
-  const n = parseInt(v, 10);
-  return Number.isFinite(n) ? n : 0;
+  // ★ 布尔必须显式排除：Number(true) === 1，会把一个坏档位读成"胜场 1 场"。
+  //   （parseInt 对这点是对的，改用 Number 时不补这一句就回归了。）
+  if (typeof v === "boolean" || v === null || v === undefined) return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.trunc(n) : 0;
 }
 
 /**
@@ -323,7 +340,10 @@ export function saveAchList() {
  * 升级、成就、段位变化等既有落盘点都走这里，因此一处委托即可全覆盖。
  */
 export function save() {
-  lsSet(SAVE_KEYS.gold, store.gold);
+  // 写盘前先夹紧 + 取整：保证落盘原文永远是十进制整数字符串，
+  // 不会因为值太大退化成 "1e+21" 那种读回来就变味的写法。
+  store.gold = safeGold(store.gold);
+  lsSet(SAVE_KEYS.gold, String(store.gold));
   lsSet(SAVE_KEYS.up, JSON.stringify(store.upgrades));
   lsSet(SAVE_KEYS.unlocked, store.unlocked);
   lsSet(SAVE_KEYS.stars, JSON.stringify(store.stars));
@@ -544,9 +564,18 @@ export function initAutoSave(intervalMs = 30000) {
 
 // ---------------- 老存档迁移（20 关 → 72 关） ----------------
 
-/** 判断是否为"旧 20 关结构"星级数组（长度 1~20 且 < 现有 72） */
-function isLegacy20(arr) {
-  return Array.isArray(arr) && arr.length > 0 && arr.length < LEVELS.length && arr.length <= 20;
+/**
+ * 判断是否为"旧关卡数"星级数组（比当前关卡数少，且少到只可能是 20 或 72）。
+ *
+ * ★ 不能只看"长度小于当前总数"：那种写法会把玩家**故意截断**的坏档也当成老档，
+ *   按索引重排后星级会错位。必须显式枚举历史关卡数。
+ */
+const LEGACY_LEVEL_COUNTS = [20, 72];
+function isLegacyStars(arr) {
+  if (!Array.isArray(arr) || arr.length === 0) return false;
+  // ≤20 的都算 1~20 代的存档（早期版本存过不满 20 关的中间态，实测存档确实存在 6 项的）；
+  // 另加历史上确有其事的 72 关总数。21 这类"从没有过的长度"不迁移。
+  return arr.length <= 20 || LEGACY_LEVEL_COUNTS.includes(arr.length);
 }
 
 /** 星级数组里最后一个有星的下标（无则 -1） */
@@ -631,11 +660,11 @@ export function loadSave() {
       store.gold *= 10;
     }
 
-    // 版本 2 → 3：20 关 → 72 关结构迁移（只执行一次，由 bike_v 守护）
+    // 版本 2 → 4：关卡数结构迁移（20 → 72 → 432，只执行一次，由 bike_v 守护）
     // 旧第 i 关的全局索引仍是 i，因此星级按索引原样映射；解锁不回退；星级补齐 0。
     let migrated = false;
     let stars = starsArr;
-    if (ver < 3 && isLegacy20(starsArr)) {
+    if (ver < CUR_VER && isLegacyStars(starsArr)) {
       migrated = true;
       stars = starsArr.slice(0, LEVELS.length);
       const hi = highestStarred(stars);
@@ -650,7 +679,13 @@ export function loadSave() {
     if (ver < CUR_VER) {
       if (migrated) store.progress.branchCleared = deriveBranchCleared();
       lsSet(SAVE_KEYS.ver, String(CUR_VER));
-      save(); // 内部委托 saveProgress()，一并落盘进度阶梯
+      // ★ 必须**先 loadProgress 再 save**。
+      //   save() 内部委托 saveProgress()，会把 store.progress.rating / stat 原样写回；
+      //   而此刻这些字段还是模块初始的 0 —— 直接 save 会把玩家攒下的段位分与
+      //   累计统计**清零**。（实测：baseline rating=1350，迁移后读回 0。）
+      //   读一次再写，迁移就只改它该改的（星级数组 / 解锁进度 / 版本号）。
+      loadProgress();
+      save();
     }
 
     // 特殊模式体验包（localStorage 键 bike_trial=1）：每次加载都把

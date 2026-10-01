@@ -55,7 +55,7 @@ if (ONLY_MODULES) {
   // ----------------------------------------------------------
   const { store, bike, world } = await imp("core/store.js");
   const { key } = await imp("core/input.js");
-  const { LEVELS, BRANCHES, FINALE, FINALE_INDEX, LEVELS_PER_BRANCH, N_BRANCHES, starTime, variantRule, VARIANTS, levelHillY, airTargetOf: atOfDiag } = await imp("config/levels.js");
+  const { LEVELS, BRANCHES, FINALE, FINALE_INDEX, LEVELS_PER_BRANCH, N_BRANCHES, starTime, variantRule, VARIANTS, levelHillY, airTargetOf: atOfDiag, SPECIAL_SLOTS } = await imp("config/levels.js");
   // 坡度辅助复用真实地形函数（避免测试里再抄一份公式而与实现脱节）
   _hillY = levelHillY;
   const { THEMES } = await imp("config/themes.js");
@@ -240,10 +240,10 @@ if (ONLY_MODULES) {
 
     menu.renderHeroSummary();
     const sum = els("heroSummary").innerHTML || "";
-    const need = ["通关", "2/72", "1234"];
+    const need = ["通关", `2/${LEVELS.length}`, "1234"];
     const miss = need.filter((k) => !sum.includes(k));
     check("Hero 摘要精简为通关进度 + 金币两项且与 store 一致", miss.length === 0,
-      miss.length ? "缺 " + miss.join(",") : "通关 2/72 · 金币 1234");
+      miss.length ? "缺 " + miss.join(",") : `通关 2/${LEVELS.length} · 金币 1234`);
 
     // 未解锁入口：按钮文案必须写明解锁条件与当前进度，且标记锁定
     store.stars.fill(0);
@@ -1902,10 +1902,15 @@ if (ONLY_MODULES) {
   // ---------------- 关卡结构（12 支线 × 6 关 + 最终任务） ----------------
   section("关卡结构");
   {
-    check("共 12 条支线", BRANCHES.length === N_BRANCHES && N_BRANCHES === 12, `BRANCHES=${BRANCHES.length}`);
-    check("每支线 6 关", LEVELS_PER_BRANCH === 6, String(LEVELS_PER_BRANCH));
-    check("LEVELS 恰为 72 关的扁平数组", LEVELS.length === 72, `长度 ${LEVELS.length}`);
-    check("FINALE 存在且索引为 72", FINALE && FINALE_INDEX === LEVELS.length && FINALE_INDEX === 72, `FINALE_INDEX=${FINALE_INDEX}`);
+    // ★ 一律从配置派生，不再写死 12 支线 / 6 关 / 72 关：
+    //   内容扩容（36 场景 × 12 关 = 432）后这些魔法数字会集体变红，
+    //   而失败原因与"关卡结构对不对"毫无关系（是断言自己过期了）。
+    check(`共 ${N_BRANCHES} 条支线`, BRANCHES.length === N_BRANCHES, `BRANCHES=${BRANCHES.length}`);
+    check(`每支线 ${LEVELS_PER_BRANCH} 关`, LEVELS_PER_BRANCH === 12, String(LEVELS_PER_BRANCH));
+    check(`LEVELS 恰为 ${N_BRANCHES * LEVELS_PER_BRANCH} 关的扁平数组`,
+      LEVELS.length === N_BRANCHES * LEVELS_PER_BRANCH, `长度 ${LEVELS.length}`);
+    check(`FINALE 存在且索引为 ${LEVELS.length}`,
+      FINALE && FINALE_INDEX === LEVELS.length, `FINALE_INDEX=${FINALE_INDEX}`);
 
     // 每关 theme 与所属支线绑定（1:1）
     const themeBad = [];
@@ -1931,7 +1936,7 @@ if (ONLY_MODULES) {
   // ---------------- 场景数据（12 场景数据驱动） ----------------
   section("场景数据");
   {
-    check("THEMES 恰为 12 个场景", THEMES.length === 12, String(THEMES.length));
+    check(`THEMES 恰为 ${N_BRANCHES} 个场景（与支线 1:1）`, THEMES.length === N_BRANCHES, String(THEMES.length));
 
     // 数据完整性：必需字段
     const fields = ["name", "g", "traction", "sky", "sun", "pal", "ground", "deco", "bg", "surface", "dust", "ambient"];
@@ -2024,13 +2029,13 @@ if (ONLY_MODULES) {
     for (let bi = 0; bi < BR2.length; bi++) {
       for (let k = 0; k < LPB2; k++) {
         const v = LEVELS[bi * LPB2 + k].variant;
-        const special = k === 2 || k === 4;
+        const special = SPECIAL_SLOTS.indexOf(k) >= 0;
         if (special && v === "normal") badLayout.push(`支线${bi}第${k + 1}关应特殊却是normal`);
         if (!special && v !== "normal") badLayout.push(`支线${bi}第${k + 1}关应normal却是${v}`);
       }
     }
-    check("每条支线第 3、5 关为特殊变体、其余为常规", badLayout.length === 0,
-      badLayout.slice(0, 5).join(",") || "72 关排布正确");
+    check(`每条支线的 ${SPECIAL_SLOTS.map((x) => x + 1).join("、")} 关为特殊变体、其余为常规`, badLayout.length === 0,
+      badLayout.slice(0, 5).join(",") || `${LEVELS.length} 关排布正确`);
 
     // 6 种变体在全游戏中都出现
     const seen = new Set(LEVELS.map((L) => L.variant));
@@ -2133,7 +2138,20 @@ if (ONLY_MODULES) {
   // ---------------- 机制：危险段（超速必摔） ----------------
   section("危险段机制");
   {
-    const HZ_IDX = 40;
+    /**
+     * 取一个**确实生成了危险段**的关卡，而不是写死下标。
+     *
+     * ★ 写死 40 在 72 关时没问题，扩到 432 关后第 40 关落在支线 3 的月面，
+     *   那一关没生成危险段 → world.hazards[0] 为 undefined → 整条用例在读 .x0 时崩掉
+     *   （autotest 从此一项都跑不出来）。关卡总数会再变，所以这里按"实际有危险段"来选。
+     */
+    const HZ_IDX = (() => {
+      for (let i = LEVELS.length - 1; i >= 0; i--) {
+        startGame("level", i);
+        if (world.hazards && world.hazards.length) return i;
+      }
+      return 0;
+    })();
     /** 以 mult 倍限速冲过第一段危险区，返回是否摔车 */
     function runThroughHazard(mult) {
       startGame("level", HZ_IDX);
@@ -2880,16 +2898,16 @@ if (ONLY_MODULES) {
     renderLevelsPanel();
     const wallHtml = panelEl.innerHTML || "";
     const cardCount = (wallHtml.match(/class="[^"]*branchCard/g) || []).length;
-    check("支线任务面板首屏为 12 张支线卡片（不铺 72 关）", cardCount === 12,
+    check(`支线任务面板首屏为 ${N_BRANCHES} 张支线卡片（不铺全部关卡）`, cardCount === 12,
       `卡片数 ${cardCount}；不含关卡格 ${!/class="[^"]*lvCell/.test(wallHtml) ? "✔" : "✘"}`);
     hidePanel();
 
-    // 展开支线：恰好 6 个关卡格（含星级/变体/坡度/三星时限），且有返回卡片墙入口
+    // 展开支线：恰好 LEVELS_PER_BRANCH 个关卡格（含星级/变体/坡度/三星时限），且有返回卡片墙入口
     renderLevelsPanel(0);
     const openHtml = panelEl.innerHTML || "";
     const cellCount = (openHtml.match(/class="[^"]*lvCell/g) || []).length;
-    check("展开支线后为 6 个关卡格且可返回卡片墙",
-      cellCount === 6 && openHtml.includes('data-act="branchClose"') &&
+    check(`展开支线后为 ${LEVELS_PER_BRANCH} 个关卡格且可返回卡片墙`,
+      cellCount === LEVELS_PER_BRANCH && openHtml.includes('data-act="branchClose"') &&
         openHtml.includes("badge variant") && openHtml.includes("三星") && openHtml.includes("坡度"),
       `关卡格 ${cellCount} 个 · 变体徽标/坡度/三星时限 ${openHtml.includes("三星") ? "✔" : "✘"} · 返回入口 ${openHtml.includes("branchClose") ? "✔" : "✘"}`);
     hidePanel();

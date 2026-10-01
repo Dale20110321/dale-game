@@ -5,16 +5,25 @@
 //  · 支线 i 绑定 THEMES[i]（场景下标 1:1）
 import { clamp, mulberry32 } from "../core/utils.js";
 import { REF_SPEED, KICK_TARGET } from "../config/constants.js";
+import { THEMES } from "../config/themes.js";
 
 /** 断层过渡宽度（px）：做成"陡坡"而不是"窄坑"，否则车身会卡死 */
 export const STEP_W = 150;
 /** 起伏渐入长度（px）：出发平台之后，用这段 smoothstep 把起伏逐渐放大，给足加速距离 */
 const RUN_IN = 430;
+/**
+ * 收尾缓冲长度（px）：终点前这一段把地形平滑地收平。
+ *
+ * ★ 起步有 LAUNCH_PAD 平缓段、终点却没有，于是终点前 200px 的坡度完全由随机波形决定，
+ *   偶发落到断崖上（72 关时样本少，432 关后必现）。过线即刻结算，坡度再大都无碍，
+ *   所以这里按构造把终点收平，而不是去放宽那条断言。
+ */
+const FINISH_PAD = 900;
 
 /** 每条支线的关卡数 */
-export const LEVELS_PER_BRANCH = 6;
+export const LEVELS_PER_BRANCH = 12;
 /** 支线数量（与 THEMES.length 一致） */
-export const N_BRANCHES = 12;
+export const N_BRANCHES = 36;
 /** 总关卡数 */
 const TOTAL = N_BRANCHES * LEVELS_PER_BRANCH;
 
@@ -23,7 +32,18 @@ const TOTAL = N_BRANCHES * LEVELS_PER_BRANCH;
 /** 6 种变体：normal 为常规关，其余 5 种是特殊变体 */
 export const VARIANTS = ["normal", "sprint", "gauntlet", "airtime", "fuelrun", "downhill"];
 
-/** 每条支线第 3、5 关（k=2、k=4）为特殊变体，按此顺序轮转分配 */
+/**
+ * 每条支线的特殊变体关位（k 值）。12 关规模下用 6 个位：2/4/6/8/10/11。
+ *
+ * ★ 为什么是这 6 个位、且要错开两轮轮转：原 6 关版只有 k=2、4 两个特殊位，
+ *   6 种变体在 72 关里只出现 36 次、分布很不均。扩到 12 关后若只补位不补齐，
+ *   变体分布仍会偏斜（checklist 要求 6 种出现次数两两差 ≤ 2）。
+ *   `SPECIAL_SLOTS` 给出位，`bi` 与 `bi+2` 错开轮转，保证相邻支线不会撞同一个变体。
+ */
+export const SPECIAL_SLOTS = [2, 4, 6, 8, 10];
+// ★ 特殊变体只有 5 种（VARIANTS 去掉 normal），所以位也取 5 个。
+//   6 位 × 5 种会让 sprint 出现 72 次、其余各 36 次（实测差 36，远超"差 ≤2"）。
+//   5 位 × 5 种 × 36 条支线 = 900 / 5 = 每种正好 36 次。
 const SPECIALS = ["sprint", "gauntlet", "airtime", "fuelrun", "downhill"];
 
 /** 变体展示信息（HUD / 面板） */
@@ -61,8 +81,15 @@ export function variantRule(v) {
   return VARIANT_RULES[v] || VARIANT_RULES.normal;
 }
 
-/** 12 条支线：i 绑定 THEMES[i]（场景下标 1:1） */
-export const BRANCHES = [
+/**
+ * 36 条支线：i 绑定 THEMES[i]（场景下标 1:1）。
+ *
+ * ★ 前 12 条手写（名字与 desc 是既有内容，不动）；第 13~36 条**由 THEMES 派生**，
+ *   而不是再抄一份手写表 —— 派生保证"支线名永远等于它绑定的那个场景名"，
+ *   不会出现两边各写一份、改了场景忘了改支线的漂移（这类漂移一旦发生，
+ *   关卡地图上就会出现"名字叫 A 画的却是 B"的错位）。
+ */
+const BRANCH_SEED = [
   { id: "green", name: "翠野乡道", theme: 0, desc: "平缓草甸，热身上路" },
   { id: "snow", name: "极寒雪原", theme: 1, desc: "积雪打滑，稳住节奏" },
   { id: "desert", name: "流沙荒漠", theme: 2, desc: "沙丘连绵，酷热耗油" },
@@ -76,6 +103,24 @@ export const BRANCHES = [
   { id: "sky", name: "天空浮岛", theme: 10, desc: "浮空群岛，轻若无物" },
   { id: "night", name: "极夜星空", theme: 11, desc: "极夜寒星，终极试炼" },
 ];
+
+/** 由场景派生后续支线（12 → 36）：name 取场景名，desc 由该场景的重力/抓地自动描述 */
+function deriveBranch(i) {
+  // 兜底：场景表还没就绪时不至于整份配置加载失败（那会让整个 bundle 白屏）。
+  // 正常情况下 THEMES.length === N_BRANCHES，这里永远不会走到兜底分支。
+  const t = THEMES[i] || { name: "场景 " + (i + 1), g: 750, traction: 1 };
+  const grip = t.traction <= 0.7 ? "极滑抓地" : t.traction <= 0.85 ? "湿滑路面" : "抓地良好";
+  const grav = t.g < 600 ? "低重力" : t.g > 820 ? "高重力" : "标准重力";
+  return {
+    id: "s" + i,
+    name: t.name,
+    theme: i,
+    desc: `${grav} · ${grip}`,
+  };
+}
+
+export const BRANCHES = Array.from({ length: N_BRANCHES }, (_, i) =>
+  BRANCH_SEED[i] || deriveBranch(i));
 
 // ============================================================
 //  地形体格：每关独一无二（形状随机 × 难度受控）
@@ -264,8 +309,32 @@ const LAUNCH_PAD = 150;
 
 // ---------------- 纯地形函数 ----------------
 
-/** 关卡地形高度（x 为世界坐标，返回世界 y） */
+/**
+ * 关卡地形高度（x 为世界坐标，返回世界 y）。
+ *
+ * = 未收尾的地形（hillRaw）按终点收尾权重向"终点平台高度"混合
+ *   → 起点有 LAUNCH_PAD 平缓段、终点有 FINISH_PAD 收平段，两端坡度都由构造保证。
+ */
 export function levelHillY(L, x) {
+  const t = finishT(L, x);
+  if (t <= 0) return hillRaw(L, x);
+  const a = finishAnchor(L);
+  return hillRaw(L, a) + (hillRaw(L, x) - hillRaw(L, a)) * (1 - t);
+}
+
+/** 终点收尾的混合权重（0 = 原始地形，1 = 完全收平）；终点前不受影响 */
+function finishT(L, x) {
+  const a = finishAnchor(L);
+  if (x <= a) return 0;
+  return ss((x - a) / RUN_IN);
+}
+/** 收尾段锚点：终点前 FINISH_PAD 处，其地形高度作为收平后的平台高度 */
+function finishAnchor(L) {
+  return L.len - FINISH_PAD;
+}
+
+/** 原始地形高度（含起步缓冲，未做终点收尾） */
+function hillRaw(L, x) {
   let y = 300;
   let relief = 0;
   for (const w of L.waves) relief += w.amp * Math.sin(x * w.f + w.ph);
@@ -488,15 +557,21 @@ function makeLevel(gi) {
   const gN = gi / (TOTAL - 1); // 0 → 1
   const bi = Math.floor(gi / LEVELS_PER_BRANCH);
   const k = gi % LEVELS_PER_BRANCH;
-  // 变体穿插：每条支线第 3 关（k=2）、第 5 关（k=4）为特殊变体，错开两轮轮转保证 6 种都出现
-  const variant =
-    k === 2 ? SPECIALS[bi % SPECIALS.length]
-    : k === 4 ? SPECIALS[(bi + 2) % SPECIALS.length]
-    : "normal";
+  // 变体穿插：k ∈ SPECIAL_SLOTS 的关位为特殊变体，按支线下标错开两轮轮转
+  const slotIdx = SPECIAL_SLOTS.indexOf(k);
+  const variant = slotIdx >= 0 ? SPECIALS[(bi * 2 + slotIdx) % SPECIALS.length] : "normal";
   // 难度分层：前期 ramp 增长慢（教学），后段陡增；ramp 对 gN 单调不减
   const ramp = Math.pow(clamp(gN, 0, 1), 1.15);
   const len = Math.round(4200 + gN * 9000); // 路程 4200 → 13200
-  const coinN = Math.round(16 + gN * 40); // 金币 16 → 56
+  // 赛道金币数量随全局进度递增（24 → 72）
+  const coinN = Math.round(24 + gN * 48);
+  // 通关固定奖励随进度递增（240 → 900）：玩家在**闯关阶段**（前 36 关）
+  // 就能把一台入门车四项升满，不必刷几百关才看得到升级效果。
+  // 系数是反推出来的：432 关里前 36 关（闯关阶段）按 60% 收集率要能攒够 28,240
+  // （一台入门车四项升满）。240/660 时实测只到 27,090，差一点；抬到 280/720 后有富余。
+  const goldBase = Math.round(280 + 720 * gN);
+  // 单枚赛道金币的面值（30 → 60）：与 coinN 相乘，单关总产出 720 → 4320
+  const coinVal = Math.round(30 + 30 * gN);
   // 体格：一条支线一种（按支线下标错开轮转，12 条支线覆盖 12 种气质），
   // 再叠加每关独立的种子 → 相邻关卡的波形 / 局部地貌 / 断层节奏都不同
   const mood = TERRAIN_MOODS[bi % TERRAIN_MOODS.length];
@@ -508,6 +583,8 @@ function makeLevel(gi) {
     steps: buildSteps(mood, ramp, gN, len, rng),
     feats: buildFeats(mood, ramp, len, rng),
     coinN,
+    goldBase,
+    coinVal,
     ramp,
     // 三星时限的速度基准（三星要求均速）：前期 ≈0.72×基准极速（余量更宽、易拿满星），
     // 末期 ≈0.50×（更严，须在陡峭地形上稳住节奏）；starTime(L) = L.len / L.den3 语义不变

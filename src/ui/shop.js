@@ -1,6 +1,6 @@
 // 升级车间
 import {
-  MAX_LV, upCost, toKmh,
+  MAX_LV, upCostOf, toKmh,
   deriveHandling, deriveSuspension, deriveFriction, crashTiltDeg,
 } from "../config/constants.js";
 import { VEHICLES } from "../config/vehicles.js";
@@ -78,15 +78,21 @@ export function renderShop() {
   if (ultraEl) {
     const v = VEHICLES[store.currentVehicle];
     if (v.ultra) {
-      const got = store.ultra[v.id] === true;
-      const full4 = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= MAX_LV);
-      ultraEl.className = "upUltra" + (got ? " got" : full4 ? " canBuy" : "");
-      if (got) {
-        ultraEl.textContent = v.ultra.icon + " 特殊模式「" + v.ultra.name + "」已开启 · " + v.ultra.desc;
-      } else if (full4) {
-        ultraEl.textContent = "⭐ 已全部升满！到车库花 " + v.ultra.cost.toLocaleString() + " 🪙 解锁「" + v.ultra.name + "」";
+      // builtin 形态（究极终局车）：免解锁、已永久生效，不走"解锁/满级才能开"那套文案
+      if (v.ultra.builtin === true) {
+        ultraEl.className = "upUltra got";
+        ultraEl.textContent = v.ultra.icon + " 「" + v.ultra.name + "」已内置生效 · " + v.ultra.desc;
       } else {
-        ultraEl.textContent = "🔒 全部升级升到 Lv" + MAX_LV + " 后可解锁特殊模式「" + v.ultra.name + "」：" + v.ultra.desc;
+        const got = store.ultra[v.id] === true;
+        const full4 = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= MAX_LV);
+        ultraEl.className = "upUltra" + (got ? " got" : full4 ? " canBuy" : "");
+        if (got) {
+          ultraEl.textContent = v.ultra.icon + " 特殊模式「" + v.ultra.name + "」已开启 · " + v.ultra.desc;
+        } else if (full4) {
+          ultraEl.textContent = "⭐ 已全部升满！到车库花 " + v.ultra.cost.toLocaleString() + " 🪙 解锁「" + v.ultra.name + "」";
+        } else {
+          ultraEl.textContent = "🔒 全部升级升到 Lv" + MAX_LV + " 后可解锁特殊模式「" + v.ultra.name + "」：" + v.ultra.desc;
+        }
       }
     } else {
       ultraEl.className = "upUltra";
@@ -122,7 +128,7 @@ export function renderShop() {
       btn.disabled = true;
       btn.style.opacity = 0.5;
     } else {
-      const c = upCost(lv + 1);
+      const c = upCostOf(VEHICLES[store.currentVehicle], lv + 1);
       btn.textContent = "升级 " + c + " 🪙";
       btn.disabled = store.gold < c;
       btn.style.opacity = 1;
@@ -134,7 +140,7 @@ function buyUpgrade(k) {
   const u = getUp();
   const lv = u[k] || 0;
   if (lv >= MAX_LV) return;
-  const c = upCost(lv + 1);
+  const c = upCostOf(VEHICLES[store.currentVehicle], lv + 1);
   const note = document.getElementById("shopNote");
   if (store.gold < c) {
     if (note) note.textContent = "金币不足，去关卡里收集吧！";

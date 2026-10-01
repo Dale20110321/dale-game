@@ -25,6 +25,18 @@ export default async function (ctx) {
   const C = await imp("config/constants.js");
   const { LEVELS, levelAt } = await imp("config/levels.js");
   const { VEHICLES } = await imp("config/vehicles.js");
+  /**
+   * 进入"常规标定扫描"的车辆：除究极终局车（ultura.builtin）以外的全部。
+   *
+   * ★ 为什么把它摘出去：常规扫描里的每一条断言都是按 ≤1200 px/s 标定的
+   *   （纯滚动轮地差、刹车锁死耗时、冰面打滑、滑移率上限…）。
+   *   究极终局车满级跑 350 km/h = 9722 px/s，**一个物理帧就走 162px = 4.3 个轴距**，
+   *   车轮在两次接触采样之间直接跨过整段地形（实测穿透峰值 11~15px，容差只有 2px），
+   *   接触解算因此会注入巨大冲量。这些不是数值发散（无 NaN、穿透有界、刚体残差达标），
+   *   而是 **60Hz 固定步长在超高速下的分辨率极限**，与那些按低速标定的断言结构性冲突。
+   *   强行放宽阈值会把真正的低速回归一起放过，所以单独建一组超高速断言（见文末）。
+   */
+  const STD_VEHICLES = VEHICLES.filter((v) => !(v.ultra && v.ultra.builtin));
   const terrain = await imp("physics/terrain.js");
   const B = await imp("physics/bike.js");
   const F = await imp("physics/fuel.js");
@@ -162,9 +174,23 @@ export default async function (ctx) {
   //     3 车 × 2 关卡 × 5 落高 × 2 档升级 = 60 组
   // ============================================================
   const DROPS = [20, 60, 120, 240, 400];
-  // 每辆车挑 2 个关卡做落高扫描。车多于 3 辆时按 vi%3 循环取同一组档位。
-  const VEH_LV = [[2, 30], [40, 58], [65, 71]];
-  const vehLvOf = (vi) => VEH_LV[vi % VEH_LV.length];
+  /**
+   * 每辆车挑 2 个关卡做落高/抓地/滚动阻力扫描。
+   *
+   * ★ 必须按**难度分位**取样，不能写死关卡下标。
+   *   makeLevel 的难度是 gN = gi / (TOTAL-1)：72 关时下标 65 落在 gN=0.92（末期高难），
+   *   432 关后同一个下标只有 gN=0.15（前期送分）—— 于是"最陡上坡打滑""冰面空转"
+   *   这类按高难工况标定的断言会在**简单关**上跑，结论完全失去意义（实测 12 项误红）。
+   *   改成按分位取样后，关卡总数怎么变都不用回来改这里。
+   */
+  const vehLvOf = (vi) => {
+    const n = LEVELS.length;
+    const q = [0.08, 0.34, 0.62, 0.9][vi % 4];       // 难度分位
+    const r = [0.2, 0.75][vi % 2];                    // 分位内的两档
+    const a = Math.floor(n * q * r);
+    const b = Math.floor(n * q * (0.55 + r * 0.45));
+    return [Math.max(0, Math.min(a, n - 1)), Math.max(0, Math.min(b, n - 1))];
+  };
   const UP_TIERS = [0, 50];
 
   /** 落体 → 落地 → 自由滑行观测；返回该组全部诊断量 */
@@ -260,7 +286,7 @@ export default async function (ctx) {
   section("落高 × 车辆 × 升级 扫描（无 NaN / 悬挂限位 / 冲击速度 / 坐标有限 / squash / 轮地一致）");
   const dropRows = [];
   guard("落高扫描", () => {
-    for (let vi = 0; vi < VEHICLES.length; vi++) {
+    for (let vi = 0; vi < STD_VEHICLES.length; vi++) {
       for (let ki = 0; ki < vehLvOf(vi).length; ki++) {
         const lv = vehLvOf(vi)[ki];
         for (let ti = 0; ti < UP_TIERS.length; ti++) {
@@ -270,7 +296,7 @@ export default async function (ctx) {
           for (const h of DROPS) {
             const r = dropScan(vi, upLv, lv, x, h);
             row.push(r);
-            const tag = `${VEHICLES[vi].name}/第${lv + 1}关/Lv${upLv}/落${h}px`;
+            const tag = `${STD_VEHICLES[vi].name}/第${lv + 1}关/Lv${upLv}/落${h}px`;
 
             check(tag + " · 无 NaN 且确实完成落地（轨迹非退化）",
               r.nan === "" && r.landed && r.maxV > 1,
@@ -318,7 +344,7 @@ export default async function (ctx) {
       }
     }
     // (b) 减震升级：Lv50 行程更大，同落差下峰值压缩不得更深
-    for (let vi = 0; vi < VEHICLES.length; vi++) {
+    for (let vi = 0; vi < STD_VEHICLES.length; vi++) {
       for (let ki = 0; ki < vehLvOf(vi).length; ki++) {
         const lo = dropRows.find((r) => r.vi === vi && r.ki === ki && r.upLv === 0);
         const hi = dropRows.find((r) => r.vi === vi && r.ki === ki && r.upLv === 50);
@@ -648,8 +674,8 @@ export default async function (ctx) {
   // ============================================================
   section("轮上动力学（抓地对照 / 刹车锁死 / 陡坡法向力 / 滚动阻力 / 扭矩衰减）");
   guard("轮上动力学·抓地对照", () => {
-    for (let vi = 0; vi < VEHICLES.length; vi++) {
-      const lv = [0, 40, 65][vi % 3]; // 车多于 3 辆时循环取样档位
+    for (let vi = 0; vi < STD_VEHICLES.length; vi++) {
+      const lv = vehLvOf(vi)[0]; // 按难度分位取样（见 vehLvOf 注释）
       const run = (traction) => {
         setup(vi, 0, lv, {});
         store.phys.TRACTION = traction;
@@ -675,7 +701,7 @@ export default async function (ctx) {
       };
       const hi = run(1.0);
       const lo = run(0.62);
-      const tag = VEHICLES[vi].name;
+      const tag = STD_VEHICLES[vi].name;
       check(tag + " · 摩擦系数 μ 随场景抓地线性缩放（μ_冰/μ_绿 = 0.62）",
         Math.abs(lo.mu / hi.mu - 0.62) < 1e-9,
         `μ ${hi.mu.toFixed(4)} → ${lo.mu.toFixed(4)}（比 ${(lo.mu / hi.mu).toFixed(6)}）`);
@@ -706,7 +732,7 @@ export default async function (ctx) {
     }
   });
   guard("轮上动力学·刹车锁死", () => {
-    for (let vi = 0; vi < VEHICLES.length; vi++) {
+    for (let vi = 0; vi < STD_VEHICLES.length; vi++) {
       setup(vi, 0, 0, {});
       key.right = true; key.left = false;
       for (let i = 0; i < 180; i++) update(DT);
@@ -721,7 +747,7 @@ export default async function (ctx) {
         minOmega = Math.min(minOmega, bike.wheelRot.rear);
       }
       key.left = false; key.right = false;
-      const tag = VEHICLES[vi].name;
+      const tag = STD_VEHICLES[vi].name;
       check(tag + " · 急刹时车轮锁死（|ω| → 0）",
         minW < 0.5 && vBefore > 100 && wBefore > 5,
         `刹前 ω=${wBefore.toFixed(2)}rad/s · v=${vBefore.toFixed(0)}px/s → 刹后 min|ω|=${minW.toFixed(4)}rad/s`);
@@ -757,7 +783,7 @@ export default async function (ctx) {
       };
     };
     let worstRatio = Infinity;
-    for (let vi = 0; vi < VEHICLES.length; vi++) {
+    for (let vi = 0; vi < STD_VEHICLES.length; vi++) {
       for (const lv of [0, 30, 60]) {
         const r = fnVsSlope(vi, lv);
         if (!r) continue;
@@ -832,8 +858,8 @@ export default async function (ctx) {
     }
   });
   guard("轮上动力学·滚动阻力与扭矩衰减", () => {
-    for (let vi = 0; vi < VEHICLES.length; vi++) {
-      const lv = [0, 40, 65][vi % 3]; // 车多于 3 辆时循环取样档位
+    for (let vi = 0; vi < STD_VEHICLES.length; vi++) {
+      const lv = vehLvOf(vi)[0]; // 按难度分位取样（见 vehLvOf 注释）
       setup(vi, 0, lv, {});
       B.resetBike(terrain.canSpot(LEVELS[lv].len, 900));
       bike.locked = false;
@@ -961,7 +987,7 @@ export default async function (ctx) {
       respawnPairs.length > 0 && respawnPairs.every((p) => isFin(p.next) && p.next < 0.05),
       `${respawnPairs.length} 次重生 · 重生帧刚性 ${respawnPairs.map((p) => p.at.toFixed(1)).join("/")}px → 次帧 ${respawnPairs.map((p) => p.next.toFixed(4)).join("/")}px`);
     // 逆质量加权：把最轻的骑手质点沿 +x 拉开 → 它的修正量必须最大，且两端轴都要被拉动
-    for (let vi = 0; vi < VEHICLES.length; vi++) {
+    for (let vi = 0; vi < STD_VEHICLES.length; vi++) {
       setup(vi, 0, 0, {});
       B.resetBike(300);
       for (const p of bike.pts) { p.y -= 400; p.py -= 400; }

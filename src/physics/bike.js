@@ -26,6 +26,8 @@ import {
   REV_SPEED, REV_ENTER_V,
   SOLVER_TOL, SOLVER_ITERS, PEN_TOL, FN_MAX_K, NUM_CAP_V, HEAD_R,
   ROLL_RES_K, AIR_DRAG_K, wheelInertia, torqueAt, topSpeedOf, crashTiltDeg,
+  ABSOLUT_V, ABSOLUT_DRAG_K, ABSOLUT_THRUST_K, ABSOLUT_SERVO_ACC,
+  REAR_LOAD, wheelieTauOf,
   CRASH_FUEL_LOSS, CRASH_TIME_PENALTY, MAX_LV, REF_SPEED,
   deriveHandling, deriveRigidBody, deriveSuspension, deriveFriction,
 } from "../config/constants.js";
@@ -87,8 +89,16 @@ const WARP_V_CAP = 90;
  */
 export function activeMode(veh) {
   const v = veh || VEHICLES[store.currentVehicle];
-  if (!v || !v.ultra || store.ultra[v.id] !== true) return "";
-  return v.ultra.mode || "";
+  if (!v || !v.ultra || !v.ultra.mode) return "";
+  // ★ `builtin` 的形态**免解锁**：究极终局车的"绝对形态"是这辆车自带的，
+  //   不需要也不应该在车库花金币解锁。免的只是这一项特性 —— 四项升级仍照常花钱。
+  if (v.ultra.builtin === true) return v.ultra.mode;
+  return store.ultra[v.id] === true ? v.ultra.mode : "";
+}
+
+/** 究极终局车「绝对形态」是否生效（免解锁，恒为真） */
+export function isAbsolut() {
+  return activeMode() === "absolut";
 }
 
 /** 当前车辆的专属特殊模式是否已解锁 */
@@ -101,10 +111,10 @@ export function isUltraStable() {
   return activeMode() === "stable";
 }
 
-/** 是否处于"摔车免疫"模式（护盾 / 相位；贴地模式另行处理） */
+/** 是否处于"摔车免疫"模式（护盾 / 相位 / 绝对形态；贴地模式另行处理） */
 export function isCrashImmune() {
   const m = activeMode();
-  return m === "shield" || m === "phase" || m === "stable";
+  return m === "shield" || m === "phase" || m === "stable" || m === "absolut";
 }
 
 /** 贴地模式：把车轮/轮轴垂直钉到各自下方地表，头保持在轴中线 SEAT_H 上方（水平滑行，永不腾空） */
@@ -162,6 +172,16 @@ export function applyUpgrades() {
     store.phys.mu = Math.max(store.phys.mu, 3.4);
     store.phys.airDragK = AIR_DRAG_K * 0.2;
     store.phys.MAXV = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N;
+  } else if (mode === "absolut") {
+    // 绝对形态：表盘满量程钉在 350 km/h，并把风阻调到该速度上恰好能与附加推力相抵
+    // （默认阻力在 9722px/s 处减速约 7.8 万 px/s²，任何驱动力都顶不住，
+    //  高速只会"冲一下就掉速"）。
+    store.phys.MAXV = ABSOLUT_V;
+    // ★ rpmK 刻意**不**放大：扭矩路径已经够强（扭矩倍率 3.0），而把红线拉到
+    //   ω=2376 会让满油门时的摩擦上限根本刹不住车轮 —— 实测后轮一路空转到
+    //   ωR = 73,000 px/s，直接打挂"无动力滑行纯滚动 / 车轮锁死 / 滑移不爆炸"三项。
+    //   350 km/h 由下面那段附加推力负责，扭矩路径保持正常尺度。
+    store.phys.airDragK = ABSOLUT_DRAG_K;
   } else if (mode === "warp") {
     // 光子跃迁：直接给整车注入持续推力冲量（见 stepPhysics 的 boost 段）
     store.phys.MAXV = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N * 1.6;
@@ -421,7 +441,7 @@ function applyDrive(b, P, sub, drv, brk, rev) {
    * 不来自堆扭矩）完全不受影响：τ 被压在恢复力矩之下，驱动力仍够把车推上去。
    * 只限驱动扭矩，刹车 / 倒挡伺服 / 被动阻力都不动 —— 那三者本来就不产生这个力矩。
    */
-  const wheelieTau = P.rb.mTot * P.GRAV * WHEELBASE * 0.5;
+  const wheelieTau = wheelieTauOf(P.rb.mTot, P.GRAV);
   for (const wk of WHEELS) {
     let w = b.wheelRot[wk];
     let tau = 0;
@@ -821,8 +841,10 @@ export function stepPhysics() {
   const revReady = revK && systemVel(b).vx < REV_ENTER_V;
   const brkK = (key.left || (revK && !revReady)) && !run.crashed ? 1 : 0;
   const rev = revReady ? 1 : 0;
-  // 「光子跃迁」的持续推力在整帧内固定，每子步重查 mode 是纯浪费
-  const warp = activeMode() === "warp";
+  // 附加推力模式在整帧内固定，每子步重查 mode 是纯浪费
+  const mode0 = activeMode();
+  const warp = mode0 === "warp";
+  const absolut = mode0 === "absolut";
   const prevGrounded = b.grounded;
   const prevSpin = { rear: b.wheelRot.rear, front: b.wheelRot.front };
   const ang0 = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
@@ -844,11 +866,20 @@ export function stepPhysics() {
     applyDrive(b, P, sub, drvK, brkK, rev);
     // 5) 空气阻力
     applyDrag(b, P, sub);
-    // 5.5) 「光子跃迁」：踩住油门即持续注入水平推力冲量（0.7s 内逼近标称极速）
-    if (warp && drvK && !run.crashed) {
-      const tgt = P.MAXV * 0.98;
+    // 5.5) 附加推力：「光子跃迁」与「绝对形态」共用，**传动链保持完整**
+    // （早期版本试过用速度伺服整条替换传动链，结果刹车锁死 / 打滑率 / 场景抓地缩放
+    //   三条不变式同时失效，一次就打挂 15 项断言 —— 所以只能"叠加"，不能"替换"）
+    if ((warp || absolut) && drvK && !run.crashed) {
       const svw = systemVel(b);
-      const add = clamp((tgt - svw.vx) * WARP_ACC * sub, 0, WARP_V_CAP * sub);
+      let add;
+      if (warp) {
+        add = clamp((P.MAXV * 0.98 - svw.vx) * WARP_ACC * sub, 0, WARP_V_CAP * sub);
+      } else {
+        // 上限 = 可用抓地。★ 不能再套 WARP_V_CAP：那个值（90）是按"整秒"标定的
+        // 光子跃迁限速，除以子步长只剩 0.25px/子步，把 350km/h 的推力掐到只剩万分之一。
+        const grip = P.mu * P.rb.mTot * P.GRAV * REAR_LOAD;
+        add = clamp((P.MAXV - svw.vx) * ABSOLUT_SERVO_ACC * sub, 0, grip * ABSOLUT_THRUST_K * sub);
+      }
       for (const p of b.pts) p._vx += add;
     }
     // 6) 速度层约束（车架刚性 / 悬挂 / 单侧接触）

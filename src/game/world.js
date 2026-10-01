@@ -162,7 +162,7 @@ export function buildLevel(idx) {
   const coins = [];
   for (let i = 0; i < L.coinN; i++) {
     const cx = L.len * 0.15 + (i * (L.len * 0.75)) / (L.coinN - 1);
-    coins.push({ x: cx, y: groundY(cx) - 35, taken: false, ph: rng() * 6.28 });
+    coins.push({ x: cx, y: groundY(cx) - 35, taken: false, ph: rng() * 6.28, coinVal: L.coinVal || 30 });
   }
 
   // ---------------- 油罐 ----------------
@@ -325,7 +325,9 @@ export function freeFill() {
     const gy = groundY(x);
     if (gy !== Infinity) {
       if (rng() < 0.85 - diffS * 0.4) {
-        world.coins.push({ x, y: gy - 30, taken: false, ph: rng() * 6.28 });
+        // 无限模式没有具体关卡，用难度当量换算面值（随里程缓慢变高）
+        world.coins.push({ x, y: gy - 30, taken: false, ph: rng() * 6.28,
+          coinVal: Math.round(30 + 30 * diffS) });
       }
       if (rng() < 0.11) {
         world.canisters.push({ x, y: gy - 26, taken: false, ph: rng() * 6.28 });
@@ -387,7 +389,8 @@ export function updateCoins() {
     if (Math.hypot(c.x - mx, c.y - my) < 45) {
       c.taken = true;
       store.run.coinGot++;
-      addGold(30);
+      // 单枚面值随关卡进度递增（30 → 60），与 coinN 相乘后单关总产出 720 → 4320
+      addGold(c.coinVal || 30);
       playCoinSound();
       emitParticles(c.x, c.y, 12, { color: token("obj-coin"), spd: 2.5, life: 30, size: 3, grav: 0.03 });
     }

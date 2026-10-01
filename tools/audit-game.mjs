@@ -476,8 +476,14 @@ export default async function (ctx) {
       return store.progress.rating > 1000 && store.progress.wins === 1 &&
         !!lastResult && lastResult.ratingDelta > 0;
     })(), `rating=${store.progress.rating} Δ=${lastResult && lastResult.ratingDelta}`);
+    // 记下结算后的段位分（= 下一场的赛前段位分），供下面的金币断言用
+    var RANKED_BEFORE = store.progress.rating - C.RATING_WIN_GAIN;
     T('ranked 判胜不写关卡星级与解锁', store.stars.every((stars) => stars === 0) && store.unlocked === 0, `stars非零=${store.stars.filter((stars) => stars > 0).length} unlocked=${store.unlocked}`);
-    T('ranked 判胜不发放通关金币', store.gold === 0, `gold=${store.gold}`);
+    // 排位赛现在按 rankGold(won, rating) 发放金币：段位越高、胜得越多。
+    // 期望值必须用**那场比赛开始前**的段位分算 —— 前置用例已打过若干场，rating 不为 0。
+    T('ranked 判胜按段位发放金币',
+      store.gold === C.rankGold(true, RANKED_BEFORE),
+      `gold=${store.gold} 期望=${C.rankGold(true, RANKED_BEFORE)}（赛前段位分=${RANKED_BEFORE}）`);
     T('settleRanked 连败后段位分不为负', (() => {
       fresh();
       store.progress.rating = 10;
@@ -601,10 +607,12 @@ export default async function (ctx) {
     T('撞线后 clearing 置位', store.run.clearing === true, `clearing=${store.run.clearing}`);
     T('通关写入至少 1 星', store.stars[index] >= 1, `stars=${store.stars[index]}`);
     T('慢速 + 低金币只给 1 星', store.stars[index] === 1, `stars=${store.stars[index]} ratio=${(0.2).toFixed(2)} elapsed≈${f2(limit * 2)}s`);
-    T('通关结算基础金币 +200', store.gold === 200, `gold=${store.gold}`);
+    // ★ 金币随关卡进度递增（makeLevel 的 goldBase：280 → 1000），不再是写死的 200
+    T('通关结算基础金币 = 该关 goldBase', store.gold === LEVELS[index].goldBase,
+      `gold=${store.gold} 期望=${LEVELS[index].goldBase}`);
     T('通关推进解锁进度', store.unlocked === index + 1, `unlocked=${store.unlocked}`);
     T('结算结果卡交给 presenter', !!lastResult && String(lastResult.title || '').includes('通关'), lastResult ? `title=${lastResult.title} stars=${lastResult.stars}` : '未收到结果卡');
-    T('结果卡携带星级与金币字段', lastResult && lastResult.stars >= 1 && lastResult.goldGain === 200 && lastResult.goldTotal === store.gold, `stars=${lastResult && lastResult.stars} goldGain=${lastResult && lastResult.goldGain}`);
+    T('结果卡携带星级与金币字段', lastResult && lastResult.stars >= 1 && lastResult.goldGain === LEVELS[index].goldBase && lastResult.goldTotal === store.gold, `stars=${lastResult && lastResult.stars} goldGain=${lastResult && lastResult.goldGain}`);
     T('通关累计局数与里程（100px=1m）', store.stat.totalRuns === 1 && store.stat.totalMeters === toM(store.finishX), `runs=${store.stat.totalRuns} meters=${store.stat.totalMeters} 期望=${toM(store.finishX)}`);
 
     installPresenter(true);

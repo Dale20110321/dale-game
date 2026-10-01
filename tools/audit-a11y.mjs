@@ -452,6 +452,7 @@ export default async function auditA11y(ctx) {
   const mediaNorms = css.medias.map((m) => m.norm);
   const EXPECT_MEDIA = [
     "min-width:1180px", "max-width:1023px", "max-width:767px", "max-width:420px", "max-height:820px",
+    "min-width:768px and min-height:720px",
     "max-width:519px", "max-height:480px", "max-height:480px and min-width:700px",
     "pointer:coarse", "prefers-reduced-motion:no-preference", "prefers-reduced-motion:reduce",
   ];

@@ -1,5 +1,5 @@
 // 进度结算：金币与成就（所有金币来源必须走 addGold，成就才能正确触发）
-import { ACHS } from "../config/constants.js";
+import { ACHS, safeGold } from "../config/constants.js";
 import { store } from "../core/store.js";
 import { save, saveAchList } from "../core/storage.js";
 import { showToast } from "../core/toast.js";
@@ -12,7 +12,9 @@ export function hasAch(id) {
 /** 唯一的金币入口：拾取 / 特技 / 比赛 / 通关都必须走这里 */
 export function addGold(n) {
   if (!n) return;
-  store.gold += n;
+  // 入口就夹紧：非有限值一旦进了 store.gold，落盘就会变成 "Infinity"/"NaN"，
+  // 玩家刷新页面后余额直接归零（实测复现过）。
+  store.gold = safeGold(store.gold + n);
   save();
   if (store.gold >= 5000) checkAch("rich");
 }
