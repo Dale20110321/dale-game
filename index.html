@@ -14,6 +14,7 @@
 
   <div id="touch" class="hidden">
     <button class="tbtn tleft" data-k="left" aria-label="刹车 / 空中逆时针转体">◀</button>
+    <button class="tbtn trev" data-k="rev" aria-label="倒车">▼</button>
     <button class="tbtn tright" data-k="right" aria-label="加速 / 空中顺时针转体">▶</button>
   </div>
   <button id="fullBtn" class="tbtn tfull" aria-label="全屏">⛶</button>
@@ -28,7 +29,14 @@
     <div class="hero">
       <h1 id="ovTitle">🚲 越野自行车</h1>
       <div class="sub" id="ovSub" hidden></div>
+      <!-- 进度 chip 一行，打赏按钮**独占一行**：
+           给它四周留白，比继续加重颜色/加辉光更"不刻意"，却一眼就能看见。
+           （#heroSummary 的 innerHTML 会被重写，所以按钮必须是它的兄弟节点） -->
       <div class="heroStat" id="heroSummary" aria-label="当前进度"></div>
+      <div class="heroCoffeeRow">
+        <button class="heroCoffee" id="btnCoffee" type="button"
+                aria-label="请作者喝杯咖啡，支持这个游戏继续做下去">☕ 请作者喝杯咖啡</button>
+      </div>
     </div>
 
     <nav class="modeTabs" id="modeTabs" aria-label="玩法">
@@ -72,10 +80,17 @@
       <button class="tab" data-q="high" role="tab" aria-selected="false">高</button>
     </div>
     <div class="setNote" id="qDesc"></div>
+    <div class="setGrp">🔍 画面锐度</div>
+    <div class="qualityTabs tabs" id="scaleTabs" role="tablist" aria-label="渲染倍率档位">
+      <button class="tab" data-s="0.75" role="tab" aria-selected="false">省电</button>
+      <button class="tab" data-s="1" role="tab" aria-selected="true">标准</button>
+      <button class="tab" data-s="1.25" role="tab" aria-selected="false">锐利</button>
+    </div>
+    <div class="setNote" id="sDesc"></div>
     <div class="setGrp">🔊 声音</div>
     <button class="btn sm" id="btnMute">🔊 声音开启</button>
     <div class="setGrp">☕ 支持</div>
-    <button class="btn sm ghost" id="btnDonate">请我喝咖啡</button>
+    <button class="btn sm ghost" id="btnDonate">请作者喝杯咖啡</button>
     <div class="setFoot"><button class="btn" id="closeSettings">返回</button></div>
   </div>
 
@@ -92,9 +107,22 @@
   </div>
 </div>
 
-<!-- 原生 ES module 直连：零依赖、零构建，任意静态服务器（含 GitHub Pages）直接运行。
-     本地调试：node tools/_serve.mjs  →  http://localhost:8765
-     注意：file:// 下浏览器会以 CORS 拦截 module 加载，请勿直接双击打开。 -->
-<script type="module" src="src/main.js"></script>
+<!-- 入口：加载 dist/game.bundle.js（普通 script，非 ES module）。它是**唯一**入口。
+     ★ 为什么不用 <script type="module" src="src/main.js">：
+       ES module 在 file:// 下会被浏览器的 CORS 策略拦截，页面只剩静态 HTML ——
+       按钮全哑、关卡地图空白，就是"双击打不开"的根因。普通 script 没有这个限制。
+     ★ dist/ 必须跟着源码一起提交/更新：改完源码跑一次 build.bat 重新生成。
+     GitHub Pages 走 https，普通 script 同样正常加载。
+     ★★ 为什么源码入口只能"兜底"、不能并列写死：
+       两个 script 都执行 = 整个游戏被初始化**两遍**（两套 store / 两条主循环，
+       却共用同一个 DOM 和同一份 localStorage）。症状是所有交互都触发两次，
+       最典型的是存档面板里点一次「✨ 新建存档」会连建两个存档。
+       打包入口一旦执行，src/main.js 的首行会置 __daleBooted；下面的 module 脚本
+       （type="module" 天然 defer，必然晚于上面的普通 script 执行）据此跳过 import。
+       打包文件缺失时标志不存在，于是回退到源码入口 —— 本地服务器调试就靠这条。 -->
+<script src="dist/game.bundle.js"></script>
+<script type="module">
+  if (!window.__daleBooted) await import("./src/main.js");
+</script>
 </body>
 </html>

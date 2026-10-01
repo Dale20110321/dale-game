@@ -21,12 +21,15 @@ export function closeDonate() {
 }
 
 export function initDonate() {
-  const btn = document.getElementById("btnDonate");
-  if (btn) {
-    btn.addEventListener("click", () => {
-      initAudio();
-      openDonate();
-    });
+  // 两个入口：主页面 hero 里的 #btnCoffee（显眼位）与设置面板里的 #btnDonate（原位置保留）
+  for (const id of ["btnCoffee", "btnDonate"]) {
+    const btn = document.getElementById(id);
+    if (btn) {
+      btn.addEventListener("click", () => {
+        initAudio();
+        openDonate();
+      });
+    }
   }
   const closeBtn = document.getElementById("closeDonate");
   if (closeBtn) closeBtn.addEventListener("click", closeDonate);

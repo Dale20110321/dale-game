@@ -15,6 +15,8 @@ export const store = {
   rankedAdvanced: false,
 
   // 进度
+  /** 当前存档槽下标（0 = 存档1）。槽 0 沿用旧的 bike_* 键，老存档自动成为「存档1」。 */
+  slot: 0,
   lvIdx: 0,
   selLevel: 0,
   unlocked: 0,
@@ -149,6 +151,11 @@ export const bike = {
   angVel: 0,
   /** 真实车身角速度（rad/s，物理层每帧写入）：含地形与悬挂带来的转动 */
   angRate: 0,
+  /** 本帧车轮视觉转角（rad/帧）：渲染层据此判断辐条是否已快到频闪、该糊掉了。
+   *  后轮/前轮各一个 —— 渲染层两个轮子都要读，漏声明哪个，开局到首次按键之间
+   *  （stepPhysics 尚未跑过）就会读到 undefined → NaN 污染 globalAlpha。 */
+  wheelStep: 0,
+  wheelStepF: 0,
   rotAcc: 0,
   // 骑手在"前轴→后轴连线"的哪一侧（刚体属性，旋转不变；用于防止约束求解把骑手甩到轮轴下方）
   headUp: -1,

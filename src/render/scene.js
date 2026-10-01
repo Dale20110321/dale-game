@@ -14,7 +14,13 @@ import { shakeOffset } from "./camera.js";
 import { drawHud } from "./hud.js";
 import { applyPostFx } from "./postfx.js";
 
-export function drawScene() {
+/**
+ * @param {number} [dt] 本渲染帧的真实时长（秒）。**渲染层里凡是"逐帧累加"的量
+ *   （天气粒子的下落、骑手踏频）都必须用它，而不是写死 1/60** —— 写死的话在
+ *   144Hz 屏上会快 2.4 倍、30Hz 上慢一半，与 core/loop.js 声明的"与显示器刷新率
+ *   无关"直接矛盾。缺省 1/60 只是为了兼容不传 dt 的调用方（体检脚本等）。
+ */
+export function drawScene(dt = 1 / 60) {
   const cam = store.cam;
   drawBackground(cam.x, cam.y);
 
@@ -37,7 +43,7 @@ export function drawScene() {
   drawCanisters(cam.x, cam.y);
   drawFlag(cam.x, cam.y, store.finishX);
   drawBikeShadow();
-  if (store.state === "play" || store.state === "ended" || store.state === "pause") drawBike();
+  if (store.state === "play" || store.state === "ended" || store.state === "pause") drawBike(dt);
   ctx.restore();
 
   cam.x = bcx;
@@ -45,7 +51,7 @@ export function drawScene() {
 
   // 后处理（渐晕 / 色彩分级 / 拖影 / 远景淡化 / 天气）
   // 放在 HUD 之前：HUD 是界面层叠加，不应被色彩分级与渐晕干扰（也保证机制警告不被遮挡）
-  applyPostFx(store.time);
+  applyPostFx(store.time, dt);
 
   if (store.state === "play" || store.state === "pause" || store.state === "ended") {
     drawHud();

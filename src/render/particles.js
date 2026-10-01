@@ -8,14 +8,19 @@ const MAX_PARTICLES = 600;
 
 export function emitParticles(x, y, count, cfg) {
   const arr = world.particles;
+  // cfg.spd 是唯一的必填项，但它没有默认值：漏传会得到 s * undefined = NaN，
+  // 而 NaN 速度会让粒子在 updateParticles 里位置立刻变 NaN 并**永久留在数组里**
+  // （NaN !== NaN，life 检查也拦不住），画面上表现为凭空消失的粒子洞。
+  // 其余字段本来就有默认值，这里给 spd 也补一个，杜绝这类"静默 NaN"。
+  const spd = Number.isFinite(cfg.spd) ? cfg.spd : 1;
   for (let i = 0; i < count; i++) {
     const a = Math.random() * 6.2832;
     const s = 0.5 + Math.random() * 1.5;
     arr.push({
       x,
       y,
-      vx: Math.cos(a) * s * cfg.spd,
-      vy: Math.sin(a) * s * cfg.spd - 0.5,
+      vx: Math.cos(a) * s * spd,
+      vy: Math.sin(a) * s * spd - 0.5,
       life: cfg.life || 40,
       maxLife: cfg.life || 40,
       size: cfg.size || 2 + Math.random() * 2,

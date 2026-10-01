@@ -9,18 +9,20 @@ import {
 import { THEMES } from "../config/themes.js";
 import {
   LEVELS, BRANCHES, LEVELS_PER_BRANCH, N_BRANCHES, FINALE, FINALE_INDEX,
-  branchLevel, globalIndexOf, branchProgress, starTime, VARIANT_INFO,
+  branchLevel, globalIndexOf, branchOfGlobal, branchProgress, starTime, VARIANT_INFO,
 } from "../config/levels.js";
 import { VEHICLES } from "../config/vehicles.js";
 import { store, uiHooks } from "../core/store.js";
 import {
   save, downloadSave, parseSave, importSave, resetSave,
   isStorageAvailable, availableFreeThemes, isAdvancedUnlocked,
+  listSlots, switchSlot, createSlot, deleteSlot, currentSlot, MAX_SLOTS,
 } from "../core/storage.js";
 import { showToast } from "../core/toast.js";
 import { initAudio } from "../core/audio.js";
 import { hasAch } from "../game/progress.js";
 import { getQuality, setQuality, QUALITY, QUALITY_LABEL } from "../render/postfx.js";
+import { getRenderScale, setRenderScalePersisted, RENDER_SCALES, RENDER_SCALE_LABEL } from "../render/postfx.js";
 import { showPanel, hidePanel, showMenu, refreshMenuButtons } from "./menu.js";
 import { card, chip, badge, statRow, emptyState, themeVars } from "./components.js";
 
@@ -111,7 +113,12 @@ export function renderHomeView(mode) {
   const host = document.getElementById("homeView");
   if (!host) return;
   panelKind = mode === "race" ? "race" : "level";
-  if (openBranch < 0 || !branchOpen(openBranch)) openBranch = frontierBranch();
+  // 展开哪条支线：**优先当前关卡所在的支线**（返回首页 = 回到正在打的那一关），
+  // 其次才是"前沿"。openBranch ≥ 0 说明玩家手动点开了某条支线，尊重之。
+  if (openBranch < 0 || !branchOpen(openBranch)) {
+    const cur = currentBranch();
+    openBranch = cur >= 0 ? cur : frontierBranch();
+  }
   // 顺序：最终任务 → 当前支线的 6 个关卡 → 12 支线总览。
   // 关卡格排在总览之前，玩家进主页面第一眼看到的是"现在打哪一关"，而不是先扫一遍 12 张卡。
   host.innerHTML =
@@ -120,10 +127,36 @@ export function renderHomeView(mode) {
     `<div class="branchWall">${BRANCHES.map((_, i) => branchCard(i)).join("")}</div>`;
 }
 
-/** 当前前沿支线：已开放且尚未全部通关的第一条（全部通关时回落到最后一条） */
+/** 支线 bi 已通关关卡数（星级 ≥ 1） */
+function branchCleared(bi) {
+  let n = 0;
+  for (let k = 0; k < LEVELS_PER_BRANCH; k++) if ((store.stars[globalIndexOf(bi, k)] || 0) >= 1) n++;
+  return n;
+}
+
+/**
+ * 当前关卡所在的支线：返回首页时优先展开它，把玩家带回"正在打的那一关"，
+ * 而不是笼统的"第一条还没打完的支线"。
+ * 未开放 / 越界时返回 -1，交由调用方回退。
+ */
+function currentBranch() {
+  const gi = store.selLevel;
+  if (!Number.isInteger(gi) || gi < 0 || gi >= LEVELS.length) return -1;
+  const bi = branchOfGlobal(gi);
+  return branchOpen(bi) ? bi : -1;
+}
+
+/**
+ * 前沿支线：已开放、**且尚未全部通关**的第一条。
+ *
+ * ★ 修 bug：原来写的是 `firstLockedK(i) < LEVELS_PER_BRANCH`，
+ *   而 firstLockedK 在支线全通时返回的是 `LEVELS_PER_BRANCH - 1`（不是 6），
+ *   于是"已全通的第一条"永远满足条件 —— 前沿被死死钉在第一条支线（翠野乡道），
+ *   展开的关卡块也跟着一直停在翠野乡道。改用 branchCleared() 判定"真的没打完"。
+ */
 function frontierBranch() {
   for (let i = 0; i < N_BRANCHES; i++) {
-    if (branchOpen(i) && firstLockedK(i) < LEVELS_PER_BRANCH) return i;
+    if (branchOpen(i) && branchCleared(i) < LEVELS_PER_BRANCH) return i;
   }
   const last = Math.floor(unlockFrontier() / LEVELS_PER_BRANCH);
   return Math.max(0, Math.min(N_BRANCHES - 1, last));
@@ -210,6 +243,11 @@ function onPanelClick(e) {
       renderSavePanel();
       showToast("🎚 画质已切到「" + QUALITY_LABEL[getQuality()] + "」", 800);
       return;
+    case "scale":
+      setRenderScalePersisted(el.dataset.s);
+      renderSavePanel();
+      showToast("🔍 锐度已切到「" + RENDER_SCALE_LABEL[getRenderScale()] + "」", 800);
+      return;
     case "export":
       doExport();
       return;
@@ -234,6 +272,15 @@ function onPanelClick(e) {
       return;
     case "resetConfirm":
       doReset();
+      return;
+    case "slotSwitch":
+      doSwitchSlot(+el.dataset.slot);
+      return;
+    case "slotNew":
+      doNewSlot();
+      return;
+    case "slotDelete":
+      doDeleteSlot(+el.dataset.slot);
       return;
     default:
       return;
@@ -332,13 +379,9 @@ function branchCard(bi) {
   const b = BRANCHES[bi];
   const th = THEMES[b.theme] || THEMES[0];
   const open = branchOpen(bi);
-  let cleared = 0;
   let stars = 0;
-  for (let k = 0; k < LEVELS_PER_BRANCH; k++) {
-    const s = store.stars[globalIndexOf(bi, k)] || 0;
-    if (s >= 1) cleared++;
-    stars += s;
-  }
+  for (let k = 0; k < LEVELS_PER_BRANCH; k++) stars += store.stars[globalIndexOf(bi, k)] || 0;
+  const cleared = branchCleared(bi);
   const done = cleared >= LEVELS_PER_BRANCH;
   const nextK = firstLockedK(bi);
   // 前沿 = 已开放、未全通、且还有未通关卡 → 标「▶ 继续 第 N 关」
@@ -370,11 +413,17 @@ function levelCell(bi, k) {
   const st = store.stars[gi] || 0;
   // next = 支线内第一个未通关且已解锁的关卡，也就是"该你打的下一关"，给它最醒目的样式
   const isNext = !locked && st === 0;
+  // cur = 当前所在关卡（store.selLevel）：返回首页时一眼看出"我在这儿"
+  const isCur = store.selLevel === gi;
   const stars = locked ? "🔒 未解锁" : st > 0 ? "★".repeat(st) + "☆".repeat(3 - st) : "☆☆☆";
-  const label = `${BRANCHES[bi].name} 第${k + 1}关 ${v.name} 坡度${Math.round(L.maxSlope)}度 三星时限${Math.round(starTime(L))}秒 ${locked ? "未解锁" : st + "星"}${isNext ? "，下一关" : ""}`;
-  return `<div class="lvCell${locked ? " locked" : st > 0 ? " done" : " next"}" data-act="play" data-gi="${gi}"
+  const label = `${BRANCHES[bi].name} 第${k + 1}关 ${v.name} 坡度${Math.round(L.maxSlope)}度 三星时限${Math.round(starTime(L))}秒 ${locked ? "未解锁" : st + "星"}${isCur ? "，当前关卡" : isNext ? "，下一关" : ""}`;
+  const cls = locked ? " locked" : isCur ? " cur" : st > 0 ? " done" : " next";
+  const head = isCur
+    ? '<span class="lvNext">📍 当前关卡</span>'
+    : isNext ? '<span class="lvNext">▶ 下一关</span>' : "第" + (k + 1) + "关";
+  return `<div class="lvCell${cls}" data-act="play" data-gi="${gi}"
       role="button" tabindex="0" aria-label="${label}">
-    <div>${isNext ? '<span class="lvNext">▶ 下一关</span>' : "第" + (k + 1) + "关"}</div>
+    <div>${head}</div>
     <div class="thm">${badge(v.icon + " " + v.name, "variant")}</div>
     <div class="thm">坡度 ${Math.round(L.maxSlope)}° · ${Math.round(toM(L.len))}m</div>
     <div class="thm">三星 ≤ ${fmtClock(starTime(L))}</div>
@@ -710,6 +759,7 @@ export function renderSavePanel() {
        </div>`
     : "";
   showPanel(`<div class="modeTitle">💾 存档 · 进度管理</div>
+  ${slotListHtml()}
   ${statRow([
     { label: "已通关", value: `${cur.cleared}/${LEVELS.length}` },
     { label: "总星数", value: `${cur.stars}/${LEVELS.length * 3}` },
@@ -725,7 +775,12 @@ export function renderSavePanel() {
   <div class="tabs" role="tablist">${QUALITY.map((q) =>
     `<button class="tab" role="tab" data-act="quality" data-q="${q}" aria-selected="${q === getQuality()}" aria-label="画质 ${QUALITY_LABEL[q]}">${QUALITY_LABEL[q]}</button>`
   ).join("")}</div>
-  <div class="panelNote">低 / 关 会关闭拖影与天气流动；设置保存在浏览器本地（非存档键，导出存档不包含它）</div>
+  <div class="panelNote">画质决定"画多少东西"（阴影 / 雾 / 辉光 / 天气粒子）；低档全部关闭、最省性能</div>
+  <div class="brHead">🔍 画面设置 · 锐度</div>
+  <div class="tabs" role="tablist">${RENDER_SCALES.map((s) =>
+    `<button class="tab" role="tab" data-act="scale" data-s="${s}" aria-selected="${Math.abs(s - getRenderScale()) < 0.01}" aria-label="锐度 ${RENDER_SCALE_LABEL[s]}">${RENDER_SCALE_LABEL[s]}</button>`
+  ).join("")}</div>
+  <div class="panelNote">锐度决定"画在多少像素上"，与画质互不影响：省电 0.75×（56% 像素）/ 标准 1× / 锐利 1.25×（156% 像素）。两项设置都保存在浏览器本地（非存档键，导出存档不包含它们）</div>
   ${saveView.error ? `<div class="panelNote">${saveView.error}</div>` : ""}
   ${saveView.note ? `<div class="panelNote">${saveView.note}</div>` : ""}
   ${cmp}
@@ -830,4 +885,68 @@ function doReset() {
   if (api.applyVehicle) api.applyVehicle();
   refreshMenuButtons();
   renderSavePanel();
+}
+
+// ---------------- 存档槽 ----------------
+
+/** 切换存档槽：落盘当前槽 → 载入目标槽 → 重建整车派生量 */
+function doSwitchSlot(n) {
+  const before = currentSlot();
+  if (n === before) return;
+  if (!isStorageAvailable()) { saveView.error = "⚠️ 浏览器存储不可用，无法切换存档"; renderSavePanel(); return; }
+  if (switchSlot(n)) {
+    if (api.applyVehicle) api.applyVehicle();
+    saveView.error = "";
+    saveView.note = `✅ 已切换到「存档${n + 1}」`;
+    refreshMenuButtons();
+  }
+  renderSavePanel();
+}
+
+/** 新建存档槽：占用下一个空槽并切入（等于开一局新的） */
+function doNewSlot() {
+  if (!isStorageAvailable()) { saveView.error = "⚠️ 浏览器存储不可用，无法新建存档"; renderSavePanel(); return; }
+  const n = createSlot();
+  if (n < 0) {
+    saveView.error = "⚠️ 存档位已满，无法新建";
+  } else {
+    if (api.applyVehicle) api.applyVehicle();
+    saveView.error = "";
+    saveView.note = `✨ 已新建「存档${n + 1}」，从第 1 关重新开始`;
+    refreshMenuButtons();
+  }
+  renderSavePanel();
+}
+
+/** 删除非当前槽 */
+function doDeleteSlot(n) {
+  if (!isStorageAvailable()) { saveView.error = "⚠️ 浏览器存储不可用，无法删除存档"; renderSavePanel(); return; }
+  if (deleteSlot(n)) saveView.note = `🗑 已删除「存档${n + 1}」`;
+  else saveView.error = "⚠️ 无法删除当前正在使用的存档";
+  renderSavePanel();
+}
+
+/** 存档槽列表的渲染；只显示到"下一个空槽"为止，避免一屏塞 6 个空槽 */
+function slotListHtml() {
+  const slots = listSlots();
+  const shown = [];
+  for (const s of slots) {
+    shown.push(s);
+    if (!s.used) break; // 第一个空槽之后就不再展示
+  }
+  const cells = shown.map((s) => {
+    const cls = "lvCell slotCell" + (s.active ? " cur" : s.used ? " done" : "");
+    const sub = s.active ? "📍 当前" : s.used ? `已通关 ${s.cleared}/${LEVELS.length}` : "空存档位";
+    return `<div class="${cls}" role="button" tabindex="0" data-act="slotSwitch" data-slot="${s.index}"
+        aria-label="${s.name}${s.used ? `，已通关 ${s.cleared} 关` : "，空存档位"}${s.active ? "，当前使用中" : ""}">
+      <div>${s.name}</div>
+      <div class="thm">${sub}</div>
+      ${s.used && !s.active ? `<button class="btn sm ghost slotDel" data-act="slotDelete" data-slot="${s.index}" aria-label="删除${s.name}">🗑</button>` : ""}
+    </div>`;
+  }).join("");
+  const hasEmpty = listSlots().some((s) => !s.used);
+  return `<div class="brHead">🗂 存档位</div>
+    <div class="lvGrid slotGrid">${cells}</div>
+    ${hasEmpty ? `<button class="btn sm ghost slotNew" data-act="slotNew">✨ 新建存档</button>` : `<div class="panelNote">存档位已满（上限 ${MAX_SLOTS} 个）</div>`}
+    <div class="panelNote">切换存档位会各自保存独立的进度 / 星级 / 金币 / 车库。当前正在玩的存档位不能删除。</div>`;
 }

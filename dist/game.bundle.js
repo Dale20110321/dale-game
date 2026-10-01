@@ -37,7 +37,7 @@
       });
   };
 
-  // dale-game/src/main.js
+  // src/main.js
   var exports_main = {};
   __export(exports_main, {
     restart: () => restart,
@@ -45,9 +45,13 @@
     stepper: () => stepper
   });
 
-  // dale-game/src/core/utils.js
+  // src/core/utils.js
   var clamp = (v, a, b) => v < a ? a : v > b ? b : v;
   var lerp = (a, b, t) => a + (b - a) * t;
+  var wrapX = (v, m) => {
+    const w = m || 1;
+    return (v % w + w) % w;
+  };
   function mulberry32(a) {
     return function() {
       a |= 0;
@@ -81,22 +85,33 @@
     return a;
   }
 
-  // dale-game/src/core/canvas.js
+  // src/core/canvas.js
   var cv = document.getElementById("cv");
   var ctx = cv.getContext("2d");
-  var view = { W: 0, H: 0, DPR: 1 };
+  var view = { W: 0, H: 0, DPR: 1, RS: 1, k: 1 };
+  var RENDER_SCALES = [0.75, 1, 1.25];
+  var RENDER_SCALE_LABEL = { 0.75: "省电", 1: "标准", 1.25: "锐利" };
+  function setRenderScale(s) {
+    const v = Number(s);
+    const hit = RENDER_SCALES.find((x) => Math.abs(x - v) < 0.01);
+    view.RS = hit || 1;
+    resize();
+    return view.RS;
+  }
   function resize() {
     view.W = window.innerWidth;
     view.H = window.innerHeight;
     view.DPR = Math.min(window.devicePixelRatio || 1, view.W < 700 || view.H < 480 ? 1.6 : 2);
-    cv.width = view.W * view.DPR;
-    cv.height = view.H * view.DPR;
+    const k = view.DPR * view.RS;
+    view.k = k;
+    cv.width = Math.max(1, Math.round(view.W * k));
+    cv.height = Math.max(1, Math.round(view.H * k));
     cv.style.width = view.W + "px";
     cv.style.height = view.H + "px";
-    ctx.setTransform(view.DPR, 0, 0, view.DPR, 0, 0);
+    ctx.setTransform(k, 0, 0, k, 0, 0);
   }
 
-  // dale-game/src/config/constants.js
+  // src/config/constants.js
   var DT = 1 / 60;
   var SUB = 6;
   var SUB_DT = DT / SUB;
@@ -206,6 +221,8 @@
   var SPEEDLINE_V = 260;
   var SPEEDLINE_REF = 560;
   var STUN_TIME = 1.1;
+  var REV_ENTER_V = 24;
+  var REV_SPEED = 0.3;
   var START_X = 40;
   var hazardSpeed = (ramp) => REF_SPEED * (0.95 - 0.2 * ramp);
   var gateSpeed = (den3) => den3 * 0.8;
@@ -215,6 +232,7 @@
   var KICK_MIN_V = 220;
   var MAX_LV = 100;
   var upCost = (lv) => 30 + lv * 5;
+  var CAN_FUEL = 0.6;
   var ACHS = [
     { id: "air", name: "腾空初体验", icon: "\uD83D\uDD4A", desc: "单次腾空 0.8 秒以上" },
     { id: "flip", name: "空翻达人", icon: "\uD83E\uDD38", desc: "完成一次空中翻转并安全落地" },
@@ -239,7 +257,8 @@
     prog: "bike_prog",
     rating: "bike_rating",
     stat: "bike_stat",
-    ultra: "bike_ultra"
+    ultra: "bike_ultra",
+    sel: "bike_sel"
   };
   var RATING_ADVANCED = 1200;
   var RATING_PEAK = 2400;
@@ -272,13 +291,14 @@
   var SAVE_APP = "dale-bike";
   var SAVE_FORMAT = 1;
 
-  // dale-game/src/core/store.js
+  // src/core/store.js
   var store = {
     time: 0,
     state: "menu",
     mode: "level",
     lastMode: "level",
     rankedAdvanced: false,
+    slot: 0,
     lvIdx: 0,
     selLevel: 0,
     unlocked: 0,
@@ -367,6 +387,9 @@
     lastAng: 0,
     angVel: 0,
     angRate: 0,
+    _revHold: 0,
+    wheelStep: 0,
+    wheelStepF: 0,
     rotAcc: 0,
     headUp: -1,
     wheelRot: { rear: 0, front: 0 },
@@ -393,8 +416,11 @@
     gates: [],
     jumps: []
   };
+  var uiHooks = {
+    onHome: null
+  };
 
-  // dale-game/src/core/audio.js
+  // src/core/audio.js
   var audioCtx = null;
   var audioInit = false;
   function initAudio() {
@@ -461,7 +487,7 @@
     setTimeout(() => playTone(1318, 0.2, "triangle", 0.07), 220);
   }
 
-  // dale-game/src/core/toast.js
+  // src/core/toast.js
   var toastEl = document.getElementById("toast");
   var comboEl = document.getElementById("comboTag");
   var comboTimer = null;
@@ -546,8 +572,24 @@
     }, 1400);
   }
 
-  // dale-game/src/config/vehicles.js
+  // src/config/vehicles.js
   var P = (mass, inertia, suspK, suspC, travel, torque, rpm) => ({ mass, inertia, suspK, suspC, travel, torque, rpm });
+  var POSE = (shX, shY, hdX, hdY, barX, barY) => ({ shX, shY, hdX, hdY, barX, barY });
+  var ART = (o) => Object.assign({
+    tire: 3,
+    rim: true,
+    spokes: 6,
+    spokeW: 1.6,
+    tube: 4,
+    topDrop: 2,
+    coil: 1,
+    bar: "flat",
+    saddleW: 10,
+    helmR: 4.4,
+    peak: true,
+    vents: 1,
+    pose: POSE(0, 0, 0, 0, 0, 0)
+  }, o);
   var VEHICLES = [
     {
       id: "trail",
@@ -562,6 +604,7 @@
       air: 1,
       tank: 1,
       color: "#314ccd",
+      art: ART({}),
       phys: P(1, 1, 1, 1, 16, 1, 1)
     },
     {
@@ -577,6 +620,21 @@
       air: 1.4,
       tank: 0.75,
       color: "#e63946",
+      art: ART({
+        tire: 1.7,
+        rim: false,
+        spokes: 12,
+        spokeW: 0.8,
+        tube: 2.4,
+        topDrop: 6,
+        coil: 0,
+        bar: "drop",
+        saddleW: 6.5,
+        helmR: 4.9,
+        peak: false,
+        vents: 0,
+        pose: POSE(4.5, 5.5, 6, 5, 1.5, 3.5)
+      }),
       phys: P(0.8, 0.7, 1.25, 1.1, 13, 1.35, 1.25),
       ultra: {
         name: "极速模式",
@@ -598,6 +656,19 @@
       air: 0.75,
       tank: 1.45,
       color: "#8a5a2b",
+      art: ART({
+        tire: 5.6,
+        spokes: 5,
+        spokeW: 2.4,
+        tube: 6.2,
+        topDrop: -1,
+        coil: 1.9,
+        bar: "wide",
+        saddleW: 14,
+        helmR: 4.2,
+        vents: 3,
+        pose: POSE(-3, -4.5, -3.5, -4.5, -1, -4)
+      }),
       phys: P(1.5, 1.35, 0.85, 0.9, 20, 1.12, 0.85),
       ultra: {
         name: "贴地模式",
@@ -608,9 +679,9 @@
     }
   ];
 
-  // dale-game/src/config/levels.js
+  // src/config/levels.js
   var STEP_W = 150;
-  var RUN_IN = 520;
+  var RUN_IN = 430;
   var LEVELS_PER_BRANCH = 6;
   var N_BRANCHES = 12;
   var TOTAL = N_BRANCHES * LEVELS_PER_BRANCH;
@@ -648,6 +719,151 @@
     { id: "sky", name: "天空浮岛", theme: 10, desc: "浮空群岛，轻若无物" },
     { id: "night", name: "极夜星空", theme: 11, desc: "极夜寒星，终极试炼" }
   ];
+  var TERRAIN_MOODS = [
+    {
+      id: "rolling",
+      label: "起伏丘陵",
+      waves: [[2600, 56, 34], [1000, 14, 7], [420, 5, 2]],
+      feat: { dip: 3, shelf: 1.4, kicker: 0.8, ramp: 0.3 },
+      stepGap: 1800,
+      stepK: 1,
+      jitter: 0.16
+    },
+    {
+      id: "dunes",
+      label: "连绵沙丘",
+      waves: [[3400, 74, 42], [1400, 12, 6], [560, 4, 2]],
+      feat: { shelf: 2, dip: 2, ramp: 0.3 },
+      stepGap: 2400,
+      stepK: 0.7,
+      jitter: 0.12
+    },
+    {
+      id: "whoops",
+      label: "碎浪连包",
+      waves: [[2700, 48, 28], [900, 18, 10], [420, 9, 5]],
+      feat: { whoops: 3, dip: 1.6, ramp: 0.4 },
+      stepGap: 1500,
+      stepK: 0.9,
+      jitter: 0.2
+    },
+    {
+      id: "canyon",
+      label: "深谷沟壑",
+      waves: [[3000, 62, 34], [1100, 15, 8], [460, 6, 3]],
+      feat: { chasm: 2.6, kicker: 1.6, shelf: 1, ramp: 0.6 },
+      stepGap: 2000,
+      stepK: 1.2,
+      jitter: 0.18
+    },
+    {
+      id: "ridge",
+      label: "连绵山脊",
+      waves: [[2900, 66, 40], [980, 13, 7], [400, 5, 2]],
+      feat: { kicker: 3, dip: 1.4, ramp: 0.5 },
+      stepGap: 1700,
+      stepK: 1.1,
+      jitter: 0.16
+    },
+    {
+      id: "plateau",
+      label: "阶梯平台",
+      waves: [[2800, 50, 30], [1150, 15, 8], [480, 5, 2]],
+      feat: { shelf: 3.4, dip: 1.2, kicker: 1, ramp: 0.5 },
+      stepGap: 1300,
+      stepK: 1.3,
+      jitter: 0.14
+    },
+    {
+      id: "chasm",
+      label: "断裂天堑",
+      waves: [[3200, 56, 34], [1250, 14, 8], [520, 5, 3]],
+      feat: { chasm: 3, whoops: 1.2, ramp: 0.7 },
+      stepGap: 1100,
+      stepK: 1.45,
+      jitter: 0.18
+    },
+    {
+      id: "badlands",
+      label: "嶙峋台地",
+      waves: [[2500, 56, 34], [1000, 18, 10], [440, 8, 5]],
+      feat: { kicker: 2, whoops: 2, shelf: 1.2, ramp: 0.6 },
+      stepGap: 1400,
+      stepK: 1.15,
+      jitter: 0.22
+    },
+    {
+      id: "rollers",
+      label: "长缓丘陵",
+      waves: [[4000, 80, 46], [1600, 15, 8], [640, 5, 2]],
+      feat: { dip: 2.4, shelf: 1.6, ramp: 0.6 },
+      stepGap: 2600,
+      stepK: 0.85,
+      jitter: 0.1
+    },
+    {
+      id: "gauntlet",
+      label: "断崖飞坡",
+      waves: [[2500, 60, 36], [1000, 15, 8], [440, 6, 3]],
+      feat: { kicker: 3.4, chasm: 1.6, ramp: 1.2 },
+      stepGap: 1000,
+      stepK: 1.5,
+      jitter: 0.2
+    },
+    {
+      id: "marsh",
+      label: "泥泞浅滩",
+      waves: [[2600, 46, 28], [980, 16, 9], [440, 6, 3]],
+      feat: { dip: 3.2, whoops: 1.4, shelf: 1, ramp: 1 },
+      stepGap: 1900,
+      stepK: 0.95,
+      jitter: 0.18
+    },
+    {
+      id: "summit",
+      label: "登峰造极",
+      waves: [[2700, 64, 42], [1000, 19, 11], [440, 8, 4]],
+      feat: { kicker: 2.4, chasm: 2, whoops: 2, ramp: 1.3 },
+      stepGap: 1200,
+      stepK: 1.35,
+      jitter: 0.24
+    }
+  ];
+  var MIN_WAVELEN = 380;
+  var MIN_FEAT_W = 420;
+  function targetSlopeDeg(gN) {
+    return 19.5 + 34.5 * Math.pow(gN, 1.1);
+  }
+  var FEAT_AMP_MAX = 0;
+  function ss(u) {
+    return u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u);
+  }
+  function featProfile(kind, t, n) {
+    if (t <= 0 || t >= 1)
+      return 0;
+    switch (kind) {
+      case "kicker":
+        return t < 0.5 ? ss(t / 0.5) : 1 - ss((t - 0.5) / 0.5);
+      case "dip":
+        return -(t < 0.5 ? ss(t / 0.5) : 1 - ss((t - 0.5) / 0.5));
+      case "shelf":
+        return t < 0.28 ? ss(t / 0.28) : t < 0.72 ? 1 : 1 - ss((t - 0.72) / 0.28);
+      case "whoops":
+        return Math.sin(Math.PI * t) * Math.sin(Math.PI * t) * Math.sin(2 * Math.PI * n * t);
+      case "chasm":
+        return -(t < 0.5 ? ss(t / 0.5) : 1 - ss((t - 0.5) / 0.5));
+      case "ramp":
+        return rampProfile(t);
+      default:
+        return 0;
+    }
+  }
+  function rampProfile(t) {
+    return 0.5 - 0.5 * Math.cos(2 * Math.PI * t);
+  }
+  var FEAT_AMP = { kicker: 1, dip: 0.7, shelf: 0.85, whoops: 0.55, chasm: -1.15 };
+  var RAMP_GRADE = 0.34;
+  var LAUNCH_PAD = 150;
   function levelHillY(L, x) {
     let y = 300;
     let relief = 0;
@@ -659,23 +875,45 @@
         relief += s.drop * (t * t * (3 - 2 * t));
       }
     }
-    return y + relief * clamp((x - 60) / RUN_IN, 0, 1);
+    const feats = L.feats;
+    if (feats) {
+      for (let i = 0;i < feats.length; i++) {
+        const f = feats[i];
+        if (x <= f.x0)
+          break;
+        if (x >= f.x1)
+          continue;
+        relief += f.amp * featProfile(f.kind, (x - f.x0) / (f.x1 - f.x0), f.n);
+      }
+    }
+    return y + relief * ss((x - LAUNCH_PAD) / RUN_IN);
   }
   function levelGroundInfo(L, x, e = 2) {
     const yL = levelHillY(L, x - e);
     const yR = levelHillY(L, x + e);
     return { y: levelHillY(L, x), m: (yR - yL) / (2 * e) };
   }
+  function freeMoodOf(x) {
+    const t = Math.floor(x / 3000);
+    const h = Math.imul(t ^ 2654435769, 2246822507) >>> 0;
+    return TERRAIN_MOODS[h % TERRAIN_MOODS.length];
+  }
   function freeHill(x) {
     const d = Math.max(0, x - 400);
     const diff = Math.min(1, d / 120000);
     const diffS = diff * diff * (3 - 2 * diff);
     let y = 300;
-    y += Math.sin(x * 0.004 + 1.7) * (26 + diffS * 160);
-    y += Math.sin(x * 0.0013 + 3.1) * (22 + diffS * 110);
-    y += Math.sin(x * 0.0007 + 5.2) * (18 + diffS * 80);
-    const stepGap = 1400;
-    const stepDrop = 15 + diffS * 10;
+    const ramp = ss((x - LAUNCH_PAD) / RUN_IN);
+    const seg = Math.floor(x / 3000);
+    const mood = freeMoodOf(x);
+    const ph = seg * 2.399963 % 6.283185307;
+    for (let i = 0;i < mood.waves.length; i++) {
+      const w = mood.waves[i];
+      const wl = Math.max(MIN_WAVELEN, w[0] * (0.85 + (seg * 7 + i * 13) % 31 / 31 * 0.3));
+      y += Math.sin(x / wl * 6.283185307 + ph + i * 1.9) * (w[1] * 0.5 + w[1] * 0.5 * diffS + w[2] * diffS);
+    }
+    const stepGap = mood.stepGap;
+    const stepDrop = (15 + diffS * 10) * mood.stepK;
     const segIdx = Math.floor(d / stepGap);
     y += stepDrop * segIdx;
     const cur = d % stepGap;
@@ -683,32 +921,105 @@
       const t = clamp(cur / STEP_W, 0, 1);
       y += stepDrop * (t * t * (3 - 2 * t));
     }
-    return y;
+    return 300 + (y - 300) * ramp;
   }
-  function measureMaxSlope(L) {
+  function measureMaxSlopeTan(P, len) {
     let mx = 0;
-    for (let x = 70;x <= L.len; x += 4) {
-      const m = Math.abs(levelGroundInfo(L, x).m);
+    for (let x = 70;x <= len; x += 4) {
+      const m = Math.abs(levelGroundInfo(P, x).m);
       if (m > mx)
         mx = m;
     }
-    return Math.atan(mx) * 180 / Math.PI;
+    return mx;
   }
-  function buildWaves(ramp) {
-    return [
-      { f: 2 * Math.PI / 2600, amp: 56 + ramp * 34, ph: 1.7 },
-      { f: 2 * Math.PI / 1000, amp: 20 + ramp * 9, ph: 3.1 },
-      { f: 2 * Math.PI / 400, amp: 7 + ramp * 2, ph: 5.2 }
-    ];
+  function measureMaxSlope(L) {
+    return Math.atan(measureMaxSlopeTan(L, L.len)) * 180 / Math.PI;
   }
-  function buildSteps(ramp, gN) {
-    const nStep = 1 + Math.floor(gN * 6);
+  function fitSlope(L, targetDeg) {
+    const tanT = Math.tan(targetDeg * Math.PI / 180);
+    const raw = measureMaxSlopeTan(L, L.len);
+    if (!(raw > 0.000001)) {
+      L.maxSlope = targetDeg;
+      return;
+    }
+    const k = tanT / raw;
+    for (const w of L.waves)
+      w.amp *= k;
+    for (const s of L.steps)
+      s.drop *= k;
+    if (L.feats)
+      for (const f of L.feats)
+        f.amp *= k;
+    L.maxSlope = measureMaxSlope(L);
+  }
+  function buildWaves(mood, ramp, rng) {
+    const j = mood.jitter;
+    const out = [];
+    for (let i = 0;i < mood.waves.length; i++) {
+      const [wl0, a0, aG] = mood.waves[i];
+      const wl = Math.max(MIN_WAVELEN, wl0 * (1 + (rng() * 2 - 1) * j));
+      out.push({
+        f: 2 * Math.PI / wl,
+        amp: a0 + aG * ramp,
+        ph: rng() * Math.PI * 2
+      });
+    }
+    return out;
+  }
+  function buildSteps(mood, ramp, gN, len, rng, nOverride) {
+    const nStep = nOverride != null ? nOverride : 1 + Math.floor(gN * 6);
     const steps = [];
+    let cx = LAUNCH_PAD + RUN_IN + 200 + rng() * 400;
+    const gap = mood.stepGap * (0.62 + len / 13200 * 0.38);
     for (let r = 0;r < nStep; r++) {
-      const drop = 15 + gN * 76 + r * (2 + gN * 7);
-      steps.push({ cx: 700 + r * 1600, drop });
+      steps.push({ cx: Math.round(cx), drop: 15 + gN * 76 + r * (2 + gN * 7) });
+      cx += gap * (1 + (rng() * 2 - 1) * 0.18);
     }
     return steps;
+  }
+  function buildFeats(mood, ramp, len, rng) {
+    const kinds = [];
+    for (const k in mood.feat) {
+      const n = Math.round(mood.feat[k] * (0.7 + ramp * 0.9));
+      for (let i = 0;i < n; i++)
+        kinds.push(k);
+    }
+    if (!kinds.length)
+      return [];
+    const feats = [];
+    const x0Min = 900;
+    const x1Max = len - 500;
+    const span = x1Max - x0Min;
+    if (span < 600)
+      return [];
+    const W = { kicker: 760, dip: 700, shelf: 980, whoops: 900, chasm: 640, ramp: 750 };
+    const total = kinds.length;
+    const n = Math.max(3, Math.min(16, Math.round(total * span / 4200)));
+    for (let i = 0;i < n; i++) {
+      const kind = kinds[Math.floor(rng() * kinds.length) % kinds.length];
+      const nPer = kind === "whoops" ? 1 + Math.floor(rng() * 2) : 2 + Math.floor(rng() * 3);
+      const minW = kind === "whoops" ? MIN_WAVELEN * (nPer + 1) * 0.5 : MIN_FEAT_W;
+      const w = Math.max(minW, W[kind] * (0.85 + rng() * 0.5));
+      if (w > span * 0.9)
+        continue;
+      const slot = (span - w) * ((i + 0.15 + rng() * 0.7) / n);
+      const x0 = x0Min + slot;
+      let amp;
+      if (kind === "ramp") {
+        amp = RAMP_GRADE * w / Math.PI * (0.8 + ramp * 0.35) * (0.85 + rng() * 0.3);
+      } else {
+        amp = FEAT_AMP[kind] * FEAT_AMP_MAX * (0.55 + rng() * 0.6) * (0.7 + ramp * 0.4);
+      }
+      feats.push({
+        kind,
+        x0: Math.round(x0),
+        x1: Math.round(x0 + w),
+        amp,
+        n: nPer
+      });
+    }
+    feats.sort((a, b) => a.x0 - b.x0);
+    return feats;
   }
   function makeLevel(gi) {
     const gN = gi / (TOTAL - 1);
@@ -718,11 +1029,14 @@
     const ramp = Math.pow(clamp(gN, 0, 1), 1.15);
     const len = Math.round(4200 + gN * 9000);
     const coinN = Math.round(16 + gN * 40);
+    const mood = TERRAIN_MOODS[bi % TERRAIN_MOODS.length];
+    const rng = mulberry32(20973 + gi * 2654435761);
     const L = {
       name: BRANCHES[bi].name + " " + (k + 1),
       len,
-      waves: buildWaves(ramp),
-      steps: buildSteps(ramp, gN),
+      waves: buildWaves(mood, ramp, rng),
+      steps: buildSteps(mood, ramp, gN, len, rng),
+      feats: buildFeats(mood, ramp, len, rng),
       coinN,
       ramp,
       den3: REF_SPEED * (0.72 - 0.22 * ramp),
@@ -731,21 +1045,47 @@
       hazardN: Math.round(1 + gN * 5),
       gateN: 3 + Math.round(gN * 2),
       variant,
-      theme: BRANCHES[bi].theme
+      theme: BRANCHES[bi].theme,
+      mood: mood.id
     };
-    L.maxSlope = measureMaxSlope(L);
+    fitSlope(L, targetSlopeDeg(gN));
     return L;
   }
   var LEVELS = Array.from({ length: TOTAL }, (_, gi) => makeLevel(gi));
   var FINALE = (() => {
     const len = 22000;
+    const rng = mulberry32(15825438);
+    const segLen = 3600;
+    const segs = 6;
+    const waves = [];
+    const steps = [];
+    const feats = [];
+    for (let s = 0;s < segs; s++) {
+      const mood = TERRAIN_MOODS[(s * 5 + 3) % TERRAIN_MOODS.length];
+      const w = buildWaves(mood, 1, rng)[0];
+      w.ph += s * 2.399963;
+      w.amp *= Math.pow(0.62, s);
+      waves.push(w);
+      for (const f of buildFeats(mood, 1, segLen, rng)) {
+        feats.push({ ...f, x0: f.x0 + s * segLen, x1: f.x1 + s * segLen });
+      }
+    }
+    {
+      const first = LAUNCH_PAD + RUN_IN + 200;
+      const sp = buildSteps(TERRAIN_MOODS[9], 1, 1, len, rng, 7);
+      const k = (len - first - 800) / 7800;
+      for (const st of sp)
+        steps.push({ cx: Math.round(first + (st.cx - first) * k), drop: st.drop });
+    }
+    feats.sort((a, b) => a.x0 - b.x0);
     const L = {
       name: "终极远征 · 环大陆",
       len,
-      waves: buildWaves(1),
-      steps: buildSteps(1, 1),
+      waves,
+      steps,
+      feats,
       coinN: 90,
-      ramp: 1,
+      ramp: 0.5,
       den3: REF_SPEED * (0.72 - 0.22),
       fuelK: 1 + 3.1,
       mech: 1.3,
@@ -753,6 +1093,7 @@
       gateN: 6,
       variant: "normal",
       theme: 0,
+      mood: "gauntlet",
       segments: [
         { x: 0, theme: 0 },
         { x: 3600, theme: 6 },
@@ -762,7 +1103,7 @@
         { x: 19800, theme: 11 }
       ]
     };
-    L.maxSlope = measureMaxSlope(L);
+    fitSlope(L, 54);
     return L;
   })();
   var FINALE_INDEX = LEVELS.length;
@@ -791,6 +1132,9 @@
   function globalIndexOf(bi, k) {
     return bi * LEVELS_PER_BRANCH + k;
   }
+  function branchOfGlobal(gi) {
+    return Math.floor(gi / LEVELS_PER_BRANCH);
+  }
   function branchProgress(gi) {
     return { bi: Math.floor(gi / LEVELS_PER_BRANCH), k: gi % LEVELS_PER_BRANCH };
   }
@@ -798,12 +1142,178 @@
     return L.len / L.den3;
   }
 
-  // dale-game/src/core/storage.js
+  // src/core/storage.js
   var CUR_VER = 3;
   var ALL_KEYS = Object.values(SAVE_KEYS);
   var available = true;
   function isStorageAvailable() {
     return available;
+  }
+  var MAX_SLOTS = 6;
+  var META_KEYS = { slot: "dale_slot", slots: "dale_slots" };
+  function rawGet(k) {
+    try {
+      return localStorage.getItem(k);
+    } catch (e) {
+      available = false;
+      return null;
+    }
+  }
+  function rawSet(k, v) {
+    try {
+      localStorage.setItem(k, v);
+    } catch (e) {
+      available = false;
+    }
+  }
+  function rawRemove(k) {
+    try {
+      localStorage.removeItem(k);
+    } catch (e) {
+      available = false;
+    }
+  }
+  function slotIndex() {
+    const n = store.slot | 0;
+    return n >= 0 && n < MAX_SLOTS ? n : 0;
+  }
+  function slotKey(n, k) {
+    return n === 0 ? k : `dale_s${n}_${k}`;
+  }
+  function sk(k) {
+    return slotKey(slotIndex(), k);
+  }
+  function slotGet(n, k) {
+    return rawGet(slotKey(n, k));
+  }
+  function readSlots() {
+    const raw = rawGet(META_KEYS.slots);
+    if (!raw)
+      return [];
+    try {
+      const v = JSON.parse(raw);
+      return Array.isArray(v) ? v.slice(0, MAX_SLOTS) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+  function writeSlots(list) {
+    rawSet(META_KEYS.slots, JSON.stringify(list.slice(0, MAX_SLOTS)));
+  }
+  function slotUsed(n) {
+    return slotGet(n, SAVE_KEYS.gold) !== null || slotGet(n, SAVE_KEYS.stars) !== null;
+  }
+  function listSlots() {
+    const meta = readSlots();
+    const out = [];
+    for (let n = 0;n < MAX_SLOTS; n++) {
+      const used = slotUsed(n);
+      const m = meta[n] || {};
+      out.push({
+        index: n,
+        name: used ? m.name || `存档${n + 1}` : `存档${n + 1}`,
+        used,
+        active: n === slotIndex(),
+        updatedAt: m.updatedAt || "",
+        cleared: used ? m.cleared | 0 : 0
+      });
+    }
+    return out;
+  }
+  function touchSlotMeta(n, cleared) {
+    const meta = readSlots();
+    while (meta.length < MAX_SLOTS)
+      meta.push({});
+    meta[n] = {
+      ...meta[n],
+      name: meta[n] && meta[n].name ? meta[n].name : `存档${n + 1}`,
+      updatedAt: new Date().toISOString().slice(0, 10),
+      cleared: cleared | 0
+    };
+    writeSlots(meta);
+  }
+  function currentSlot() {
+    return slotIndex();
+  }
+  function switchSlot(n) {
+    n = n | 0;
+    if (n < 0 || n >= MAX_SLOTS)
+      return false;
+    if (n === slotIndex())
+      return true;
+    try {
+      save();
+    } catch (e) {}
+    rawSet(META_KEYS.slot, String(n));
+    store.slot = n;
+    loadSave();
+    loadAchList();
+    loadProgress();
+    touchSlotMeta(n, clearedCountOfCurrent());
+    return true;
+  }
+  function createSlot() {
+    const used = listSlots().filter((s) => s.used);
+    if (used.length >= MAX_SLOTS)
+      return -1;
+    let target = -1;
+    for (let n = 0;n < MAX_SLOTS; n++)
+      if (!slotUsed(n)) {
+        target = n;
+        break;
+      }
+    if (target < 0)
+      return -1;
+    switchSlot(target);
+    resetSave();
+    const meta = readSlots();
+    while (meta.length < MAX_SLOTS)
+      meta.push({});
+    meta[target] = { name: `存档${target + 1}`, updatedAt: new Date().toISOString().slice(0, 10), cleared: 0 };
+    writeSlots(meta);
+    return target;
+  }
+  function deleteSlot(n) {
+    n = n | 0;
+    if (n < 0 || n >= MAX_SLOTS || n === slotIndex())
+      return false;
+    for (const k of ALL_KEYS)
+      rawRemove(slotKey(n, k));
+    if (n === 0) {
+      try {
+        if (typeof localStorage.length === "number" && typeof localStorage.key === "function") {
+          const dead = [];
+          for (let i = 0;i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.indexOf("bike_") === 0)
+              dead.push(k);
+          }
+          for (const k of dead)
+            rawRemove(k);
+        }
+      } catch (e) {
+        available = false;
+      }
+    }
+    const meta = readSlots();
+    while (meta.length < MAX_SLOTS)
+      meta.push({});
+    meta[n] = {};
+    writeSlots(meta);
+    return true;
+  }
+  function clearedCountOfCurrent() {
+    let n = 0;
+    const raw = slotGet(slotIndex(), SAVE_KEYS.stars);
+    try {
+      const v = JSON.parse(raw || "[]");
+      if (Array.isArray(v)) {
+        for (const s of v)
+          if (s >= 1)
+            n++;
+      }
+    } catch (e) {}
+    return n;
   }
   function probeStorage() {
     const k = "__dale_probe__";
@@ -818,7 +1328,7 @@
   }
   function lsGet(k) {
     try {
-      return localStorage.getItem(k);
+      return localStorage.getItem(sk(k));
     } catch (e) {
       available = false;
       return null;
@@ -826,7 +1336,7 @@
   }
   function lsSet(k, v) {
     try {
-      localStorage.setItem(k, v);
+      localStorage.setItem(sk(k), v);
       return true;
     } catch (e) {
       available = false;
@@ -835,7 +1345,7 @@
   }
   function lsRemove(k) {
     try {
-      localStorage.removeItem(k);
+      localStorage.removeItem(sk(k));
       return true;
     } catch (e) {
       available = false;
@@ -853,6 +1363,35 @@
   function intOr(v) {
     const n = parseInt(v, 10);
     return Number.isFinite(n) ? n : 0;
+  }
+  function clampLv(v) {
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n))
+      return 0;
+    return Math.max(0, Math.min(MAX_LV, n));
+  }
+  function clampStar(v) {
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n) || n <= 0)
+      return 0;
+    return Math.min(3, n);
+  }
+  function sanitizeUpgrades(u) {
+    const out = {};
+    if (!u || typeof u !== "object" || Array.isArray(u))
+      return out;
+    for (const veh of VEHICLES) {
+      const rec = u[veh.id];
+      if (!rec || typeof rec !== "object" || Array.isArray(rec))
+        continue;
+      out[veh.id] = {
+        engine: clampLv(rec.engine),
+        tire: clampLv(rec.tire),
+        frame: clampLv(rec.frame),
+        susp: clampLv(rec.susp)
+      };
+    }
+    return out;
   }
   function getUp() {
     const id = VEHICLES[store.currentVehicle].id;
@@ -879,7 +1418,9 @@
     lsSet(SAVE_KEYS.mute, store.muted ? "1" : "0");
     lsSet(SAVE_KEYS.best, store.best);
     lsSet(SAVE_KEYS.ultra, JSON.stringify(store.ultra || {}));
+    lsSet(SAVE_KEYS.sel, store.selLevel || 0);
     saveProgress();
+    touchSlotMeta(slotIndex(), clearedCountOfCurrent());
   }
   function clearedBranchesOf(stars) {
     const arr = Array.isArray(stars) ? stars : [];
@@ -1044,30 +1585,36 @@
   }
   function loadSave() {
     try {
-      store.gold = intOr(lsGet(SAVE_KEYS.gold)) || 0;
+      const persisted = parseInt(rawGet(META_KEYS.slot) || "0", 10);
+      store.slot = Number.isFinite(persisted) && persisted >= 0 && persisted < MAX_SLOTS ? persisted : 0;
+      store.gold = Math.max(0, intOr(lsGet(SAVE_KEYS.gold)));
       const u = jsonOr(lsGet(SAVE_KEYS.up) || "{}", {});
       if (u && u.engine !== undefined) {
         const id = VEHICLES[store.currentVehicle].id;
         store.upgrades = {};
         store.upgrades[id] = {
-          engine: Math.min(MAX_LV, u.engine || 0),
-          tire: Math.min(MAX_LV, u.tire || 0),
-          frame: Math.min(MAX_LV, u.frame || 0),
-          susp: Math.min(MAX_LV, u.susp || 0)
+          engine: clampLv(u.engine),
+          tire: clampLv(u.tire),
+          frame: clampLv(u.frame),
+          susp: clampLv(u.susp)
         };
       } else {
-        store.upgrades = u && typeof u === "object" && !Array.isArray(u) ? u : {};
+        store.upgrades = sanitizeUpgrades(u);
       }
       store.unlocked = Math.max(0, Math.min(LEVELS.length - 1, parseInt(lsGet(SAVE_KEYS.unlocked) || "0", 10) || 0));
+      store.selLevel = Math.max(0, Math.min(LEVELS.length - 1, parseInt(lsGet(SAVE_KEYS.sel) || "0", 10) || 0));
       const rawStars = jsonOr(lsGet(SAVE_KEYS.stars) || "[]", []);
-      const starsArr = Array.isArray(rawStars) ? rawStars.slice() : [];
+      const starsArr = (Array.isArray(rawStars) ? rawStars : []).map(clampStar);
       store.currentVehicle = parseInt(lsGet(SAVE_KEYS.veh) || "0", 10) || 0;
       const owned = jsonOr(lsGet(SAVE_KEYS.owned) || "[0]", [0]);
-      store.ownedVehicles = Array.isArray(owned) ? owned : [0];
+      store.ownedVehicles = (Array.isArray(owned) ? owned : [0]).map((i) => parseInt(i, 10)).filter((i) => Number.isInteger(i) && i >= 0 && i < VEHICLES.length);
       if (!store.ownedVehicles.length)
         store.ownedVehicles = [0];
       if (!store.ownedVehicles.includes(store.currentVehicle)) {
-        store.currentVehicle = store.ownedVehicles[0] || 0;
+        store.currentVehicle = store.ownedVehicles[0];
+      }
+      if (!(store.currentVehicle >= 0 && store.currentVehicle < VEHICLES.length)) {
+        store.currentVehicle = 0;
       }
       store.muted = lsGet(SAVE_KEYS.mute) === "1";
       store.best = parseInt(lsGet(SAVE_KEYS.best) || "0", 10) || 0;
@@ -1116,13 +1663,21 @@
     } catch (e) {}
   }
   function listSaveKeys() {
+    const n = slotIndex();
     const set = new Set(ALL_KEYS);
     try {
       if (typeof localStorage.length === "number" && typeof localStorage.key === "function") {
+        const prefix = n === 0 ? "bike_" : `dale_s${n}_bike_`;
         for (let i = 0;i < localStorage.length; i++) {
           const k = localStorage.key(i);
-          if (k && k.indexOf("bike_") === 0)
-            set.add(k);
+          if (!k)
+            continue;
+          if (n === 0) {
+            if (k.indexOf("bike_") === 0)
+              set.add(k);
+          } else if (k.indexOf(prefix) === 0) {
+            set.add(k.slice(`dale_s${n}_`.length));
+          }
         }
       }
     } catch (e) {
@@ -1224,6 +1779,9 @@
       lsRemove(k);
     for (const [k, v] of entries)
       lsSet(k, String(v));
+    if (!Object.prototype.hasOwnProperty.call(map, SAVE_KEYS.ver)) {
+      lsSet(SAVE_KEYS.ver, String(CUR_VER));
+    }
     loadSave();
     loadAchList();
     loadProgress();
@@ -1234,6 +1792,7 @@
       lsRemove(k);
     store.gold = 0;
     store.unlocked = 0;
+    store.selLevel = 0;
     store.stars = new Array(LEVELS.length).fill(0);
     store.best = 0;
     store.ownedVehicles = [0];
@@ -1259,8 +1818,18 @@
     return true;
   }
 
-  // dale-game/src/core/input.js
-  var key = { left: false, right: false };
+  // src/core/input.js
+  var key = { left: false, right: false, rev: false };
+  var touchWanted = false;
+  var touchActive = false;
+  function syncTouchVisibility() {
+    const el = document.getElementById("touch");
+    if (!el)
+      return;
+    const playing = store.state === "play" || store.state === "pause";
+    touchActive = !!(touchWanted && playing);
+    el.classList.toggle("hidden", !touchActive);
+  }
   function bind(e, down) {
     const k = (e.key || "").toLowerCase();
     let c = null;
@@ -1268,6 +1837,8 @@
       c = "right";
     else if (e.code === "ArrowLeft" || e.key === "ArrowLeft" || k === "a")
       c = "left";
+    else if (e.code === "ArrowDown" || e.key === "ArrowDown" || k === "s")
+      c = "rev";
     if (c)
       key[c] = down;
   }
@@ -1319,19 +1890,25 @@
     window.addEventListener("blur", () => {
       key.left = false;
       key.right = false;
+      key.rev = false;
       bike.angVel = 0;
     });
     const touchEl = document.getElementById("touch");
     const touchBtn = document.getElementById("touchBtn");
-    const isTouch = "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
-    if (isTouch && touchEl && touchBtn) {
-      touchEl.classList.remove("hidden");
-      touchBtn.classList.add("on");
+    let isTouch = false;
+    try {
+      isTouch = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches) || "ontouchstart" in window && (navigator.maxTouchPoints || 0) > 1;
+    } catch (e) {
+      isTouch = "ontouchstart" in window;
     }
-    if (touchBtn && touchEl) {
+    touchWanted = isTouch;
+    syncTouchVisibility();
+    if (touchBtn) {
+      touchBtn.classList.toggle("on", touchWanted);
       touchBtn.addEventListener("click", () => {
-        touchEl.classList.toggle("hidden");
-        touchBtn.classList.toggle("on", !touchEl.classList.contains("hidden"));
+        touchWanted = !touchWanted;
+        touchBtn.classList.toggle("on", touchWanted);
+        syncTouchVisibility();
       });
     }
     document.querySelectorAll(".tbtn[data-k]").forEach((b) => {
@@ -1369,9 +1946,9 @@
     }
   }
 
-  // dale-game/src/core/loop.js
+  // src/core/loop.js
   class Stepper {
-    constructor(step, fixed = DT, maxSteps = 3) {
+    constructor(step, fixed = DT, maxSteps = 15) {
       this.step = step;
       this.fixed = fixed;
       this.maxSteps = maxSteps;
@@ -1416,7 +1993,7 @@
     requestAnimationFrame(tick);
   }
 
-  // dale-game/src/config/themes.js
+  // src/config/themes.js
   var THEMES = [
     {
       name: "绿野",
@@ -1750,7 +2327,7 @@
     __default: ["#8a8f98"]
   };
 
-  // dale-game/src/config/ui-tokens.js
+  // src/config/ui-tokens.js
   var TOKENS = Object.freeze({
     "surface-0": "#070f18",
     "surface-1": "#0d1b2a",
@@ -1869,6 +2446,9 @@
     "fx-shadow-faint": "rgba(0,0,0,0.08)",
     "fx-none-dark": "rgba(0,0,0,0)",
     "fx-vignette-edge": "rgba(0,0,0,0.03)",
+    "fx-lit-top": "rgba(255,248,222,1)",
+    "fx-shade-top": "rgba(9,15,28,1)",
+    "fx-vignette": "rgba(0,0,0,0.32)",
     "fx-fade-top": "rgba(255,255,255,0.015)",
     "fx-fade-hi-top": "rgba(255,255,255,0.05)",
     "fx-sun-warm": "rgba(255,248,222,0.32)",
@@ -1877,6 +2457,8 @@
     "glass-hover": "rgba(255,255,255,0.2)",
     track: "rgba(255,255,255,0.2)",
     scrim: "rgba(8,20,32,0.74)",
+    "scrim-menu": "rgba(8,20,32,0.60)",
+    "hud-scrim": "rgba(6,14,24,0.55)",
     "scrim-strong": "rgba(8,20,32,0.88)",
     "scrim-solid": "rgba(8,20,32,0.97)",
     "success-soft": "rgba(80,255,150,0.16)",
@@ -1891,6 +2473,7 @@
     "gold-3": "#e08b22",
     "gold-glow": "rgba(255,205,90,0.4)",
     "gold-glow-strong": "rgba(255,215,110,0.75)",
+    "info-glow": "rgba(124,231,255,0.4)",
     "grad-progress": "linear-gradient(90deg, #06d6a0, #ffd166)",
     "grad-fuel": "linear-gradient(90deg, #e85d04, #ffba08)",
     "grad-donate": "linear-gradient(135deg, #ffd166, #f0a83c 55%, #e08b22)",
@@ -1920,7 +2503,7 @@
     return weight + " " + size + " " + TOKENS["font-family"];
   }
 
-  // dale-game/src/physics/terrain.js
+  // src/physics/terrain.js
   function hillY(x) {
     if (store.mode === "free")
       return freeHill(x);
@@ -1935,7 +2518,8 @@
     const yL = groundY(x - e);
     const yR = groundY(x + e);
     if (!isFinite(y0) || !isFinite(yL) || !isFinite(yR)) {
-      return { y: y0, m: 0 };
+      const safe = isFinite(y0) ? y0 : isFinite(yL) ? yL : isFinite(yR) ? yR : 0;
+      return { y: safe, m: 0 };
     }
     return { y: y0, m: (yR - yL) / (2 * e) };
   }
@@ -1968,7 +2552,7 @@
   function safeSpot(x) {
     let bx = x;
     let bm = Math.abs(groundInfo(x).m);
-    for (let d = -120;d <= 320; d += 20) {
+    for (let d = -200;d <= 600; d += 20) {
       const xx = Math.max(24, x + d);
       const m = Math.abs(groundInfo(xx).m);
       if (m < bm) {
@@ -1976,10 +2560,10 @@
         bx = xx;
       }
     }
-    return bm <= 0.16 ? bx : x;
+    return bx;
   }
 
-  // dale-game/src/physics/events.js
+  // src/physics/events.js
   var noop = () => {};
   var hooks = { onCrash: noop, onLand: noop, onSlip: noop };
   function initPhysicsEvents(h) {
@@ -1994,10 +2578,13 @@
     return hooks;
   }
 
-  // dale-game/src/physics/bike.js
+  // src/physics/bike.js
   var TAU = Math.PI * 2;
   var WHEELS = ["rear", "front"];
   var numCapHits = 0;
+  function bikeVx() {
+    return systemVel(bike).vx;
+  }
   function isUltraActive() {
     return store.ultra[VEHICLES[store.currentVehicle].id] === true;
   }
@@ -2078,7 +2665,7 @@
       p._vx = 0;
       p._vy = 0;
     }
-    const hx = x + L / 2 - Math.sin(ang) * SEAT_H;
+    const hx = x + L / 2 + Math.sin(ang) * SEAT_H;
     const hy = (yR + yF) / 2 - Math.cos(ang) * SEAT_H;
     b.head.x = hx;
     b.head.y = hy;
@@ -2116,6 +2703,9 @@
     b.slip.front = 0;
     b.fn.rear = 0;
     b.fn.front = 0;
+    b._revHold = 0;
+    b.boostT = 0;
+    b.angRate = 0;
     b.rb = store.phys.rb;
     bindMasses(store.phys.rb);
   }
@@ -2201,11 +2791,15 @@
       b.susp[wk].v = cRate;
     }
   }
-  function applyDrive(b, P, sub, drv, brk) {
+  function applyDrive(b, P, sub, drv, brk, rev) {
     if (isUltraStable()) {
       const sv = systemVel(b);
       const vx = sv.vx;
-      const target = drv ? P.MAXV * 0.95 : 0;
+      let target = 0;
+      if (rev)
+        target = -P.MAXV * REV_SPEED;
+      else if (drv)
+        target = P.MAXV * 0.95;
       const maxAcc = P.MAXV * 2;
       const dv = clamp(target - vx, -maxAcc * sub, maxAcc * sub);
       if (dv !== 0)
@@ -2223,6 +2817,10 @@
       let tau = 0;
       if (wk === "rear" && drv)
         tau += torqueAt(veh, w, drv, P.torquePeak, P.rpmK || 1);
+      if (wk === "rear" && rev) {
+        const wantW = -P.MAXV * REV_SPEED / WHEEL_R;
+        tau += clamp((wantW - w) * IW / sub, -P.torquePeak, P.torquePeak);
+      }
       if (brk) {
         const cap = Math.min(P.brakePeak, Math.abs(w) * IW / sub);
         tau -= Math.sign(w || 1) * cap * brk;
@@ -2566,9 +3164,12 @@
     const SUS = P.susp;
     const mu = P.mu;
     const crashTol = Math.max(8, 30 - (P.crashMargin - 4) * 1.4);
-    const invMargin = -8 - (P.crashMargin - 4) * 0.3;
+    const tiltMin = Math.min(0.7 * Math.PI, (0.55 + (P.crashMargin - 4) * 0.014) * Math.PI);
     const drvK = key.right && !run.crashed ? 1 : 0;
-    const brkK = key.left && !run.crashed ? 1 : 0;
+    const revK = key.rev && !run.crashed && b.grounded > 0 ? 1 : 0;
+    const revReady = revK && systemVel(b).vx < REV_ENTER_V;
+    const brkK = (key.left || revK && !revReady) && !run.crashed ? 1 : 0;
+    const rev = revReady ? 1 : 0;
     const prevGrounded = b.grounded;
     const prevSpin = { rear: b.wheelRot.rear, front: b.wheelRot.front };
     const ang0 = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
@@ -2583,7 +3184,7 @@
         p._vy += P.GRAV * sub;
       airControl(b, sub);
       applySuspension(b, SUS, sub);
-      applyDrive(b, P, sub, drvK, brkK);
+      applyDrive(b, P, sub, drvK, brkK, rev);
       applyDrag(b, P, sub);
       solveVelocityConstraints(b, P, SUS, mu, sub);
       for (const p of b.pts) {
@@ -2617,23 +3218,22 @@
     b.squash += (target - b.squash) * 0.4;
     if (Math.abs(b.squash) < 0.004)
       b.squash = 0;
-    b.wheelRear = (b.wheelRear + b.wheelRot.rear * SUB_DT * 0.06) % TAU;
-    b.wheelFront = (b.wheelFront + b.wheelRot.front * SUB_DT * 0.06) % TAU;
+    b.wheelStep = b.wheelRot.rear * DT;
+    b.wheelStepF = b.wheelRot.front * DT;
+    b.wheelRear = (b.wheelRear + b.wheelStep) % TAU;
+    b.wheelFront = (b.wheelFront + b.wheelStepF) % TAU;
     b.speed = lerp(b.speed, systemVel(b).vx, 0.12);
     const ang1 = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
     b.angRate = wrapAngle(ang1 - ang0) / DT;
     const hgi = groundInfo(b.head.x);
     if (!run.crashed && isFinite(hgi.y)) {
       const gap = hgi.y - b.head.y;
-      const inverted = b.axleR.y < b.head.y + invMargin && b.axleF.y < b.head.y + invMargin;
-      if (gap < HEAD_R + CONTACT_BAND && bodyLow(b))
-        crash();
-      else if (gap < crashTol && inverted)
+      if (gap < Math.max(HEAD_R + CONTACT_BAND, crashTol) && Math.abs(wrapAngle(ang1)) > tiltMin)
         crash();
     }
   }
 
-  // dale-game/src/physics/fuel.js
+  // src/physics/fuel.js
   function drainFuel(dt) {
     const v = VEHICLES[store.currentVehicle];
     const L = store.mode === "level" ? levelAt(store.lvIdx) : null;
@@ -2653,18 +3253,19 @@
     return P.fuelMax > 0 ? P.fuel / P.fuelMax : 0;
   }
 
-  // dale-game/src/render/particles.js
+  // src/render/particles.js
   var MAX_PARTICLES = 600;
   function emitParticles(x, y, count, cfg) {
     const arr = world.particles;
+    const spd = Number.isFinite(cfg.spd) ? cfg.spd : 1;
     for (let i = 0;i < count; i++) {
       const a = Math.random() * 6.2832;
       const s = 0.5 + Math.random() * 1.5;
       arr.push({
         x,
         y,
-        vx: Math.cos(a) * s * cfg.spd,
-        vy: Math.sin(a) * s * cfg.spd - 0.5,
+        vx: Math.cos(a) * s * spd,
+        vy: Math.sin(a) * s * spd - 0.5,
         life: cfg.life || 40,
         maxLife: cfg.life || 40,
         size: cfg.size || 2 + Math.random() * 2,
@@ -2706,7 +3307,7 @@
     ctx.globalAlpha = 1;
   }
 
-  // dale-game/src/render/camera.js
+  // src/render/camera.js
   function addShake(v) {
     store.cam.shake = Math.min(16, store.cam.shake + v);
   }
@@ -2729,14 +3330,18 @@
     else
       cam.shake = 0;
   }
+  var shPhase = 0;
   function shakeOffset() {
     const s = store.cam.shake;
-    if (s <= 0.06)
+    if (s <= 0.06) {
+      shPhase += 0.37;
       return { x: 0, y: 0 };
-    return { x: (Math.random() * 2 - 1) * s, y: (Math.random() * 2 - 1) * s * 0.7 };
+    }
+    shPhase += 0.55;
+    return { x: Math.sin(shPhase * 2.1) * s, y: Math.cos(shPhase * 3.3) * s * 0.7 };
   }
 
-  // dale-game/src/game/progress.js
+  // src/game/progress.js
   function hasAch(id) {
     return store.achGot.includes(id);
   }
@@ -2761,7 +3366,7 @@
     return true;
   }
 
-  // dale-game/src/game/stats.js
+  // src/game/stats.js
   var COMBO_WINDOW = 4;
   function updateStats(dt) {
     const b = bike;
@@ -2823,13 +3428,13 @@
   }
   function pickCanister(c) {
     c.taken = true;
-    refuel(0.45);
+    refuel(CAN_FUEL);
     emitParticles(c.x, c.y, 10, { color: token("warn"), spd: 1.4, life: 26, size: 3, grav: 0.02 });
-    showToast("⛽ +45%", 650);
+    showToast(`⛽ +${Math.round(CAN_FUEL * 100)}%`, 650);
     playFuelSound();
   }
 
-  // dale-game/src/game/world.js
+  // src/game/world.js
   var GATE_START_ALLOW = 900;
   var BOOST_HAZARD_GAP = 400;
   function measureBottomY(L) {
@@ -2853,6 +3458,17 @@
     }
     return list.length - 1;
   }
+  var TALL_DECO = new Set([
+    "tree",
+    "snowtree",
+    "cactus",
+    "fern",
+    "pine",
+    "reed",
+    "stump",
+    "pillar",
+    "ruin"
+  ]);
   function buildDeco(L, rng) {
     const T0 = THEMES[segmentThemeAt(L, 0)] || THEMES[0];
     const trees = [];
@@ -2868,7 +3484,7 @@
       const T = THEMES[segmentThemeAt(L, x)] || T0;
       const di = pickDecoIndex(T.deco, rng());
       const item = { x, y: gi.y, kind: T.deco[di], s, ph };
-      if (di === 0)
+      if (TALL_DECO.has(item.kind))
         trees.push(item);
       else
         rocks.push(item);
@@ -2955,17 +3571,17 @@
     const range = vAvg / kAvg;
     const need = L.len / range;
     const M = 1.3 - 0.25 * L.ramp;
-    const budgetCans = Math.max(1, Math.min(6, Math.ceil((need * M - 1) / 0.45)));
+    const budgetCans = Math.max(1, Math.min(6, Math.ceil((need * M - 1) / CAN_FUEL)));
     const rule = variantRule(L.variant);
     const n = rule.canN === null ? budgetCans : Math.max(0, rule.canN);
-    world.prepFuel = rule.prepFuel ? Math.max(0, budgetCans - n) * 0.45 : 0;
+    world.prepFuel = rule.prepFuel ? Math.max(0, budgetCans - n) * CAN_FUEL : 0;
     const canisters = [];
     if (n === 1) {
       const cx = canSpot(L.len, L.len * 0.5);
       canisters.push({ x: cx, y: groundY(cx) - 26, taken: false, ph: rng() * 6.28 });
     } else if (n > 1) {
-      const x0 = L.len * 0.2;
-      const x1 = L.len * 0.84;
+      const x0 = L.len * 0.12;
+      const x1 = L.len * 0.92;
       for (let i = 0;i < n; i++) {
         const x = canSpot(L.len, x0 + (x1 - x0) * i / (n - 1));
         canisters.push({ x, y: groundY(x) - 26, taken: false, ph: rng() * 6.28 });
@@ -3128,6 +3744,7 @@
     for (const c of world.coins) {
       if (c.taken)
         continue;
+      c.ph += 0.05;
       if (Math.hypot(c.x - mx, c.y - my) < 45) {
         c.taken = true;
         store.run.coinGot++;
@@ -3143,6 +3760,7 @@
     for (const c of world.canisters) {
       if (c.taken)
         continue;
+      c.ph += 0.05;
       if (Math.hypot(c.x - mx, c.y - my) < 45)
         pickCanister(c);
     }
@@ -3207,7 +3825,7 @@
     store.cam.shake = Math.min(16, store.cam.shake + v);
   }
 
-  // dale-game/src/game/race.js
+  // src/game/race.js
   var RACE_PACE = 0.68;
   var RANKED_BASE = 0.7;
   var RANKED_GAIN = 0.2;
@@ -3260,7 +3878,7 @@
     }
   }
 
-  // dale-game/src/game/game.js
+  // src/game/game.js
   var presenter = { hideOverlay() {}, toMenu() {} };
   initPhysicsEvents({
     onCrash: (e) => {
@@ -3397,7 +4015,10 @@
     }
   }
   function respawn() {
-    const sx = safeSpot(store.run.lastSafeX);
+    const prev = store.run.lastSafeX;
+    let sx = safeSpot(prev);
+    if (sx === prev)
+      sx = Math.max(24, prev + 80);
     store.run.lastSafeX = sx;
     resetBike(sx);
     bike.locked = false;
@@ -3406,7 +4027,10 @@
     showToast("! 回到安全点", 420);
   }
   function pitRewind() {
-    const sx = safeSpot(store.run.lastSafeX);
+    const prev = store.run.lastSafeX;
+    let sx = safeSpot(prev);
+    if (sx === prev)
+      sx = Math.max(24, prev + 80);
     store.run.lastSafeX = sx;
     resetBike(sx);
     bike.locked = false;
@@ -3588,7 +4212,7 @@
       checkAch("fast");
     if (store.mode === "level" && !run.clearing) {
       if (!run.crashed && world.hazards.length) {
-        const spd = Math.abs((b.front.x - b.front.px) * SUBV);
+        const spd = Math.abs(bikeVx());
         for (const h of world.hazards) {
           if (mid >= h.x0 && mid <= h.x1 && spd > h.vmax) {
             crashWithReason("⚠️ 危险路段超速！燃料 -8% · 计时 +2s");
@@ -3629,16 +4253,36 @@
     }
   }
 
-  // dale-game/src/render/postfx.js
+  // src/render/light.js
+  var DEFAULT_CELESTIAL = { x: 0.85, y: 90 };
+  function getLight() {
+    const T = THEMES[store.phys.theme] || THEMES[0];
+    const c = T.bg && T.bg.celestial || DEFAULT_CELESTIAL;
+    const nx = typeof c.x === "number" ? c.x : DEFAULT_CELESTIAL.x;
+    const y = typeof c.y === "number" ? c.y : DEFAULT_CELESTIAL.y;
+    const px = c.parallax || 0;
+    return {
+      x: wrapX(view.W * nx - store.cam.x * px, view.W),
+      y,
+      side: nx >= 0.5 ? 1 : -1,
+      color: T.sun,
+      isNight: y > 120
+    };
+  }
+
+  // src/render/postfx.js
   var QUALITY = ["low", "medium", "high"];
   var QUALITY_LABEL = { low: "低", medium: "中", high: "高" };
   var QKEY = "dale_quality";
+  var SKEY = "dale_scale";
   var WEATHER_N = 64;
   var weather = [];
   for (let i = 0;i < WEATHER_N; i++) {
-    weather.push({ x: 0, y: 0, s: 0, ph: 0, v: 0, seed: i / WEATHER_N });
+    weather.push({ x: 0, y: 0, s: 0, ph: 0, v: 0, a: 0, d: 0, seed: i / WEATHER_N });
   }
   var weatherSeeded = false;
+  var weatherSeededW = 0;
+  var weatherSeededH = 0;
   var quality = "low";
   var reduced = false;
   var off = null;
@@ -3648,6 +4292,10 @@
   var fade = null;
   var fadeHi = null;
   var warmGlow = null;
+  var warmPosX = NaN;
+  var warmPosY = NaN;
+  var vignette = null;
+  var gradTheme = -1;
   function lsGet2(k) {
     try {
       return localStorage.getItem(k);
@@ -3662,7 +4310,15 @@
   }
   function initPostFx() {
     const saved = lsGet2(QKEY);
-    quality = QUALITY.includes(saved) ? saved : "low";
+    let weak = view.W < 560;
+    try {
+      const cores = typeof navigator !== "undefined" && navigator.hardwareConcurrency || 0;
+      if (cores > 0 && cores <= 4)
+        weak = true;
+    } catch (e) {}
+    quality = QUALITY.includes(saved) ? saved : weak ? "medium" : "high";
+    const savedScale = parseFloat(lsGet2(SKEY));
+    setRenderScale(Number.isFinite(savedScale) ? savedScale : 1);
     try {
       if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
         const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -3680,6 +4336,15 @@
   function getQuality() {
     return quality;
   }
+  function getRenderScale() {
+    return view.RS;
+  }
+  function setRenderScalePersisted(s) {
+    const v = setRenderScale(s);
+    lsSet2(SKEY, String(v));
+    invalidateOff();
+    return v;
+  }
   function applyCanvasLook() {
     try {
       if (!cv || !cv.style)
@@ -3695,20 +4360,31 @@
     applyCanvasLook();
     return quality;
   }
+  function invalidateOff() {
+    fade = null;
+    fadeHi = null;
+    warmGlow = null;
+    warmPosX = NaN;
+    warmPosY = NaN;
+    vignette = null;
+    gradTheme = -1;
+  }
   function ensureOff(w, h) {
     if (!off) {
       off = document.createElement("canvas");
       offCtx = off.getContext("2d");
     }
-    if (offW !== w || offH !== h) {
-      off.width = w;
-      off.height = h;
-      offW = w;
-      offH = h;
-      fade = null;
-      fadeHi = null;
-      warmGlow = null;
+    const k = view.k || view.DPR || 1;
+    const pw = Math.max(1, Math.round(w * k));
+    const ph = Math.max(1, Math.round(h * k));
+    if (offW !== pw || offH !== ph) {
+      off.width = pw;
+      off.height = ph;
+      offW = pw;
+      offH = ph;
+      invalidateOff();
     }
+    offCtx.setTransform(k, 0, 0, k, 0, 0);
     return offCtx;
   }
   function gradeColor() {
@@ -3723,40 +4399,48 @@
       const p = weather[i];
       p.x = Math.random() * view.W;
       p.y = Math.random() * view.H;
-      p.s = 0.6 + Math.random() * 1.6;
+      p.d = 0.2 + Math.random() * 0.8;
+      p.s = 0.5 + p.d * 1.2;
+      p.a = 0.1 + p.d * 0.34;
       p.v = 0.4 + Math.random() * 1.4;
       p.ph = Math.random() * 6.283;
     }
+    weatherSeededW = view.W;
+    weatherSeededH = view.H;
     weatherSeeded = true;
   }
-  function drawWeather(amb, t) {
+  function drawWeather(amb, t, dt) {
     if (!amb || amb.type === "none")
       return;
     const moving = !reduced;
-    const n = Math.round(WEATHER_N * clamp(amb.rate, 0, 1) * 1.4);
+    const dtSec = dt;
+    const n = Math.min(WEATHER_N, Math.round(WEATHER_N * clamp(amb.rate, 0, 1) * 1.4));
     ctx.fillStyle = amb.color;
     ctx.strokeStyle = amb.color;
-    const dtSec = 1 / 60;
     for (let i = 0;i < n; i++) {
       const p = weather[i];
+      const sw = p.d * 0.45;
       if (moving) {
         if (amb.type === "snow") {
           p.y += p.v * amb.spd * 40 * dtSec * 2;
-          p.x += Math.sin(t + p.ph) * 0.3;
+          p.x += Math.sin(t + p.ph) * 0.3 * sw * 2;
         } else if (amb.type === "rain") {
           p.y += p.v * 220 * dtSec * 2;
           p.x -= p.v * 30 * dtSec * 2;
         } else if (amb.type === "sand") {
           p.x -= p.v * 160 * dtSec * 2;
-          p.y += Math.sin(t + p.ph) * 0.2;
+          p.y += Math.sin(t + p.ph) * 0.2 * sw * 2;
         } else if (amb.type === "ember") {
           p.y -= p.v * 40 * dtSec * 2;
-          p.x += Math.sin(t * 1.3 + p.ph) * 0.5;
+          p.x += Math.sin(t * 1.3 + p.ph) * 0.5 * sw * 2;
         } else if (amb.type === "pollen") {
-          p.x += Math.cos(t * 0.6 + p.ph) * 0.5;
-          p.y += Math.sin(t * 0.7 + p.ph) * 0.4;
+          p.x += Math.cos(t * 0.6 + p.ph) * 0.5 * sw * 2;
+          p.y += Math.sin(t * 0.7 + p.ph) * 0.4 * sw * 2;
         } else if (amb.type === "mist") {
           p.x += p.v * 10 * dtSec;
+        } else if (amb.type === "dust") {
+          p.x += p.v * 90 * amb.spd * dtSec;
+          p.y += Math.sin(t * 0.5 + p.ph) * 0.25 * sw * 2;
         }
       }
       if (p.x < -10)
@@ -3768,6 +4452,7 @@
       if (p.y > view.H + 10)
         p.y = -10;
       if (amb.type === "rain") {
+        ctx.globalAlpha = p.a * 1.6;
         ctx.beginPath();
         ctx.moveTo(p.x, p.y);
         ctx.lineTo(p.x - 2 - p.s, p.y + 8 + p.s * 4);
@@ -3778,21 +4463,25 @@
         ctx.beginPath();
         ctx.ellipse(p.x, p.y, 60 + p.s * 30, 12 + p.s * 4, 0, 0, 7);
         ctx.fill();
-        ctx.globalAlpha = 1;
       } else {
+        ctx.globalAlpha = p.a;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.s, 0, 7);
         ctx.fill();
       }
     }
+    ctx.globalAlpha = 1;
   }
-  function applyPostFx(t) {
+  function applyPostFx(t, dt = 1 / 60) {
     if (store.state !== "play")
       return;
     if (quality === "low")
       return;
     const W = view.W;
     const H = view.H;
+    if (store.phys.theme !== gradTheme)
+      invalidateOff();
+    gradTheme = store.phys.theme;
     const oc = ensureOff(W, H);
     oc.clearRect(0, 0, W, H);
     const isHi = quality === "high";
@@ -3812,38 +4501,42 @@
     oc.fillStyle = isHi ? fadeHi || fade : fade;
     oc.fillRect(0, 0, W, H * (isHi ? 0.55 : 0.45));
     if (isHi) {
-      if (!warmGlow) {
-        warmGlow = oc.createRadialGradient(W * 0.85, H * 0.12, H * 0.05, W * 0.85, H * 0.12, H * 0.5);
+      const L = getLight();
+      const sx = L.x;
+      const sy = L.y;
+      if (!warmGlow || Math.abs(sx - warmPosX) > 2 || Math.abs(sy - warmPosY) > 2) {
+        warmPosX = sx;
+        warmPosY = sy;
+        warmGlow = oc.createRadialGradient(sx, sy, H * 0.05, sx, sy, H * 0.5);
         warmGlow.addColorStop(0, token("fx-sun-warm"));
         warmGlow.addColorStop(1, token("fx-sun-none"));
       }
-      const sx = W * 0.85;
-      const sy = H * 0.12;
       oc.fillStyle = warmGlow;
       oc.globalAlpha = 0.7;
       oc.fillRect(sx - H * 0.5, sy - H * 0.5, H, H);
       oc.globalAlpha = 1;
     }
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.drawImage(off, 0, 0);
-    ctx.restore();
+    if (isHi) {
+      if (!vignette) {
+        vignette = oc.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.3, W * 0.5, H * 0.5, Math.max(W, H) * 0.76);
+        vignette.addColorStop(0, token("fx-none-dark"));
+        vignette.addColorStop(1, token("fx-vignette"));
+      }
+      oc.fillStyle = vignette;
+      oc.fillRect(0, 0, W, H);
+    }
+    ctx.drawImage(off, 0, 0, W, H);
     const th = THEMES[store.phys.theme] || THEMES[0];
     if (th && th.ambient) {
-      if (!weatherSeeded)
+      if (!weatherSeeded || weatherSeededW !== view.W || weatherSeededH !== view.H)
         seedWeather();
       ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      drawWeather(th.ambient, t || 0);
+      drawWeather(th.ambient, t || 0, dt);
       ctx.restore();
     }
   }
 
-  // dale-game/src/render/background.js
-  function wrapX(v, W) {
-    const m = W || 1;
-    return (v % m + m) % m;
-  }
+  // src/render/background.js
   var CELESTIAL_PAINTERS = {
     sun(c, cx, W) {
       const x = wrapX(W * c.x - cx * c.parallax, W);
@@ -4085,7 +4778,7 @@
       ctx.restore();
     }
     if (q === "high") {
-      const gx = W * 0.55;
+      const gx = getLight().x;
       const gy = H * 0.52;
       const glow = ctx.createRadialGradient(gx, gy, H * 0.02, gx, gy, H * 0.32);
       glow.addColorStop(0, token("fx-sun-warm"));
@@ -4098,7 +4791,7 @@
     }
   }
 
-  // dale-game/src/render/terrain.js
+  // src/render/terrain.js
   function eachGround(cx, cy, step, fn) {
     for (let x = 0;x <= view.W; x += step) {
       const wx = x + cx;
@@ -4111,12 +4804,12 @@
   var SURFACE_PAINTERS = {
     grass(s, cx, cy) {
       ctx.strokeStyle = s.color;
-      ctx.lineWidth = 2;
-      eachGround(cx, cy, 12, (x, gy, wx) => {
-        const h = 4 + Math.abs(Math.sin(wx * 0.37)) * 7;
+      ctx.lineWidth = 1.6;
+      eachGround(cx, cy, 20, (x, gy, wx) => {
+        const h = 3 + Math.abs(Math.sin(wx * 0.37)) * 5;
         ctx.beginPath();
         ctx.moveTo(x, gy - 1);
-        ctx.lineTo(x + 2.5, gy - 1 - h);
+        ctx.lineTo(x + 1.6, gy - 1 - h);
         ctx.stroke();
       });
     },
@@ -4284,18 +4977,36 @@
       });
     }
   };
+  var GS = 8;
+  var gBuf = new Float64Array(4096);
+  var gOk = new Uint8Array(4096);
+  var lBuf = new Float64Array(4096);
+  function invalidateGround() {
+    gOk.fill(0);
+  }
+  function groundBuf(cx) {
+    const n = Math.min(4096, Math.ceil(view.W / GS) + 2 | 0);
+    for (let i = 0;i < n; i++) {
+      if (!gOk[i]) {
+        gBuf[i] = groundY(cx + i * GS);
+        gOk[i] = 1;
+      }
+    }
+    return n;
+  }
   function drawTerrain(cx, cy) {
     const W = view.W;
     const H = view.H;
     const T = THEMES[store.phys.theme] || THEMES[0];
     const pal = T.pal;
+    invalidateGround();
+    const n = groundBuf(cx);
     ctx.fillStyle = pal[0];
     ctx.beginPath();
     ctx.moveTo(0, cy);
     let lastG = cy;
-    for (let x = 0;x <= W; x += 8) {
-      const wx = x + cx;
-      const gy = groundY(wx);
+    for (let i = 0, x = 0;x <= W; x += GS, i++) {
+      const gy = gBuf[i];
       if (gy === Infinity)
         ctx.lineTo(x, lastG);
       else {
@@ -4311,8 +5022,8 @@
     ctx.strokeStyle = pal[1];
     ctx.lineWidth = 8;
     ctx.beginPath();
-    for (let x = 0;x <= W; x += 8) {
-      const gy = groundY(x + cx);
+    for (let i = 0, x = 0;x <= W; x += GS, i++) {
+      const gy = gBuf[i];
       if (gy === Infinity)
         continue;
       ctx.lineTo(x, gy - cy - 8);
@@ -4321,8 +5032,8 @@
     ctx.fillStyle = token("fx-shadow-faint");
     ctx.beginPath();
     ctx.moveTo(0, cy);
-    for (let x = 0;x <= W; x += 8) {
-      const gy = groundY(x + cx);
+    for (let i = 0, x = 0;x <= W; x += GS, i++) {
+      const gy = gBuf[i];
       if (gy === Infinity)
         ctx.lineTo(x, lastG);
       else
@@ -4337,47 +5048,72 @@
     const q = getQuality();
     if (q !== "low") {
       const isHi = q === "high";
-      const kDark = isHi ? 0.5 : 0.18;
-      const kLit = isHi ? 0.34 : 0.13;
-      const st = isHi ? 16 : 24;
-      ctx.save();
-      for (let x = 0;x <= W; x += st) {
-        const wx = x + cx;
-        const yL = groundY(wx - 10);
-        const yR = groundY(wx + 10);
-        if (yL === Infinity || yR === Infinity)
+      const L = getLight();
+      const gain = isHi ? 1.5 : 0.7;
+      const depth = isHi ? 170 : 95;
+      const maxA = isHi ? 0.4 : 0.15;
+      const segs = Math.ceil(W / GS) + 1;
+      for (let i = 0;i < segs; i++) {
+        const a0 = gBuf[i];
+        const b0 = gBuf[i + 1];
+        if (a0 === Infinity || b0 === Infinity) {
+          lBuf[i] = 0;
           continue;
-        const m = (yR - yL) / 20;
-        const gy = groundY(wx) - cy;
-        if (m < 0.05) {
-          const a = Math.min(kDark, (0.05 - m) * kDark * 3);
-          if (a > 0.02) {
-            ctx.fillStyle = "rgba(10,14,20," + a.toFixed(3) + ")";
-            ctx.fillRect(x, gy, st + 4, H - gy);
-          }
-        } else if (m > 0.42) {
-          const a = Math.min(kLit, (m - 0.42) * kLit * 3);
-          if (a > 0.02) {
-            ctx.fillStyle = "rgba(255,250,235," + a.toFixed(3) + ")";
-            ctx.fillRect(x, gy, st + 4, H - gy);
-          }
         }
+        lBuf[i] = clamp(-(b0 - a0) / GS * L.side * gain, -1, 1);
       }
-      {
-        const a = isHi ? 0.1 : 0.045;
-        for (let x = 0;x <= W; x += 20) {
-          const gy = groundY(x + cx);
-          if (gy === Infinity)
-            continue;
-          ctx.fillStyle = "rgba(255,249,232," + a.toFixed(3) + ")";
-          ctx.fillRect(x, gy - cy, 24, H - (gy - cy));
-        }
+      const gLit = ctx.createLinearGradient(0, 0, 0, depth);
+      gLit.addColorStop(0, token("fx-lit-top"));
+      gLit.addColorStop(1, token("fx-sun-none"));
+      const gShd = ctx.createLinearGradient(0, 0, 0, depth);
+      gShd.addColorStop(0, token("fx-shade-top"));
+      gShd.addColorStop(1, token("fx-none-dark"));
+      ctx.save();
+      for (let i = 0;i < segs; i++) {
+        const v = lBuf[i];
+        const a = Math.abs(v) * maxA;
+        const g0 = gBuf[i];
+        if (a < 0.012 || g0 === Infinity)
+          continue;
+        const g1 = gBuf[i + 1];
+        const x0 = i * GS;
+        const x1 = Math.min(x0 + GS, W);
+        if (x1 <= x0)
+          continue;
+        const y0 = g0 - cy;
+        const dy = g1 === Infinity ? 0 : g1 - cy - y0;
+        ctx.translate(x0, y0);
+        ctx.globalAlpha = a;
+        ctx.fillStyle = v > 0 ? gLit : gShd;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(x1 - x0, dy);
+        ctx.lineTo(x1 - x0, dy + depth);
+        ctx.lineTo(0, depth);
+        ctx.closePath();
+        ctx.fill();
+        ctx.translate(-x0, -y0);
       }
+      ctx.globalAlpha = 1;
       ctx.restore();
+      if (isHi) {
+        ctx.globalAlpha = 0.07;
+        ctx.fillStyle = token("fx-lit-top");
+        ctx.beginPath();
+        ctx.moveTo(0, H);
+        for (let i = 0, x = 0;x <= W; x += GS, i++) {
+          const gy = gBuf[i];
+          ctx.lineTo(x, gy === Infinity ? H : gy - cy);
+        }
+        ctx.lineTo(W, H);
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
     }
   }
 
-  // dale-game/src/render/entities.js
+  // src/render/entities.js
   function drawDeco(cx, cy) {
     const q = getQuality();
     const shade = q === "medium" || q === "high";
@@ -4398,23 +5134,14 @@
       }
       drawDecoItem(sx, t.y - cy, t.kind, t.s, t.ph);
     }
+    ctx.globalAlpha = 0.62;
     for (const r of world.decoRock) {
       const sx = r.x - cx;
       if (sx < -60 || sx > view.W + 60)
         continue;
-      if (shade) {
-        ctx.fillStyle = token("obj-shadow");
-        ctx.beginPath();
-        ctx.ellipse(sx + 2, r.y - cy + 3, 12 * r.s, 3.8 * r.s, 0, 0, 7);
-        ctx.fill();
-        if (q === "high") {
-          ctx.beginPath();
-          ctx.ellipse(sx + 1, r.y - cy + 1.5, 7 * r.s, 2 * r.s, 0, 0, 7);
-          ctx.fill();
-        }
-      }
-      drawDecoItem(sx, r.y - cy, r.kind, r.s, r.ph);
+      drawDecoItem(sx, r.y - cy, r.kind, r.s * 0.8, r.ph);
     }
+    ctx.globalAlpha = 1;
   }
   function drawDecoItem(sx, y, kind, s, ph) {
     ctx.save();
@@ -4801,7 +5528,6 @@
         continue;
       const y = c.y - cy;
       const sxr = Math.sin(c.ph) * 6;
-      c.ph += 0.05;
       ctx.fillStyle = token("obj-coin");
       ctx.strokeStyle = token("obj-coin-dark");
       ctx.lineWidth = 2;
@@ -4824,7 +5550,6 @@
         continue;
       const y = c.y - cy;
       const bob = Math.sin(c.ph) * 3;
-      c.ph += 0.05;
       ctx.fillStyle = token("obj-canister-glow");
       ctx.beginPath();
       ctx.arc(sx, y + bob, 16, 0, 7);
@@ -5085,7 +5810,7 @@
     }
   }
 
-  // dale-game/src/render/bike.js
+  // src/render/bike.js
   function mixHex(a, b, t) {
     const p = (h) => [1, 3, 5].map((i) => parseInt(h.substr(i, 2), 16));
     const [r1, g1, b1] = p(a);
@@ -5093,31 +5818,7 @@
     const m = (x, y) => Math.round(x + (y - x) * Math.max(0, Math.min(1, t)));
     return `rgb(${m(r1, r2)},${m(g1, g2)},${m(b1, b2)})`;
   }
-  function drawBike() {
-    const P = bike;
-    const cxm = (P.rear.x + P.front.x) / 2;
-    const cym = (P.rear.y + P.front.y) / 2;
-    const ang = Math.atan2(P.front.y - P.rear.y, P.front.x - P.rear.x);
-    ctx.save();
-    ctx.translate(cxm - store.cam.x, cym - store.cam.y);
-    ctx.rotate(ang);
-    const hw = WHEELBASE * 0.5;
-    const hr = SEAT_H;
-    const sq2 = bike.squash || 0;
-    const mdy = hr * 0.55 + sq2 * 4;
-    const vehCol = VEHICLES[store.currentVehicle].color;
-    ctx.strokeStyle = vehCol;
-    ctx.lineWidth = 4;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(-hw, 0);
-    ctx.lineTo(0, -mdy);
-    ctx.lineTo(hw, 0);
-    ctx.moveTo(-hw, 0);
-    ctx.lineTo(-hw * 0.2, -hr * 0.72 + sq2 * 3);
-    ctx.moveTo(hw, 0);
-    ctx.lineTo(hw * 0.5, -hr * 0.75 + sq2 * 3);
-    ctx.stroke();
+  function drawCoils(hw, hr, mdy, sq2, k) {
     ctx.strokeStyle = mixHex(token("warn"), token("danger"), Math.abs(sq2));
     ctx.globalAlpha = 0.35 + Math.abs(sq2) * 0.65;
     ctx.lineWidth = 2;
@@ -5134,7 +5835,7 @@
         const t = i / (coils * 10);
         const px = ax + (bx - ax) * t;
         const py = ay + (by - ay) * t;
-        const off = Math.sin(i * 0.63) * 2.2;
+        const off = Math.sin(i * 0.63) * 2.2 * k;
         if (i === 0)
           ctx.moveTo(px, py);
         else
@@ -5143,44 +5844,120 @@
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
+  }
+  var CRANK_RATIO = 0.155;
+  var CRANK_FLOOR = 2.2;
+  var crank = 0;
+  function crankPhase(b, dt) {
+    const wheelRps = Math.abs(b.wheelStep) / DT;
+    crank += Math.max(wheelRps, CRANK_FLOOR) * CRANK_RATIO * dt;
+    if (crank > 1e4)
+      crank -= 1e4;
+    return crank;
+  }
+  function drawBike(dt = 1 / 60) {
+    const P = bike;
+    const cxm = (P.rear.x + P.front.x) / 2;
+    const cym = (P.rear.y + P.front.y) / 2;
+    const ang = Math.atan2(P.front.y - P.rear.y, P.front.x - P.rear.x);
+    ctx.save();
+    ctx.translate(cxm - store.cam.x, cym - store.cam.y);
+    ctx.rotate(ang);
+    const hw = WHEELBASE * 0.5;
+    const hr = SEAT_H;
+    const sq2 = bike.squash || 0;
+    const mdy = hr * 0.55 + sq2 * 4;
+    const V = VEHICLES[store.currentVehicle];
+    const vehCol = V.color;
+    const A = V.art || {};
+    const POSE = A.pose || {};
+    const seatTopY = -hr * 0.72 + sq2 * 3;
+    const headTopY = -hr * 0.75 + sq2 * 3;
+    ctx.strokeStyle = vehCol;
+    ctx.lineWidth = A.tube || 4;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-hw, 0);
+    ctx.lineTo(0, -mdy);
+    ctx.lineTo(hw, 0);
+    ctx.moveTo(-hw, 0);
+    ctx.lineTo(-hw * 0.2, seatTopY);
+    ctx.moveTo(hw, 0);
+    ctx.lineTo(hw * 0.5, headTopY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-hw * 0.2, seatTopY);
+    ctx.lineTo(hw * 0.5, headTopY + (A.topDrop || 0));
+    ctx.stroke();
+    if (A.coil > 0)
+      drawCoils(hw, hr, mdy, sq2, A.coil);
+    const glyphY = -hr * 0.72 + sq2 * 3;
+    const barX = hw * 0.5 + (POSE.barX || 0);
+    const barY = glyphY - 8 + (POSE.barY || 0);
     ctx.fillStyle = token("obj-bike-tire");
-    ctx.fillRect(-hw - 2, -hr * 0.8 - 4, 10, 4);
+    ctx.fillRect(-hw - 2, -hr * 0.8 - 4, A.saddleW || 10, 4);
     ctx.strokeStyle = token("obj-bike-carbon");
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(hw * 0.5, -hr * 0.75);
-    ctx.lineTo(hw * 0.62, -hr * 1);
+    ctx.moveTo(hw * 0.5, headTopY);
+    ctx.lineTo(barX, barY);
     ctx.stroke();
     ctx.fillStyle = token("obj-rider-suit");
-    ctx.fillRect(hw * 0.42, -hr * 1, 12, 3);
-    for (const [off, spin] of [[-hw, P.wheelRear], [hw, P.wheelFront]]) {
-      ctx.strokeStyle = token("obj-bike-rim");
-      ctx.lineWidth = 4;
+    if (A.bar === "drop") {
+      ctx.lineWidth = 2.8;
+      ctx.beginPath();
+      ctx.moveTo(barX, barY);
+      ctx.quadraticCurveTo(barX + 6.2, barY - 0.8, barX + 3.4, barY + 6.4);
+      ctx.stroke();
+      ctx.fillRect(barX - 5, barY - 1.6, 8.5, 3);
+    } else if (A.bar === "wide") {
+      ctx.fillRect(barX - 5, barY - 1.6, 16, 3.4);
+    } else {
+      ctx.fillRect(barX - 4.5, barY - 1.5, 12, 3);
+    }
+    const tire = A.tire || 3;
+    const spokes = A.spokes || 6;
+    const inner = WHEEL_R - tire * 0.5 - 1.2;
+    for (const [off, spin, step] of [[-hw, P.wheelRear, P.wheelStep], [hw, P.wheelFront, P.wheelStepF]]) {
+      ctx.strokeStyle = token("obj-bike-tire");
+      ctx.lineWidth = tire;
       ctx.beginPath();
       ctx.arc(off, 0, WHEEL_R, 0, 7);
       ctx.stroke();
-      ctx.strokeStyle = token("obj-bike-hub");
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(off, 0, WHEEL_R - 1.5, 0, 7);
-      ctx.stroke();
+      if (A.rim !== false) {
+        ctx.strokeStyle = token("obj-bike-hub");
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(off, 0, inner, 0, 7);
+        ctx.stroke();
+      }
+      const halfPeriod = Math.PI / spokes;
+      const blur = clamp((Math.abs(step) - halfPeriod * 0.4) / (halfPeriod * 1.2), 0, 1);
+      const r = Math.max(2, inner - 1);
+      ctx.globalAlpha = 1 - blur * 0.92;
       ctx.strokeStyle = token("obj-bike-metal");
-      ctx.lineWidth = 2;
+      ctx.lineWidth = A.spokeW || 1.6;
       ctx.beginPath();
-      const r = WHEEL_R - 3;
-      const ph = spin;
-      for (let i = 0;i < 4; i++) {
-        const a = i * Math.PI / 2 + ph;
+      for (let i = 0;i < spokes; i++) {
+        const a = i / spokes * Math.PI * 2 + spin;
         ctx.moveTo(off, 0);
         ctx.lineTo(off + Math.cos(a) * r, Math.sin(a) * r);
       }
       ctx.stroke();
+      if (blur > 0.25) {
+        ctx.globalAlpha = blur * 0.26;
+        ctx.strokeStyle = token("obj-bike-hub");
+        ctx.lineWidth = (A.spokeW || 1.6) * 2.4;
+        ctx.beginPath();
+        ctx.arc(off, 0, r * 0.6, 0, 7);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
       ctx.fillStyle = token("obj-bike-steel");
       ctx.beginPath();
       ctx.arc(off, 0, 2.6, 0, 7);
       ctx.fill();
     }
-    const glyphY = -hr * 0.72 + 3 * (bike.squash || 0);
     ctx.strokeStyle = token("obj-rider-skin-2");
     ctx.lineWidth = 4;
     ctx.lineCap = "round";
@@ -5198,13 +5975,11 @@
     const cr = 5.8;
     const hipX = -12.5;
     const hipY = glyphY - 6.3 + susY;
-    const shX = 2.5;
-    const shY = glyphY - 19.8 + susY;
-    const hdX = 5.6;
-    const hdY = glyphY - 22.8 + susY;
-    const barX = hw * 0.5;
-    const barY = glyphY - 8;
-    const pda = bike.wheelRear * 0.9;
+    const shX = 2.5 + (POSE.shX || 0);
+    const shY = glyphY - 19.8 + susY + (POSE.shY || 0);
+    const hdX = 5.6 + (POSE.hdX || 0);
+    const hdY = glyphY - 22.8 + susY + (POSE.hdY || 0);
+    const pda = crankPhase(bike, dt);
     const limb = (ax, ay, mx, my, bx, by, w1, w2, col, dark) => {
       ctx.lineCap = "round";
       ctx.strokeStyle = dark;
@@ -5226,11 +6001,26 @@
       ctx.lineTo(bx, by);
       ctx.stroke();
     };
+    const L_THIGH = 15, L_SHIN = 15;
+    const kneeOf = (hx, hy, fx, fy) => {
+      let dx = fx - hx;
+      let dy = fy - hy;
+      const dRaw = Math.hypot(dx, dy) || 0.0001;
+      const d = clamp(dRaw, Math.abs(L_THIGH - L_SHIN) + 0.001, (L_THIGH + L_SHIN) * 0.999);
+      dx = dx / dRaw * d;
+      dy = dy / dRaw * d;
+      const a = (L_THIGH * L_THIGH - L_SHIN * L_SHIN + d * d) / (2 * d);
+      const h = Math.sqrt(Math.max(0, L_THIGH * L_THIGH - a * a));
+      const mx = hx + dx / d * a;
+      const my = hy + dy / d * a;
+      const px = -dy / d * h;
+      const py = dx / d * h;
+      return mx + px > mx - px ? [mx + px, my + py] : [mx - px, my - py];
+    };
     const leg = (ph, w1, w2, col, dark) => {
       const fx = bbX + Math.cos(ph) * cr;
       const fy = bbY + Math.sin(ph) * cr;
-      const kx = (hipX + fx) / 2 + 3.4;
-      const ky = (hipY + fy) / 2 - 1.8;
+      const [kx, ky] = kneeOf(hipX, hipY, fx, fy);
       limb(hipX, hipY, kx, ky, fx, fy, w1, w2, col, dark);
       ctx.fillStyle = token("obj-bike-frame");
       ctx.fillRect(fx - 2.6, fy - 0.8, 5.2, 1.7);
@@ -5300,19 +6090,24 @@
     ctx.strokeStyle = token("obj-bike-frame");
     ctx.lineWidth = 0.9;
     ctx.beginPath();
-    ctx.arc(hdX - 0.2, hdY - 0.7, 4.4, Math.PI, Math.PI * 2);
+    ctx.arc(hdX - 0.2, hdY - 0.7, A.helmR || 4.4, Math.PI, Math.PI * 2);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    ctx.beginPath();
-    ctx.roundRect(hdX + 2.3, hdY - 2, 4.6, 1.9, 0.9);
-    ctx.fill();
-    ctx.stroke();
+    if (A.peak !== false) {
+      ctx.beginPath();
+      ctx.roundRect(hdX + 2.3, hdY - 2, 4.6, 1.9, 0.9);
+      ctx.fill();
+      ctx.stroke();
+    }
     ctx.strokeStyle = token("obj-glass-mid");
     ctx.lineWidth = 0.8;
-    ctx.beginPath();
-    ctx.arc(hdX - 0.2, hdY - 0.7, 2.5, Math.PI * 1.12, Math.PI * 1.8);
-    ctx.stroke();
+    for (let v = 0, total = A.vents || 0;v < total; v++) {
+      const a0 = Math.PI * (1.12 + v * 0.22);
+      ctx.beginPath();
+      ctx.arc(hdX - 0.2, hdY - 0.7, 2.5, a0, a0 + 0.6);
+      ctx.stroke();
+    }
     ctx.strokeStyle = token("obj-bike-carbon");
     ctx.lineWidth = 0.9;
     ctx.beginPath();
@@ -5334,9 +6129,9 @@
     ctx.restore();
   }
 
-  // dale-game/src/render/hud.js
+  // src/render/hud.js
   var WARN_H = 26;
-  function hudLayout(hasWarn = false) {
+  function hudLayout(hasWarn = false, touch = false) {
     const W = view.W;
     const H = view.H;
     const compact = W < 520 || H < 480;
@@ -5352,14 +6147,20 @@
     const warnW = Math.min(320, Math.max(140, W - pad * 2));
     const warn = hasWarn ? { x: (W - warnW) / 2, y: pad, w: warnW, h: WARN_H } : null;
     const gr = compact ? 36 : 50;
-    const speed = { x: W - pad - gr * 2, y: H - pad - gr * 2, w: gr * 2, h: gr * 2 };
-    const drive = { x: (W - 104) / 2, y: H - pad - 14, w: 104, h: 14 };
+    const TOUCH_KEY_ZONE = 90;
+    const speed = {
+      x: W - pad - gr * 2,
+      y: H - pad - gr * 2 - (touch ? TOUCH_KEY_ZONE + gap * 2 : 0),
+      w: gr * 2,
+      h: gr * 2
+    };
+    const drive = touch ? null : { x: (W - 104) / 2, y: H - pad - 14, w: 104, h: 14 };
     return { info, fuel, race, warn, speed, drive };
   }
   function glassRect(r, radius) {
     ctx.beginPath();
     ctx.roundRect(r.x, r.y, r.w, r.h, radius === undefined ? tokenNum("radius-card", 14) : radius);
-    ctx.fillStyle = token("glass-fill");
+    ctx.fillStyle = token("hud-scrim");
     ctx.fill();
     ctx.lineWidth = 1;
     ctx.strokeStyle = token("glass-border");
@@ -5406,12 +6207,17 @@
     for (const h of world.hazards) {
       if (mx > h.x1)
         continue;
-      if (h.x0 - mx > 620)
+      if (h.x0 - mx > 1000)
         continue;
+      const lim = Math.round(toKmh(h.vmax));
       if (mx >= h.x0 && spd > h.vmax)
         return { level: "danger", text: "⚠️ 危险路段超速！" };
-      if (spd > h.vmax * 0.9)
-        return { level: "warn", text: "⚠️ 前方限速 " + Math.round(toKmh(h.vmax)) + "km/h" };
+      if (spd > h.vmax) {
+        return { level: "warn", text: "⚠️ 已超速 " + Math.round(toKmh(spd) - lim) + " · 限速 " + lim };
+      }
+      if (spd > h.vmax * 0.9) {
+        return { level: "warn", text: "⚠️ 前方限速 " + lim + "km/h · 当前 " + Math.round(toKmh(spd)) };
+      }
     }
     return null;
   }
@@ -5420,13 +6226,14 @@
     if (store.state === "menu")
       return;
     const w = activeWarning();
-    const L = hudLayout(!!w);
+    const L = hudLayout(!!w, touchActive);
     drawInfoCard(L.info);
     drawFuelGauge(L.fuel);
     if (store.mode === "race" || store.mode === "ranked")
       drawRaceBar(L.race);
     drawSpeedGauge(L.speed);
-    drawDriveIndicator(L.drive);
+    if (L.drive)
+      drawDriveIndicator(L.drive);
     if (w)
       drawWarning(L.warn, w);
     drawSpeedLines();
@@ -5437,8 +6244,8 @@
     const compact = view.W < 520 || view.H < 480;
     const title = store.mode === "free" ? "♾ 自由模式" : store.mode === "race" || store.mode === "ranked" ? "\uD83C\uDFC6 " + (store.mode === "ranked" ? "排位赛" : "比赛") + " 第" + (store.selLevel + 1) + "关" : "关卡 " + (store.selLevel + 1) + (compact ? "" : " · " + L.name);
     ctx.save();
-    ctx.shadowColor = token("shadow-text");
-    ctx.shadowBlur = 4;
+    ctx.shadowColor = token("shadow-text-strong");
+    ctx.shadowBlur = 6;
     label(title, x, r.y + 14, "title", token("text-hi"));
     let bx = x + ctx.measureText(title).width + 6;
     if (store.mode === "level" && L.variant !== "normal") {
@@ -5628,8 +6435,8 @@
     ctx.globalAlpha = 1;
   }
 
-  // dale-game/src/render/scene.js
-  function drawScene() {
+  // src/render/scene.js
+  function drawScene(dt = 1 / 60) {
     const cam = store.cam;
     drawBackground(cam.x, cam.y);
     const off = shakeOffset();
@@ -5651,11 +6458,11 @@
     drawFlag(cam.x, cam.y, store.finishX);
     drawBikeShadow();
     if (store.state === "play" || store.state === "ended" || store.state === "pause")
-      drawBike();
+      drawBike(dt);
     ctx.restore();
     cam.x = bcx;
     cam.y = bcy;
-    applyPostFx(store.time);
+    applyPostFx(store.time, dt);
     if (store.state === "play" || store.state === "pause" || store.state === "ended") {
       drawHud();
     }
@@ -5686,7 +6493,7 @@
     ctx.globalAlpha = 1;
   }
 
-  // dale-game/src/ui/components.js
+  // src/ui/components.js
   function esc(s) {
     return String(s === undefined || s === null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
@@ -5758,13 +6565,13 @@
     return parts.join(";");
   }
 
-  // dale-game/src/ui/menu.js
+  // src/ui/menu.js
   var overlay = document.getElementById("overlay");
   var ovTitle = document.getElementById("ovTitle");
   var ovSub = document.getElementById("ovSub");
-  var ovKeys = document.getElementById("ovKeys");
-  var menuGroups = document.getElementById("menuGroups");
   var heroSummary = document.getElementById("heroSummary");
+  var homeView = document.getElementById("homeView");
+  var modeTabs = document.getElementById("modeTabs");
   var modePanel = document.getElementById("modePanel");
   var pauseBar = document.createElement("div");
   pauseBar.className = "pauseBar";
@@ -5806,78 +6613,29 @@
         n++;
     return n;
   }
-  function totalStars() {
-    let n = 0;
-    for (let i = 0;i < LEVELS.length; i++)
-      n += store.stars[i] || 0;
-    return n;
-  }
   function renderHeroSummary() {
     if (!heroSummary)
       return;
-    const veh = VEHICLES[store.currentVehicle] || VEHICLES[0];
-    const P = store.progress || {};
-    const rating = P.rating || 0;
     heroSummary.innerHTML = [
-      chip("\uD83D\uDEB2 车辆 " + veh.name),
-      chip("金币 " + store.gold, "gold"),
-      chip("通关进度 " + clearedCount() + "/" + LEVELS.length),
-      chip("总星 " + totalStars() + "/" + LEVELS.length * 3, "gold"),
-      chip(P.invited === true ? "段位 " + rankName(rating) + " " + rating : "段位 未受邀"),
-      chip("无限最佳 " + (store.best || 0) + "m")
+      chip("通关 " + clearedCount() + "/" + LEVELS.length),
+      chip("\uD83E\uDE99 " + store.gold, "gold")
     ].join("");
   }
   function setMenuGroupsVisible(v) {
-    const g = document.getElementById("menuGroups");
-    if (g)
-      g.style.display = v ? "" : "none";
+    if (homeView)
+      homeView.style.display = v ? "" : "none";
   }
   function refreshMenuButtons() {
-    const total = LEVELS.length;
-    const done = clearedCount();
-    const P = store.progress || {};
-    const btnFinale = document.getElementById("btnFinale");
-    if (btnFinale) {
-      const unlocked = done >= total;
-      const cond = "通关全部 " + total + " 关后解锁（当前 " + done + "/" + total + "）";
-      btnFinale.textContent = unlocked ? P.finaleDone ? "\uD83C\uDFAF 最终任务 ✅" : "\uD83C\uDFAF 最终任务" : "\uD83C\uDFAF 最终任务 \uD83D\uDD12 " + done + "/" + total;
-      btnFinale.classList.toggle("lockedBtn", !unlocked);
-      const label = unlocked ? P.finaleDone ? "最终任务（已通关，可重复挑战）" : "最终任务（已解锁）" : "最终任务：" + cond;
-      btnFinale.setAttribute("aria-label", label);
-      btnFinale.setAttribute("title", label);
-    }
-    const btnRanked = document.getElementById("btnRanked");
-    if (btnRanked) {
-      const rating = P.rating || 0;
-      const unlocked = P.invited === true;
-      const cond = "通关「最终任务」后解锁排位赛";
-      btnRanked.textContent = unlocked ? "\uD83C\uDFC6 排位 " + rankName(rating) + " " + rating : "\uD83C\uDFC6 排位赛 \uD83D\uDD12";
-      btnRanked.classList.toggle("lockedBtn", !unlocked);
-      const label = unlocked ? "排位赛：段位 " + rankName(rating) + " " + rating : "排位赛：" + cond;
-      btnRanked.setAttribute("aria-label", label);
-      btnRanked.setAttribute("title", label);
-    }
-    const btnFree = document.getElementById("btnFree");
-    if (btnFree) {
-      btnFree.textContent = P.peak === true ? "♾️ 无限 · 可选图" : "♾️ 无限模式";
-      const label = P.peak === true ? "无限模式：已登顶，可自选场景" : "无限模式：随机地形";
-      btnFree.setAttribute("aria-label", label);
-      btnFree.setAttribute("title", label);
-    }
+    renderHeroSummary();
     const btnSave = document.getElementById("btnSave");
     if (btnSave) {
-      btnSave.textContent = isStorageAvailable() ? "\uD83D\uDCBE 存档" : "\uD83D\uDCBE 存档（不可用）";
+      const okSave = isStorageAvailable();
+      btnSave.title = okSave ? "存档管理" : "存档（浏览器存储不可用）";
+      btnSave.classList.toggle("lockedBtn", !okSave);
     }
-    const btnLevels = document.getElementById("btnLevels");
-    if (btnLevels && !P.finaleDone) {
-      const clearedBranches = (P.branchCleared || []).length;
-      btnLevels.textContent = "\uD83C\uDFC1 闯关 · " + clearedBranches + "/" + BRANCHES.length + " 支线";
-      btnLevels.classList.remove("lockedBtn");
-    }
-    renderHeroSummary();
   }
   function visibleEntries() {
-    if (!menuGroups)
+    if (!homeView)
       return [];
     const btns = [];
     if (store.state === "pause" && pauseBar) {
@@ -5889,9 +6647,9 @@
     }
     if (resumeBtn.style.display !== "none")
       btns.push(resumeBtn);
-    if (menuGroups.style.display === "none")
+    if (homeView.style.display === "none")
       return btns;
-    for (const el of menuGroups.querySelectorAll("button[data-entry]")) {
+    for (const el of document.querySelectorAll(".mtab, .menuFoot button[data-entry]")) {
       if (el.disabled)
         continue;
       if (el.offsetParent === null)
@@ -5929,7 +6687,7 @@
     window.addEventListener("keydown", onMenuKeydown);
   }
   function focusDefault() {
-    const target = store.state === "pause" ? resumeBtn : document.getElementById("btnLevels");
+    const target = store.state === "pause" ? resumeBtn : modeTabs && modeTabs.querySelector(".mtab.is-on") || modeTabs;
     if (target && typeof target.focus === "function") {
       try {
         target.focus({ preventScroll: true });
@@ -5940,20 +6698,23 @@
   }
   function setMenuChrome() {
     ovTitle.textContent = "\uD83D\uDEB2 越野自行车";
-    ovSub.textContent = "物理引擎越野：支线任务 · 最终任务 · 排位赛 · 无限模式";
-    ovKeys.textContent = "→/D 加速(空中顺时针转)  ←/A 刹车(空中逆时针转)  P/Esc 暂停  R 重开  M 静音  ↑↓←→ 选择";
-    if (menuGroups)
-      menuGroups.style.display = "";
+    if (ovSub)
+      ovSub.hidden = true;
+    if (homeView)
+      homeView.style.display = "";
     resumeBtn.style.display = "none";
     if (pauseBar)
       pauseBar.style.display = "none";
     refreshMenuButtons();
+    if (uiHooks.onHome)
+      uiHooks.onHome();
     focusDefault();
   }
   function hideOverlay() {
     overlay.classList.add("hidden");
     if (homeFloat)
       homeFloat.style.display = "flex";
+    syncTouchVisibility();
   }
   function showPanel(html) {
     setMenuGroupsVisible(false);
@@ -5986,6 +6747,7 @@
       homeFloat.style.display = "none";
     setMenuChrome();
     overlay.classList.remove("hidden");
+    syncTouchVisibility();
   }
   function showResultCard(res = {}) {
     store.state = "ended";
@@ -6061,10 +6823,14 @@
     if (store.state === "play") {
       store.state = "pause";
       ovTitle.textContent = "⏸ 已暂停";
-      ovSub.textContent = "休息一下，随时继续，或返回主页";
-      ovKeys.textContent = "";
-      if (menuGroups)
-        menuGroups.style.display = "none";
+      if (ovSub) {
+        ovSub.hidden = false;
+        ovSub.textContent = "休息一下，随时继续，或返回主页";
+      }
+      if (homeView)
+        homeView.style.display = "none";
+      if (homeFloat)
+        homeFloat.style.display = "none";
       if (pauseBar)
         pauseBar.style.display = "";
       resumeBtn.style.display = "";
@@ -6074,13 +6840,16 @@
     } else if (store.state === "pause") {
       store.state = "play";
       overlay.classList.add("hidden");
+      if (homeFloat)
+        homeFloat.style.display = "flex";
     }
   }
 
-  // dale-game/src/ui/panels.js
+  // src/ui/panels.js
   var api = {};
   var openBranch = -1;
   var panelKind = "level";
+  var homeView2 = document.getElementById("homeView");
   var saveView = { pending: null, summary: null, error: "", note: "", confirmReset: false };
   function initPanels(a) {
     api = a || {};
@@ -6093,21 +6862,108 @@
             fn();
         });
     };
-    bind("btnLevels", () => renderLevelsPanel());
-    bind("btnRace", () => renderRacePanel());
-    bind("btnFinale", renderFinalePanel);
-    bind("btnRanked", renderRankedPanel);
-    bind("btnFree", renderFreePanel);
     bind("btnGarage", renderGaragePanel);
     bind("btnAch", renderAchPanel);
     bind("btnSave", openSavePanel);
+    const tabs = document.getElementById("modeTabs");
+    if (tabs) {
+      tabs.addEventListener("click", (e) => {
+        const el = e.target && e.target.closest ? e.target.closest("[data-mode]") : null;
+        if (!el)
+          return;
+        initAudio();
+        if (store.state === "menu")
+          selectMode(el.dataset.mode);
+      });
+    }
     const panel = document.getElementById("modePanel");
     if (panel) {
       panel.addEventListener("click", onPanelClick);
       panel.addEventListener("change", onPanelChange);
       panel.addEventListener("keydown", onPanelKeydown);
     }
+    const home = document.getElementById("homeView");
+    if (home) {
+      home.addEventListener("click", onPanelClick);
+      home.addEventListener("keydown", onPanelKeydown);
+    }
+    uiHooks.onHome = () => {
+      openBranch = -1;
+      selectMode("level");
+    };
+    uiHooks.onHome();
     refreshMenuButtons();
+  }
+  function selectMode(mode) {
+    const m = mode === "race" || mode === "ranked" || mode === "free" ? mode : "level";
+    for (const b of document.querySelectorAll("#modeTabs .mtab")) {
+      const on = b.dataset.mode === m;
+      b.classList.toggle("is-on", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    }
+    if (m === "level" || m === "race") {
+      hidePanel();
+      if (homeView2)
+        homeView2.style.display = "";
+      renderHomeView(m);
+    } else {
+      if (homeView2)
+        homeView2.style.display = "none";
+      if (m === "ranked")
+        renderRankedPanel();
+      else
+        renderFreePanel();
+    }
+  }
+  function renderHomeView(mode) {
+    const host = document.getElementById("homeView");
+    if (!host)
+      return;
+    panelKind = mode === "race" ? "race" : "level";
+    if (openBranch < 0 || !branchOpen(openBranch)) {
+      const cur = currentBranch();
+      openBranch = cur >= 0 ? cur : frontierBranch();
+    }
+    host.innerHTML = finaleTile() + (openBranch >= 0 ? levelBlock() : "") + `<div class="branchWall">${BRANCHES.map((_, i) => branchCard(i)).join("")}</div>`;
+  }
+  function branchCleared(bi) {
+    let n = 0;
+    for (let k = 0;k < LEVELS_PER_BRANCH; k++)
+      if ((store.stars[globalIndexOf(bi, k)] || 0) >= 1)
+        n++;
+    return n;
+  }
+  function currentBranch() {
+    const gi = store.selLevel;
+    if (!Number.isInteger(gi) || gi < 0 || gi >= LEVELS.length)
+      return -1;
+    const bi = branchOfGlobal(gi);
+    return branchOpen(bi) ? bi : -1;
+  }
+  function frontierBranch() {
+    for (let i = 0;i < N_BRANCHES; i++) {
+      if (branchOpen(i) && branchCleared(i) < LEVELS_PER_BRANCH)
+        return i;
+    }
+    const last = Math.floor(unlockFrontier() / LEVELS_PER_BRANCH);
+    return Math.max(0, Math.min(N_BRANCHES - 1, last));
+  }
+  function finaleTile() {
+    const done = clearedCount2();
+    const total = LEVELS.length;
+    const unlocked = done >= total;
+    const cleared = store.progress.finaleDone === true;
+    return card({
+      cls: "vehCard finaleTile",
+      icon: unlocked ? "\uD83C\uDFAF" : "\uD83D\uDD12",
+      title: FINALE.name,
+      sub: `${Math.round(toM(FINALE.len))}m · 依次穿越 6 个场景 · 坡度 ${Math.round(FINALE.maxSlope)}°`,
+      meta: cleared ? "✅ 已通关，可重复挑战" : unlocked ? "已解锁 · 点击开始" : `通关全部 ${total} 关后解锁`,
+      right: unlocked ? "▶" : `${done}/${total}`,
+      interactive: unlocked,
+      locked: !unlocked,
+      attrs: unlocked ? 'data-act="finaleStart"' : ""
+    });
   }
   function onPanelKeydown(e) {
     if (e.code !== "Enter" && e.code !== "Space")
@@ -6172,6 +7028,11 @@
         renderSavePanel();
         showToast("\uD83C\uDF9A 画质已切到「" + QUALITY_LABEL[getQuality()] + "」", 800);
         return;
+      case "scale":
+        setRenderScalePersisted(el.dataset.s);
+        renderSavePanel();
+        showToast("\uD83D\uDD0D 锐度已切到「" + RENDER_SCALE_LABEL[getRenderScale()] + "」", 800);
+        return;
       case "export":
         doExport();
         return;
@@ -6197,6 +7058,15 @@
       case "resetConfirm":
         doReset();
         return;
+      case "slotSwitch":
+        doSwitchSlot(+el.dataset.slot);
+        return;
+      case "slotNew":
+        doNewSlot();
+        return;
+      case "slotDelete":
+        doDeleteSlot(+el.dataset.slot);
+        return;
       default:
         return;
     }
@@ -6210,6 +7080,11 @@
       readSaveFile(f);
   }
   function rerender() {
+    const home = document.getElementById("homeView");
+    if (home && home.innerHTML) {
+      renderHomeView(panelKind === "race" ? "race" : "level");
+      return;
+    }
     if (panelKind === "race")
       renderRacePanel(openBranch);
     else
@@ -6274,20 +7149,18 @@
     const b = BRANCHES[bi];
     const th = THEMES[b.theme] || THEMES[0];
     const open = branchOpen(bi);
-    let cleared = 0;
     let stars = 0;
-    for (let k = 0;k < LEVELS_PER_BRANCH; k++) {
-      const s = store.stars[globalIndexOf(bi, k)] || 0;
-      if (s >= 1)
-        cleared++;
-      stars += s;
-    }
+    for (let k = 0;k < LEVELS_PER_BRANCH; k++)
+      stars += store.stars[globalIndexOf(bi, k)] || 0;
+    const cleared = branchCleared(bi);
     const done = cleared >= LEVELS_PER_BRANCH;
+    const nextK = firstLockedK(bi);
+    const front = open && !done && nextK < LEVELS_PER_BRANCH;
     return card({
-      cls: "branchCard",
+      cls: "branchCard" + (front ? " frontier" : ""),
       icon: `<div class="brThumb"></div>`,
       title: `${open ? "" : "\uD83D\uDD12 "}${b.name}`,
-      sub: `场景「${th.name}」 · ${b.desc}`,
+      sub: front ? `▶ 继续 第 ${nextK + 1} 关 · 场景「${th.name}」` : `场景「${th.name}」 · ${b.desc}`,
       meta: chip(`★ ${stars}/${LEVELS_PER_BRANCH * 3}`, "gold") + (done ? " " + badge("已通关", "success") : ""),
       right: `<div class="brDone">${cleared}/${LEVELS_PER_BRANCH}${done ? "<br>✅" : ""}</div>`,
       interactive: true,
@@ -6303,26 +7176,31 @@
     const v = VARIANT_INFO[L.variant] || VARIANT_INFO.normal;
     const locked = !levelUnlocked(bi, k);
     const st = store.stars[gi] || 0;
+    const isNext = !locked && st === 0;
+    const isCur = store.selLevel === gi;
     const stars = locked ? "\uD83D\uDD12 未解锁" : st > 0 ? "★".repeat(st) + "☆".repeat(3 - st) : "☆☆☆";
-    const label = `${BRANCHES[bi].name} 第${k + 1}关 ${v.name} 坡度${Math.round(L.maxSlope)}度 三星时限${Math.round(starTime(L))}秒 ${locked ? "未解锁" : st + "星"}`;
-    return `<div class="lvCell${locked ? " locked" : st > 0 ? " done" : ""}" data-act="play" data-gi="${gi}"
+    const label = `${BRANCHES[bi].name} 第${k + 1}关 ${v.name} 坡度${Math.round(L.maxSlope)}度 三星时限${Math.round(starTime(L))}秒 ${locked ? "未解锁" : st + "星"}${isCur ? "，当前关卡" : isNext ? "，下一关" : ""}`;
+    const cls = locked ? " locked" : isCur ? " cur" : st > 0 ? " done" : " next";
+    const head = isCur ? '<span class="lvNext">\uD83D\uDCCD 当前关卡</span>' : isNext ? '<span class="lvNext">▶ 下一关</span>' : "第" + (k + 1) + "关";
+    return `<div class="lvCell${cls}" data-act="play" data-gi="${gi}"
       role="button" tabindex="0" aria-label="${label}">
-    <div>第${k + 1}关</div>
+    <div>${head}</div>
     <div class="thm">${badge(v.icon + " " + v.name, "variant")}</div>
     <div class="thm">坡度 ${Math.round(L.maxSlope)}° · ${Math.round(toM(L.len))}m</div>
     <div class="thm">三星 ≤ ${fmtClock(starTime(L))}</div>
     <div class="stars">${stars}</div>
   </div>`;
   }
-  function levelBlock() {
+  function levelBlock(withClose) {
     const b = BRANCHES[openBranch];
     const th = THEMES[b.theme] || THEMES[0];
     const cells = Array.from({ length: LEVELS_PER_BRANCH }, (_, k) => levelCell(openBranch, k)).join("");
+    const note = withClose ? `${b.desc} · ${VARIANT_INFO.normal.icon} 常规关为 \uD83D\uDEA9；第 3、5 关为特殊变体` : b.desc;
     return `<div class="branchLevels">
     <div class="brHead">${b.name} · 场景「${th.name}」 · 6 关</div>
     <div class="lvGrid">${cells}</div>
-    <div class="panelNote">${b.desc} · ${VARIANT_INFO.normal.icon} 常规关为 \uD83D\uDEA9；第 3、5 关为特殊变体</div>
-    <button class="btn sm ghost" data-act="branchClose">收起</button>
+    <div class="panelNote">${note}</div>
+    ${withClose ? '<button class="btn sm ghost" data-act="branchClose">收起</button>' : ""}
   </div>`;
   }
   function renderLevelsPanel(openBi) {
@@ -6330,7 +7208,7 @@
     openBranch = Number.isInteger(openBi) && branchOpen(openBi) ? openBi : -1;
     showPanel(`<div class="modeTitle">\uD83C\uDFC1 闯关模式 · 支线任务</div>
   <div class="branchWall">${BRANCHES.map((_, i) => branchCard(i)).join("")}</div>
-  ${openBranch >= 0 ? levelBlock() : ""}
+  ${openBranch >= 0 ? levelBlock(true) : ""}
   <div class="panelNote">星级：通关 1★ · 金币 70% 以上 2★ · 快速通关 3★ ｜ 支线内链式解锁，支线之间可并行推进</div>
   <button class="btn backBtn" data-act="back">返回</button>`);
   }
@@ -6339,7 +7217,7 @@
     openBranch = Number.isInteger(openBi) && branchOpen(openBi) ? openBi : -1;
     showPanel(`<div class="modeTitle">\uD83C\uDFC6 比赛模式 · 与 AI 竞速</div>
   <div class="branchWall">${BRANCHES.map((_, i) => branchCard(i)).join("")}</div>
-  ${openBranch >= 0 ? levelBlock() : ""}
+  ${openBranch >= 0 ? levelBlock(true) : ""}
   <div class="panelNote">先到终点赢 300 \uD83E\uDE99（赛道需已解锁）</div>
   <button class="btn backBtn" data-act="back">返回</button>`);
   }
@@ -6355,26 +7233,6 @@
       return;
     }
     api.startGame(panelKind === "race" ? "race" : "level", gi);
-  }
-  function renderFinalePanel() {
-    const done = clearedCount2();
-    const total = LEVELS.length;
-    const unlocked = done >= total;
-    const cleared = store.progress.finaleDone === true;
-    const body = card({
-      cls: "vehCard",
-      icon: unlocked ? "\uD83C\uDFAF" : "\uD83D\uDD12",
-      title: FINALE.name,
-      sub: `${Math.round(toM(FINALE.len))}m · 依次穿越 6 个场景 · 坡度 ${Math.round(FINALE.maxSlope)}° · 机制密度最高`,
-      meta: !unlocked ? "通关全部 " + total + " 关后解锁（当前 " + done + "/" + total + "）" : cleared ? "✅ 已通关，可重复挑战（点击开始）" : "已解锁 · 点击开始",
-      interactive: unlocked,
-      locked: !unlocked,
-      attrs: unlocked ? 'data-act="finaleStart"' : ""
-    });
-    showPanel(`<div class="modeTitle">\uD83C\uDFAF 最终任务</div>
-  ${body}
-  ${unlocked ? `<div class="panelNote">通关最终任务 → 收到比赛邀请 → 解锁排位赛</div>` : `<div class="panelNote">还需通关 ${total - done} 关（当前 ${done}/${total}）</div>`}
-  <button class="btn backBtn" data-act="back">返回</button>`);
   }
   function rankedTier(advanced, label, desc, ok, note) {
     return card({
@@ -6585,6 +7443,7 @@
          <button class="btn sm ghost" data-act="resetCancel">取消</button>
        </div>` : "";
     showPanel(`<div class="modeTitle">\uD83D\uDCBE 存档 · 进度管理</div>
+  ${slotListHtml()}
   ${statRow([
       { label: "已通关", value: `${cur.cleared}/${LEVELS.length}` },
       { label: "总星数", value: `${cur.stars}/${LEVELS.length * 3}` },
@@ -6598,7 +7457,10 @@
   ${stor ? "" : `<div class="panelNote">⚠️ 浏览器存储不可用（隐私模式 / 空间已满 / 被禁用）：本次无法保存进度，导出 / 导入 / 重置均不可用</div>`}
   <div class="brHead">\uD83C\uDF9A 画面设置 · 画质</div>
   <div class="tabs" role="tablist">${QUALITY.map((q) => `<button class="tab" role="tab" data-act="quality" data-q="${q}" aria-selected="${q === getQuality()}" aria-label="画质 ${QUALITY_LABEL[q]}">${QUALITY_LABEL[q]}</button>`).join("")}</div>
-  <div class="panelNote">低 / 关 会关闭拖影与天气流动；设置保存在浏览器本地（非存档键，导出存档不包含它）</div>
+  <div class="panelNote">画质决定"画多少东西"（阴影 / 雾 / 辉光 / 天气粒子）；低档全部关闭、最省性能</div>
+  <div class="brHead">\uD83D\uDD0D 画面设置 · 锐度</div>
+  <div class="tabs" role="tablist">${RENDER_SCALES.map((s) => `<button class="tab" role="tab" data-act="scale" data-s="${s}" aria-selected="${Math.abs(s - getRenderScale()) < 0.01}" aria-label="锐度 ${RENDER_SCALE_LABEL[s]}">${RENDER_SCALE_LABEL[s]}</button>`).join("")}</div>
+  <div class="panelNote">锐度决定"画在多少像素上"，与画质互不影响：省电 0.75×（56% 像素）/ 标准 1× / 锐利 1.25×（156% 像素）。两项设置都保存在浏览器本地（非存档键，导出存档不包含它们）</div>
   ${saveView.error ? `<div class="panelNote">${saveView.error}</div>` : ""}
   ${saveView.note ? `<div class="panelNote">${saveView.note}</div>` : ""}
   ${cmp}
@@ -6700,8 +7562,80 @@
     refreshMenuButtons();
     renderSavePanel();
   }
+  function doSwitchSlot(n) {
+    const before = currentSlot();
+    if (n === before)
+      return;
+    if (!isStorageAvailable()) {
+      saveView.error = "⚠️ 浏览器存储不可用，无法切换存档";
+      renderSavePanel();
+      return;
+    }
+    if (switchSlot(n)) {
+      if (api.applyVehicle)
+        api.applyVehicle();
+      saveView.error = "";
+      saveView.note = `✅ 已切换到「存档${n + 1}」`;
+      refreshMenuButtons();
+    }
+    renderSavePanel();
+  }
+  function doNewSlot() {
+    if (!isStorageAvailable()) {
+      saveView.error = "⚠️ 浏览器存储不可用，无法新建存档";
+      renderSavePanel();
+      return;
+    }
+    const n = createSlot();
+    if (n < 0) {
+      saveView.error = "⚠️ 存档位已满，无法新建";
+    } else {
+      if (api.applyVehicle)
+        api.applyVehicle();
+      saveView.error = "";
+      saveView.note = `✨ 已新建「存档${n + 1}」，从第 1 关重新开始`;
+      refreshMenuButtons();
+    }
+    renderSavePanel();
+  }
+  function doDeleteSlot(n) {
+    if (!isStorageAvailable()) {
+      saveView.error = "⚠️ 浏览器存储不可用，无法删除存档";
+      renderSavePanel();
+      return;
+    }
+    if (deleteSlot(n))
+      saveView.note = `\uD83D\uDDD1 已删除「存档${n + 1}」`;
+    else
+      saveView.error = "⚠️ 无法删除当前正在使用的存档";
+    renderSavePanel();
+  }
+  function slotListHtml() {
+    const slots = listSlots();
+    const shown = [];
+    for (const s of slots) {
+      shown.push(s);
+      if (!s.used)
+        break;
+    }
+    const cells = shown.map((s) => {
+      const cls = "lvCell slotCell" + (s.active ? " cur" : s.used ? " done" : "");
+      const sub = s.active ? "\uD83D\uDCCD 当前" : s.used ? `已通关 ${s.cleared}/${LEVELS.length}` : "空存档位";
+      return `<div class="${cls}" role="button" tabindex="0" data-act="slotSwitch" data-slot="${s.index}"
+        aria-label="${s.name}${s.used ? `，已通关 ${s.cleared} 关` : "，空存档位"}${s.active ? "，当前使用中" : ""}">
+      <div>${s.name}</div>
+      <div class="thm">${sub}</div>
+      ${s.used && !s.active ? `<button class="btn sm ghost slotDel" data-act="slotDelete" data-slot="${s.index}" aria-label="删除${s.name}">\uD83D\uDDD1</button>` : ""}
+    </div>`;
+    }).join("");
+    const hasEmpty = listSlots().some((s) => !s.used);
+    return `<div class="brHead">\uD83D\uDDC2 存档位</div>
+    <div class="lvGrid slotGrid">${cells}</div>
+    ${hasEmpty ? `<button class="btn sm ghost slotNew" data-act="slotNew">✨ 新建存档</button>` : `<div class="panelNote">存档位已满（上限 ${MAX_SLOTS} 个）</div>`}
+    <div class="panelNote">切换存档位会各自保存独立的进度 / 星级 / 金币 / 车库。当前正在玩的存档位不能删除。</div>`;
+  }
 
-  // dale-game/src/ui/shop.js
+  // src/ui/shop.js
   var shopEl = document.getElementById("shop");
   function openShop() {
     store.shopOpen = true;
@@ -6807,7 +7741,7 @@
     }
   }
 
-  // dale-game/src/ui/donate.js
+  // src/ui/donate.js
   var donateEl = document.getElementById("donate");
   var qrImg = document.getElementById("qrImg");
   var qrBox = document.getElementById("qrBox");
@@ -6824,12 +7758,14 @@
     donateEl.classList.add("hidden");
   }
   function initDonate() {
-    const btn = document.getElementById("btnDonate");
-    if (btn) {
-      btn.addEventListener("click", () => {
-        initAudio();
-        openDonate();
-      });
+    for (const id of ["btnCoffee", "btnDonate"]) {
+      const btn = document.getElementById(id);
+      if (btn) {
+        btn.addEventListener("click", () => {
+          initAudio();
+          openDonate();
+        });
+      }
     }
     const closeBtn = document.getElementById("closeDonate");
     if (closeBtn)
@@ -6841,11 +7777,16 @@
     checkQr();
   }
 
-  // dale-game/src/ui/settings.js
+  // src/ui/settings.js
   var DESC = {
     low: "性能最优：干净画面，任何设备都能流畅跑",
     medium: "增强：装饰投影 · 天气粒子 · 轻色调",
-    high: "光影真实：坡面明暗 · 自行车投影 · 大气雾 · 太阳浸染 · 速度拖影"
+    high: "光影真实：坡面明暗 · 自行车投影 · 大气雾 · 太阳浸染"
+  };
+  var SCALE_DESC = {
+    0.75: "省电：只画 56% 的像素，老旧设备 / 边充边玩最稳（画面略软）",
+    1: "标准：与屏幕像素 1:1，绝大多数设备的推荐档",
+    1.25: "锐利：1.25 倍超采样（156% 像素），高分屏最清晰，也最吃性能"
   };
   function initSettings() {
     const panel = document.getElementById("settings");
@@ -6857,9 +7798,11 @@
     const close = document.getElementById("closeSettings");
     if (close)
       close.addEventListener("click", closeSettings);
-    panel.addEventListener("keydown", (e) => {
-      if (e.code === "Escape")
-        closeSettings();
+    window.addEventListener("keydown", (e) => {
+      if (e.code !== "Escape" || panel.classList.contains("hidden"))
+        return;
+      e.preventDefault();
+      closeSettings();
     });
     const tabs = document.getElementById("qualityTabs");
     if (tabs) {
@@ -6873,18 +7816,41 @@
     const mute = document.getElementById("btnMute");
     if (mute)
       mute.addEventListener("click", toggleMute);
+    const sTabs = document.getElementById("scaleTabs");
+    if (sTabs) {
+      sTabs.addEventListener("click", (e) => {
+        const el = e.target && e.target.closest ? e.target.closest("[data-s]") : null;
+        if (!el)
+          return;
+        applyScale(el.dataset.s);
+      });
+    }
   }
   function openSettings() {
     renderQuality();
+    renderScale();
     renderMute();
     const panel = document.getElementById("settings");
-    if (panel)
-      panel.classList.remove("hidden");
+    if (!panel)
+      return;
+    panel.classList.remove("hidden");
+    focusIn(panel.querySelector("button:not([disabled])"));
   }
   function closeSettings() {
     const panel = document.getElementById("settings");
-    if (panel)
-      panel.classList.add("hidden");
+    if (!panel)
+      return;
+    panel.classList.add("hidden");
+    focusIn(document.getElementById("btnSettings"));
+  }
+  function focusIn(el) {
+    if (!el || typeof el.focus !== "function")
+      return;
+    try {
+      el.focus({ preventScroll: true });
+    } catch (e) {
+      el.focus();
+    }
   }
   function applyQuality(q) {
     if (!QUALITY.includes(q))
@@ -6903,6 +7869,21 @@
     if (d)
       d.textContent = DESC[q] || "";
   }
+  function applyScale(s) {
+    const v = setRenderScalePersisted(s);
+    renderScale();
+    showToast("\uD83D\uDD0D 锐度已切到「" + (RENDER_SCALE_LABEL[v] || v) + "」", 800);
+  }
+  function renderScale() {
+    const s = getRenderScale();
+    document.querySelectorAll("#scaleTabs .tab").forEach((b) => {
+      const on = Math.abs(Number(b.dataset.s) - s) < 0.01;
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    const d = document.getElementById("sDesc");
+    if (d)
+      d.textContent = SCALE_DESC[s] || "";
+  }
   function toggleMute() {
     store.muted = !store.muted;
     try {
@@ -6917,7 +7898,9 @@
       m.textContent = store.muted ? "\uD83D\uDD07 已静音" : "\uD83D\uDD0A 声音开启";
   }
 
-  // dale-game/src/main.js
+  // src/main.js
+  if (typeof window !== "undefined")
+    window.__daleBooted = true;
   installRoundRect();
   resize();
   window.addEventListener("resize", resize);
@@ -6943,6 +7926,6 @@
   });
   startRaf((dt) => {
     stepper.advance(dt);
-    drawScene();
+    drawScene(dt);
   });
 })();

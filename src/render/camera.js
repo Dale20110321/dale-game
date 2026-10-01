@@ -28,9 +28,21 @@ export function updateCamera(dt) {
   else cam.shake = 0;
 }
 
-/** 取本帧的随机抖动偏移（只影响一次绘制） */
+// 抖动相位（累积而非随机）：见 shakeOffset 注释
+let shPhase = 0;
+
+/**
+ * 取本帧的抖动偏移（只影响一次绘制）。
+ *
+ * ★ 原来是逐帧 `Math.random()` 的**白噪声**：相邻两帧的偏移量毫无关联，
+ *   整屏（背景/地形/车/实体一起）在帧与帧之间无规律地跳。撞上加速带那一刻
+ *   同时又叠了 18 个粒子，画面一帧里既闪又多动，观感上就是"卡一下"。
+ *   改成**连续振荡**（相位每帧累加），位移在帧间平滑变化，观感是"震"而不是"卡"；
+ *   强度、衰减、封顶语义全部不变，行为可预期且仍然与刷新率无关。
+ */
 export function shakeOffset() {
   const s = store.cam.shake;
-  if (s <= 0.06) return { x: 0, y: 0 };
-  return { x: (Math.random() * 2 - 1) * s, y: (Math.random() * 2 - 1) * s * 0.7 };
+  if (s <= 0.06) { shPhase += 0.37; return { x: 0, y: 0 }; }
+  shPhase += 0.55;
+  return { x: Math.sin(shPhase * 2.1) * s, y: Math.cos(shPhase * 3.3) * s * 0.7 };
 }

@@ -86,6 +86,10 @@ export const TOKENS = Object.freeze({
   // 游戏对象配色
   "obj-coin": "#ffd166",
   "obj-coin-dark": "#d9a400",
+  // 注意：下面的"油桶"分组里有同名 "obj-canister"（橙色 #e85d04），
+  // 对象字面量里**后者静默覆盖前者**。两端 tokens.css 与 ui-tokens.js 都解析成
+  // 橙色，所以"逐键等价"断言抓不到这个重复 —— 但 obj-canister-top 被
+  // audit-a11y 的对比度矩阵按整张令牌表遍历消费，不能跟着删。
   "obj-canister": "#8a9098",
   "obj-canister-top": "#a9aeb6",
   "obj-boost": "#4cff88",
@@ -147,6 +151,11 @@ export const TOKENS = Object.freeze({
   "fx-shadow-faint": "rgba(0,0,0,0.08)",
   "fx-none-dark": "rgba(0,0,0,0)",
   "fx-vignette-edge": "rgba(0,0,0,0.03)",
+  // 高画质的坡面受光/背光与暗角端点色（render/terrain.js、render/postfx.js 的渐变取用）。
+  // 顶端刻意给不透明色：逐段深浅交给 globalAlpha 表达，渐变本身只负责"向下渐隐"。
+  "fx-lit-top": "rgba(255,248,222,1)",
+  "fx-shade-top": "rgba(9,15,28,1)",
+  "fx-vignette": "rgba(0,0,0,0.32)",
   "fx-fade-top": "rgba(255,255,255,0.015)",
   "fx-fade-hi-top": "rgba(255,255,255,0.05)",
   "fx-sun-warm": "rgba(255,248,222,0.32)",
@@ -175,6 +184,7 @@ export const TOKENS = Object.freeze({
   "gold-3": "#e08b22",
   "gold-glow": "rgba(255,205,90,0.4)",
   "gold-glow-strong": "rgba(255,215,110,0.75)",
+  "info-glow": "rgba(124,231,255,0.4)",
   "grad-progress": "linear-gradient(90deg, #06d6a0, #ffd166)",
   "grad-fuel": "linear-gradient(90deg, #e85d04, #ffba08)",
   "grad-donate": "linear-gradient(135deg, #ffd166, #f0a83c 55%, #e08b22)",

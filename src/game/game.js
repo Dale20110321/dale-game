@@ -1,7 +1,7 @@
 // 游戏主状态机：闯关 / 比赛 / 排位 / 无限，通关结算与重生
 // 本模块不 import 任何 UI 模块，界面动作通过 initGame(presenter) 注入（避免循环依赖）
 import {
-  START_X, WHEELBASE, SUBV, toM, toKmh, LAND_REF,
+  START_X, WHEELBASE, toM, toKmh, LAND_REF,
   RATING_MIN, RATING_WIN_GAIN, RATING_LOSS,
   RATING_WIN_GAIN_ADVANCED, RATING_LOSS_ADVANCED, rankName,
 } from "../config/constants.js";
@@ -16,7 +16,7 @@ import { playCrashSound } from "../core/audio.js";
 import { token } from "../config/ui-tokens.js";
 import { save, addStat, settleProgress, isAdvancedUnlocked } from "../core/storage.js";
 import { groundInfo, groundY, safeSpot } from "../physics/terrain.js";
-import { applyUpgrades, crash, resetBike, stepPhysics } from "../physics/bike.js";
+import { applyUpgrades, bikeVx, crash, resetBike, stepPhysics } from "../physics/bike.js";
 import { initPhysicsEvents } from "../physics/events.js";
 import { drainFuel, setFuel } from "../physics/fuel.js";
 import { updateParticles, emitParticles } from "../render/particles.js";
@@ -453,7 +453,7 @@ export function update(dt) {
   // ---- 机制判定：危险段超速必摔 / 限时门准时通过 ----
   if (store.mode === "level" && !run.clearing) {
     if (!run.crashed && world.hazards.length) {
-      const spd = Math.abs((b.front.x - b.front.px) * SUBV);
+      const spd = Math.abs(bikeVx());
       for (const h of world.hazards) {
         if (mid >= h.x0 && mid <= h.x1 && spd > h.vmax) {
           crashWithReason("⚠️ 危险路段超速！燃料 -8% · 计时 +2s");

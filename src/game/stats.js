@@ -1,5 +1,5 @@
 // 单局统计与特技结算
-import { WHEEL_R } from "../config/constants.js";
+import { WHEEL_R, CAN_FUEL } from "../config/constants.js";
 import { store, bike, world } from "../core/store.js";
 import { toM } from "../config/constants.js";
 import { groundInfo } from "../physics/terrain.js";
@@ -84,12 +84,12 @@ export function settleLanding() {
   if (msgs.length) showCombo(msgs.join("   "));
 }
 
-/** 拾取油罐：+45% 燃料 */
+/** 拾取油罐：补 CAN_FUEL（constants.js 单一事实来源，与 world.js 的罐数推导同源） */
 export function pickCanister(c) {
   c.taken = true;
-  refuel(0.45);
+  refuel(CAN_FUEL);
   emitParticles(c.x, c.y, 10, { color: token("warn"), spd: 1.4, life: 26, size: 3, grav: 0.02 });
-  showToast("⛽ +45%", 650);
+  showToast(`⛽ +${Math.round(CAN_FUEL * 100)}%`, 650);
   playFuelSound();
 }
 
