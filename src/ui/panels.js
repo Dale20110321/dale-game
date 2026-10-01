@@ -3,7 +3,7 @@
 //  · 全部面板交互走 #modePanel 上的事件委托（面板 HTML 重绘不会丢监听）
 //  · 本模块只 import 其它层，绝不反向被 import
 import {
-  ACHS, toM, rankName, MAX_LV, RATING_ADVANCED, RATING_PEAK,
+  ACHS, toM, toKmh, rankName, MAX_LV, topSpeedOf, RATING_ADVANCED, RATING_PEAK,
   RATING_WIN_GAIN, RATING_LOSS, RATING_WIN_GAIN_ADVANCED, RATING_LOSS_ADVANCED,
 } from "../config/constants.js";
 import { THEMES } from "../config/themes.js";
@@ -595,6 +595,9 @@ export function renderFreePanel() {
 
 // ---------------- 车库 ----------------
 
+/** 满级四项的升级表（车库卡片用它算"这台车满级能跑多快"） */
+const MAXED = { engine: MAX_LV, tire: MAX_LV, frame: MAX_LV, susp: MAX_LV };
+
 export function renderGaragePanel() {
   panelKind = "garage";
   showPanel(`<div class="modeTitle">🏍️ 车库</div>
@@ -606,8 +609,10 @@ export function renderGaragePanel() {
       icon: v.icon,
       title: v.name,
       sub: v.desc,
-      meta: `速度${Math.round(v.spd * 100)}% · 驱动${Math.round(v.drv * 100)}% · 抓地${Math.round(v.grp * 100)}% · 旋转${Math.round(v.air * 100)}% · 油箱${Math.round(v.tank * 100)}%`,
-      right: sel ? "✅ 使用中" : own ? "已拥有" : "🪙 " + v.price,
+      // 末位是**满级真实可达极速**（表盘满量程同源）：三辆入门车与四辆变态车的差价
+      // 到底换来了多少速度，一眼可比，不必买回去试。
+      meta: `速度${Math.round(v.spd * 100)}% · 驱动${Math.round(v.drv * 100)}% · 抓地${Math.round(v.grp * 100)}% · 旋转${Math.round(v.air * 100)}% · 油箱${Math.round(v.tank * 100)}% · 满级极速 <b>${Math.round(toKmh(topSpeedOf(v, MAXED)))} km/h</b>`,
+      right: sel ? "✅ 使用中" : own ? "已拥有" : "🪙 " + v.price.toLocaleString(),
       interactive: true,
       selected: sel,
       attrs: `data-act="veh" data-veh="${i}"`,

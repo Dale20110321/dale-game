@@ -31,7 +31,11 @@ export const kmhToPxs = (kmh) => (kmh / 3.6) * PX_PER_M;
 // ---------------- 手感缩放（用户反馈"走得太快"后整体降速） ----------------
 /** 极速降为原来的 2/3 */
 export const SPD_K = 2 / 3;
-/** 参考极速公式的原始上限与基准（px/s 的半标度基准） */
+/**
+ * 平路参考极速公式的基准（半标度）与原始上限。
+ * ★ 只用于 REF_SPEED（危险段限速 / AI 巡航基准 / 成就阈值），**不再**用于 MAXV。
+ *   MAXV 现在是"真实可达极速"，由 topSpeedOf 解算得到（见下）——两者用途不同，别混用。
+ */
 export const MAXV_RAW_CAP = 350;
 export const MAXV_BASE = 130;
 
@@ -43,23 +47,94 @@ export const MAXV_BASE = 130;
  */
 export const REF_SPEED = MAXV_BASE * SUB * SPD_K;
 
+// ============================================================
+//  升级旋钮（每级线性，全部以 MAX_LV=100 为满级口径）
+//
+//  ★ 这里修的是一个根因：**引擎升级过去只抬扭矩峰值、不抬扭矩曲线的转速上限**。
+//    torqueAt 在 ω > w0×3.2 归零，而 w0 = TORQUE_RPM_BASE × veh.rpm **与升级无关**，
+//    于是"引擎 Lv100"在直线上的实际极速被死死钉在 691px/s（18×1×3.2×12），
+//    实测 Lv0→Lv100 只快 15%~32%，花 28250 金币换来一点抖动和翻车。
+//    现在引擎同时抬"峰值"和"转速域"，极速才真的涨。
+// ============================================================
+/** 引擎：每级提升扭矩峰值 */
+export const ENGINE_TORQUE_UP = 0.010;
+/** 引擎：每级拓宽扭矩曲线的转速域（= 提高红线，Lv100 约 ×2.8） */
+export const ENGINE_RPM_UP = 0.018;
+/** 轮胎：每级顺带提升扭矩（抓地才是硬上限，扭矩堆太多只会空转翻车） */
+export const TIRE_TORQUE_UP = 0.006;
+/** 轮胎：每级提升摩擦系数 μ（+0.6%/级，audit-physics 有精确断言锁定） */
+export const FRICTION_TIRE_UP = 0.006;
+
+/** 重力基准（平路参考极速的解算基准；场景主题各自另有 g） */
+export const GRAV_BASE = 750;
+/** 后轮承担的垂直载荷比例：只有后轮被驱动，摩擦上限按后轮那份算 */
+export const REAR_LOAD = 0.62;
+/** 真实可达极速的二分搜索上界（px/s），只作数值安全兜底 */
+export const TOP_SPEED_CAP = 6000;
+
 /**
- * 由"车辆数据 + 升级等级"推导驾驶参数（扭矩峰值 / 刹车峰值 / 参考极速 / 容差）。
+ * 平路上**真实可达的极速**（px/s）——驱动能力与阻力的交点。
+ *
+ * 可用推力 avail(v) = min( τ(v/R)/R , μ·mTot·g·REAR_LOAD )
+ * 阻力     loss(v) = AIR_DRAG_K·v² + ROLL_RES_K·mTot·g
+ * avail 随 v 单调不增（扭矩曲线衰减 + 抓地上限），loss 随 v 单调增 ⇒ 交点唯一，
+ * 二分即可，无需迭代收敛。返回的是"真能跑到的速度"，不是手填的标称值。
+ *
+ * ★ 为什么必须解算而不是写公式：MAXV 是 HUD 表盘满量程、相机前推量、倒挡目标速的
+ *   共同基准。过去它由 `MAXV_BASE + 2.5·engine + 1.5·tire` 算出，满级涨 2.7 倍，
+ *   而**真实极速只涨 32%** —— 于是升级后表盘指针反而越走越低（Lv25 就顶格），
+ *   相机也不再前推，玩家自然觉得"升级没感觉"。现在表盘满量程 = 真能跑到的速度，
+ *   每升一级指针都会多走一格，升级立刻可见。
+ */
+export function topSpeedOf(veh, up) {
+  const p = (veh && veh.phys) || {};
+  const u = up || {};
+  const eng = u.engine || 0;
+  const tire = u.tire || 0;
+  const k = p.mass || (veh && veh.wgt) || 1;
+  const mTot = (M_TOT + 2 * M_W) * k;
+  const peak = TORQUE_PEAK_BASE * (p.torque || 1) *
+    (1 + ENGINE_TORQUE_UP * eng + TIRE_TORQUE_UP * tire);
+  const rpmK = 1 + ENGINE_RPM_UP * eng;
+  const mu = FRICTION_BASE * ((veh && veh.grp) || 1) * (1 + FRICTION_TIRE_UP * tire);
+  const grip = mu * mTot * GRAV_BASE * REAR_LOAD;
+  const roll = ROLL_RES_K * mTot * GRAV_BASE;
+  const avail = (v) => Math.min(torqueAt(veh, v / WHEEL_R, 1, peak, rpmK) / WHEEL_R, grip);
+  const loss = (v) => AIR_DRAG_K * v * v + roll;
+  let lo = 0;
+  let hi = TOP_SPEED_CAP;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) * 0.5;
+    if (avail(mid) > loss(mid)) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/**
+ * 由"车辆数据 + 升级等级"推导驾驶参数（扭矩峰值 / 刹车峰值 / 极速 / 扭矩转速域 / 容差）。
  * ★ 所有半标度 → 真实 px/s 的换算只允许在这里发生（保持标度唯一事实来源）。
  */
 export function deriveHandling(veh, up) {
+  const u = up || {};
   const p = veh.phys || {};
   return {
     /** 发动机扭矩峰值（游戏单位）：升级与车辆扭矩曲线共同决定 */
-    torquePeak: TORQUE_PEAK_BASE * (p.torque || 1) * (1 + 0.020 * up.engine + 0.016 * up.tire),
+    torquePeak: TORQUE_PEAK_BASE * (p.torque || 1) *
+      (1 + ENGINE_TORQUE_UP * (u.engine || 0) + TIRE_TORQUE_UP * (u.tire || 0)),
     /** 刹车扭矩峰值 */
-    brakePeak: BRAKE_TORQUE_BASE * veh.grp * (1 + 0.016 * up.tire + 0.010 * up.frame),
-    /** 参考极速（HUD / 相机 / AI 标定用） */
-    MAXV: Math.min(MAXV_RAW_CAP, MAXV_BASE + 2.5 * up.engine + 1.5 * up.tire) * SUB * veh.spd * SPD_K,
+    brakePeak: BRAKE_TORQUE_BASE * veh.grp * (1 + 0.016 * (u.tire || 0) + 0.010 * (u.frame || 0)),
+    /**
+     * 扭矩曲线的转速域倍率：引擎等级抬高红线（Lv100 ≈ ×2.8）。
+     * 这才是"引擎升级真的变快"的来源 —— 峰值扭矩在平坦路面早就撞上抓地上限了。
+     */
+    rpmK: 1 + ENGINE_RPM_UP * (u.engine || 0),
+    /** 参考极速（HUD 表盘满量程 / 相机前推 / 倒挡目标速）：**平路真实可达极速** */
+    MAXV: topSpeedOf(veh, up),
     // 倒立摔车判定的容差基准（越大越抗摔）：由车架升级 + 车重推导。
     // 0 级（up.frame=0, veh.wgt=1）≈ 4，满级（up.frame=100）≈ 14。
-    crashMargin: Math.min(14, 2 + 0.1 * up.frame + veh.wgt * 2),
-    fuelMax: veh.tank * (1 + 0.004 * up.frame),
+    crashMargin: Math.min(14, 2 + 0.1 * (u.frame || 0) + veh.wgt * 2),
+    fuelMax: veh.tank * (1 + 0.004 * (u.frame || 0)),
   };
 }
 
@@ -128,10 +203,17 @@ export const SUSP_TRAVEL_UP = 0.08;
 
 /** 摩擦：基准摩擦系数（× 场景 traction × 车辆 grp × 轮胎升级） */
 export const FRICTION_BASE = 1.15;
-export const FRICTION_TIRE_UP = 0.006;
 
 /** 刹车扭矩基准（远大于驱动扭矩：刹车本来就比加速猛） */
 export const BRAKE_TORQUE_BASE = 12000;
+
+/**
+ * 抗摔等级（crashMargin）→ 车架要翻过多大角度才判摔（度）。
+ * ★ 单一事实来源：physics/bike.js 的摔车判定与 ui/shop.js 的升级预览都读它，
+ *   两处各写一份的话，商店显示的"抗摔 99°→100°"会和实际判定脱节。
+ */
+export const crashTiltDeg = (crashMargin) =>
+  Math.min(0.7 * 180, (0.55 + (crashMargin - 4) * 0.014) * 180);
 
 /** 空气阻力系数（∝ v²）与滚动阻力系数（∝ 法向力）：极速的"自然上限" */
 export const AIR_DRAG_K = 0.0026;
@@ -257,8 +339,14 @@ export const KICK_TARGET = 0.62;
 
 // ---------------- 升级 ----------------
 export const MAX_LV = 100;
-/** 升级到 lv 级所需金币 */
-export const upCost = (lv) => 30 + lv * 5;
+/**
+ * 升到第 lv 级所需金币。
+ *
+ * ★ 旧曲线 `30 + 5·lv` 全满一项要 28250 金币（四项 113000）——按每关 200~300 金币的
+ *   收入，全满要重打四百多关，而"引擎"这项升满实测只快 32%。投入产出比低到没有体感。
+ *   现在压到约 7000/项（四项 28000），一次完整通关 + 少量重刷就能把一台车推满。
+ */
+export const upCost = (lv) => Math.round(10 + 1.2 * lv);
 
 /**
  * 油罐补给的油量（占油箱的比例）。

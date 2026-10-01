@@ -123,17 +123,50 @@
   var toM = (px) => px / PX_PER_M;
   var toKmh = (pxs) => pxs / PX_PER_M * 3.6;
   var SPD_K = 2 / 3;
-  var MAXV_RAW_CAP = 350;
   var MAXV_BASE = 130;
   var REF_SPEED = MAXV_BASE * SUB * SPD_K;
+  var ENGINE_TORQUE_UP = 0.01;
+  var ENGINE_RPM_UP = 0.018;
+  var TIRE_TORQUE_UP = 0.006;
+  var FRICTION_TIRE_UP = 0.006;
+  var GRAV_BASE = 750;
+  var REAR_LOAD = 0.62;
+  var TOP_SPEED_CAP = 6000;
+  function topSpeedOf(veh, up) {
+    const p = veh && veh.phys || {};
+    const u = up || {};
+    const eng = u.engine || 0;
+    const tire = u.tire || 0;
+    const k = p.mass || veh && veh.wgt || 1;
+    const mTot = (M_TOT + 2 * M_W) * k;
+    const peak = TORQUE_PEAK_BASE * (p.torque || 1) * (1 + ENGINE_TORQUE_UP * eng + TIRE_TORQUE_UP * tire);
+    const rpmK = 1 + ENGINE_RPM_UP * eng;
+    const mu = FRICTION_BASE * (veh && veh.grp || 1) * (1 + FRICTION_TIRE_UP * tire);
+    const grip = mu * mTot * GRAV_BASE * REAR_LOAD;
+    const roll = ROLL_RES_K * mTot * GRAV_BASE;
+    const avail = (v) => Math.min(torqueAt(veh, v / WHEEL_R, 1, peak, rpmK) / WHEEL_R, grip);
+    const loss = (v) => AIR_DRAG_K * v * v + roll;
+    let lo = 0;
+    let hi = TOP_SPEED_CAP;
+    for (let i = 0;i < 40; i++) {
+      const mid = (lo + hi) * 0.5;
+      if (avail(mid) > loss(mid))
+        lo = mid;
+      else
+        hi = mid;
+    }
+    return lo;
+  }
   function deriveHandling(veh, up) {
+    const u = up || {};
     const p = veh.phys || {};
     return {
-      torquePeak: TORQUE_PEAK_BASE * (p.torque || 1) * (1 + 0.02 * up.engine + 0.016 * up.tire),
-      brakePeak: BRAKE_TORQUE_BASE * veh.grp * (1 + 0.016 * up.tire + 0.01 * up.frame),
-      MAXV: Math.min(MAXV_RAW_CAP, MAXV_BASE + 2.5 * up.engine + 1.5 * up.tire) * SUB * veh.spd * SPD_K,
-      crashMargin: Math.min(14, 2 + 0.1 * up.frame + veh.wgt * 2),
-      fuelMax: veh.tank * (1 + 0.004 * up.frame)
+      torquePeak: TORQUE_PEAK_BASE * (p.torque || 1) * (1 + ENGINE_TORQUE_UP * (u.engine || 0) + TIRE_TORQUE_UP * (u.tire || 0)),
+      brakePeak: BRAKE_TORQUE_BASE * veh.grp * (1 + 0.016 * (u.tire || 0) + 0.01 * (u.frame || 0)),
+      rpmK: 1 + ENGINE_RPM_UP * (u.engine || 0),
+      MAXV: topSpeedOf(veh, up),
+      crashMargin: Math.min(14, 2 + 0.1 * (u.frame || 0) + veh.wgt * 2),
+      fuelMax: veh.tank * (1 + 0.004 * (u.frame || 0))
     };
   }
   var AIR_ROT_MAX = 9.5;
@@ -165,8 +198,8 @@
   var SUSP_C_UP = 0.03;
   var SUSP_TRAVEL_UP = 0.08;
   var FRICTION_BASE = 1.15;
-  var FRICTION_TIRE_UP = 0.006;
   var BRAKE_TORQUE_BASE = 12000;
+  var crashTiltDeg = (crashMargin) => Math.min(0.7 * 180, (0.55 + (crashMargin - 4) * 0.014) * 180);
   var AIR_DRAG_K = 0.0026;
   var ROLL_RES_K = 0.02;
   var CONTACT_BIAS = 0.25;
@@ -231,7 +264,7 @@
   var KICK_V = 250;
   var KICK_MIN_V = 220;
   var MAX_LV = 100;
-  var upCost = (lv) => 30 + lv * 5;
+  var upCost = (lv) => Math.round(10 + 1.2 * lv);
   var CAN_FUEL = 0.6;
   var ACHS = [
     { id: "air", name: "腾空初体验", icon: "\uD83D\uDD4A", desc: "单次腾空 0.8 秒以上" },
@@ -291,6 +324,260 @@
   var SAVE_APP = "dale-bike";
   var SAVE_FORMAT = 1;
 
+  // src/config/vehicles.js
+  var P = (mass, inertia, suspK, suspC, travel, torque, rpm) => ({ mass, inertia, suspK, suspC, travel, torque, rpm });
+  var POSE = (shX, shY, hdX, hdY, barX, barY) => ({ shX, shY, hdX, hdY, barX, barY });
+  var ART = (o) => Object.assign({
+    tire: 3,
+    rim: true,
+    spokes: 6,
+    spokeW: 1.6,
+    tube: 4,
+    topDrop: 2,
+    coil: 1,
+    bar: "flat",
+    saddleW: 10,
+    helmR: 4.4,
+    peak: true,
+    vents: 1,
+    pose: POSE(0, 0, 0, 0, 0, 0)
+  }, o);
+  var VEHICLES = [
+    {
+      id: "trail",
+      name: "山地车",
+      icon: "\uD83D\uDEB2",
+      desc: "均衡全能，新手之选",
+      price: 0,
+      drv: 1,
+      spd: 1,
+      grp: 1,
+      wgt: 1,
+      air: 1,
+      tank: 1,
+      color: "#314ccd",
+      art: ART({}),
+      phys: P(1, 1, 1, 1, 16, 1, 1)
+    },
+    {
+      id: "sport",
+      name: "竞速车",
+      icon: "\uD83C\uDFCD️",
+      desc: "极速快，空中旋转快，油箱小",
+      price: 3000,
+      drv: 1.35,
+      spd: 1.4,
+      grp: 0.72,
+      wgt: 0.8,
+      air: 1.4,
+      tank: 0.75,
+      color: "#e63946",
+      art: ART({
+        tire: 1.7,
+        rim: false,
+        spokes: 12,
+        spokeW: 0.8,
+        tube: 2.4,
+        topDrop: 6,
+        coil: 0,
+        bar: "drop",
+        saddleW: 6.5,
+        helmR: 4.9,
+        peak: false,
+        vents: 0,
+        pose: POSE(4.5, 5.5, 6, 5, 1.5, 3.5)
+      }),
+      phys: P(0.8, 0.7, 1.25, 1.1, 13, 1.35, 1.25),
+      ultra: {
+        name: "极速模式",
+        icon: "\uD83D\uDE80",
+        mode: "surge",
+        cost: 80000,
+        desc: "引擎过载：加速与极速大幅提升，风驰电掣"
+      }
+    },
+    {
+      id: "mud",
+      name: "越野车",
+      icon: "\uD83D\uDE9C",
+      desc: "抓地强，耐撞，油箱大，旋转慢",
+      price: 9000,
+      drv: 1.12,
+      spd: 0.7,
+      grp: 1.45,
+      wgt: 1.5,
+      air: 0.75,
+      tank: 1.45,
+      color: "#8a5a2b",
+      art: ART({
+        tire: 5.6,
+        spokes: 5,
+        spokeW: 2.4,
+        tube: 6.2,
+        topDrop: -1,
+        coil: 1.9,
+        bar: "wide",
+        saddleW: 14,
+        helmR: 4.2,
+        vents: 3,
+        pose: POSE(-3, -4.5, -3.5, -4.5, -1, -4)
+      }),
+      phys: P(1.5, 1.35, 0.85, 0.9, 20, 1.12, 0.85),
+      ultra: {
+        name: "贴地模式",
+        icon: "\uD83D\uDEE1️",
+        mode: "stable",
+        cost: 120000,
+        desc: "磁悬浮贴地：始终贴地，永不翻车"
+      }
+    },
+    {
+      id: "volt",
+      name: "电磁脉冲车",
+      icon: "⚡",
+      desc: "变态：满级极速是山地车的 2 倍，爬坡不喘",
+      price: 32000,
+      drv: 1.55,
+      spd: 1.85,
+      grp: 1.2,
+      wgt: 0.85,
+      air: 0.87,
+      tank: 1.3,
+      color: "#00d4ff",
+      art: ART({
+        tire: 2.2,
+        rim: false,
+        spokes: 10,
+        spokeW: 1,
+        tube: 3,
+        topDrop: 8,
+        coil: 0.6,
+        bar: "drop",
+        saddleW: 8,
+        helmR: 5,
+        vents: 2,
+        pose: POSE(5, 6, 7, 5.5, 2, 4)
+      }),
+      phys: P(0.85, 1.15, 1.35, 1.15, 14, 1.55, 1.3),
+      ultra: {
+        name: "电磁轨道炮",
+        icon: "\uD83D\uDD0C",
+        mode: "railgun",
+        cost: 260000,
+        desc: "电磁轨道炮：推力与红线同时暴涨，平地直接贴地飞行"
+      }
+    },
+    {
+      id: "ghost",
+      name: "影行者",
+      icon: "\uD83D\uDC7B",
+      desc: "变态：摔不坏、油无限、危险段随便冲",
+      price: 58000,
+      drv: 1.4,
+      spd: 1.6,
+      grp: 1.55,
+      wgt: 0.7,
+      air: 1.62,
+      tank: 2.2,
+      color: "#9d4edd",
+      art: ART({
+        tire: 1.5,
+        rim: false,
+        spokes: 14,
+        spokeW: 0.7,
+        tube: 2.2,
+        topDrop: 9,
+        coil: 0.3,
+        bar: "drop",
+        saddleW: 6,
+        helmR: 5.2,
+        peak: false,
+        vents: 0,
+        pose: POSE(6, 7, 8, 6, 2.5, 5)
+      }),
+      phys: P(0.7, 0.62, 1.5, 1.2, 12, 1.2, 1.45),
+      ultra: {
+        name: "相位穿行",
+        icon: "\uD83C\uDF00",
+        mode: "phase",
+        cost: 400000,
+        desc: "相位穿行：永不摔车 + 燃料无限 + 危险段限速豁免"
+      }
+    },
+    {
+      id: "fort",
+      name: "磁力堡垒",
+      icon: "\uD83D\uDEE1️",
+      desc: "变态：巨重巨稳，抓地碾压，翻过来也能爬起来",
+      price: 96000,
+      drv: 1.6,
+      spd: 1.35,
+      grp: 2.1,
+      wgt: 2.4,
+      air: 0.42,
+      tank: 2.6,
+      color: "#f4a261",
+      art: ART({
+        tire: 7.5,
+        spokes: 4,
+        spokeW: 3,
+        tube: 8,
+        topDrop: -3,
+        coil: 2.6,
+        bar: "wide",
+        saddleW: 18,
+        helmR: 5.4,
+        vents: 4,
+        pose: POSE(-4, -6, -2, -7, 0, -6)
+      }),
+      phys: P(2.4, 2.4, 0.72, 0.85, 24, 1.6, 1.9),
+      ultra: {
+        name: "磁力护盾",
+        icon: "\uD83D\uDD30",
+        mode: "shield",
+        cost: 620000,
+        desc: "磁力护盾：任何姿态都摔不下去，腾空与操控全部保留"
+      }
+    },
+    {
+      id: "photon",
+      name: "光子摩托",
+      icon: "\uD83D\uDCAB",
+      desc: "变态：本项目最快的脚，0.7 秒冲到极速",
+      price: 150000,
+      drv: 1.9,
+      spd: 2.1,
+      grp: 1.35,
+      wgt: 0.6,
+      air: 0.95,
+      tank: 1.6,
+      color: "#ff70a6",
+      art: ART({
+        tire: 2.6,
+        rim: false,
+        spokes: 11,
+        spokeW: 1.2,
+        tube: 3.4,
+        topDrop: 10,
+        coil: 0.2,
+        bar: "drop",
+        saddleW: 7,
+        helmR: 5.1,
+        peak: false,
+        vents: 1,
+        pose: POSE(7, 8, 9, 7, 3, 5.5)
+      }),
+      phys: P(0.6, 1.05, 1.45, 1.25, 13, 1.15, 1.7),
+      ultra: {
+        name: "光子跃迁",
+        icon: "\uD83C\uDF0C",
+        mode: "warp",
+        cost: 1e6,
+        desc: "光子跃迁：踩住油门持续喷射，0.7 秒逼近极速"
+      }
+    }
+  ];
+
   // src/core/store.js
   var store = {
     time: 0,
@@ -336,7 +623,7 @@
       minY: 0,
       GRAV: 750,
       TRACTION: 1,
-      MAXV: 520,
+      MAXV: topSpeedOf(VEHICLES[0], { engine: 0, tire: 0, frame: 0, susp: 0 }),
       crashMargin: 4,
       fuel: 1,
       fuelMax: 1,
@@ -387,7 +674,6 @@
     lastAng: 0,
     angVel: 0,
     angRate: 0,
-    _revHold: 0,
     wheelStep: 0,
     wheelStepF: 0,
     rotAcc: 0,
@@ -397,6 +683,7 @@
     susp: { rear: { t: 0, v: 0 }, front: { t: 0, v: 0 } },
     slip: { rear: 0, front: 0 },
     fn: { rear: 0, front: 0 },
+    fricAcc: { rear: 0, front: 0 },
     solverIters: 0,
     solverResid: 0,
     penetration: 0
@@ -571,113 +858,6 @@
       comboEl.style.transform = "translate(-50%,-50%) scale(1.35)";
     }, 1400);
   }
-
-  // src/config/vehicles.js
-  var P = (mass, inertia, suspK, suspC, travel, torque, rpm) => ({ mass, inertia, suspK, suspC, travel, torque, rpm });
-  var POSE = (shX, shY, hdX, hdY, barX, barY) => ({ shX, shY, hdX, hdY, barX, barY });
-  var ART = (o) => Object.assign({
-    tire: 3,
-    rim: true,
-    spokes: 6,
-    spokeW: 1.6,
-    tube: 4,
-    topDrop: 2,
-    coil: 1,
-    bar: "flat",
-    saddleW: 10,
-    helmR: 4.4,
-    peak: true,
-    vents: 1,
-    pose: POSE(0, 0, 0, 0, 0, 0)
-  }, o);
-  var VEHICLES = [
-    {
-      id: "trail",
-      name: "山地车",
-      icon: "\uD83D\uDEB2",
-      desc: "均衡全能，新手之选",
-      price: 0,
-      drv: 1,
-      spd: 1,
-      grp: 1,
-      wgt: 1,
-      air: 1,
-      tank: 1,
-      color: "#314ccd",
-      art: ART({}),
-      phys: P(1, 1, 1, 1, 16, 1, 1)
-    },
-    {
-      id: "sport",
-      name: "竞速车",
-      icon: "\uD83C\uDFCD️",
-      desc: "极速快，空中旋转快，油箱小",
-      price: 3000,
-      drv: 1.35,
-      spd: 1.4,
-      grp: 0.72,
-      wgt: 0.8,
-      air: 1.4,
-      tank: 0.75,
-      color: "#e63946",
-      art: ART({
-        tire: 1.7,
-        rim: false,
-        spokes: 12,
-        spokeW: 0.8,
-        tube: 2.4,
-        topDrop: 6,
-        coil: 0,
-        bar: "drop",
-        saddleW: 6.5,
-        helmR: 4.9,
-        peak: false,
-        vents: 0,
-        pose: POSE(4.5, 5.5, 6, 5, 1.5, 3.5)
-      }),
-      phys: P(0.8, 0.7, 1.25, 1.1, 13, 1.35, 1.25),
-      ultra: {
-        name: "极速模式",
-        icon: "\uD83D\uDE80",
-        cost: 1e6,
-        desc: "引擎过载：加速与极速大幅提升，风驰电掣"
-      }
-    },
-    {
-      id: "mud",
-      name: "越野车",
-      icon: "\uD83D\uDE9C",
-      desc: "抓地强，耐撞，油箱大，旋转慢",
-      price: 9000,
-      drv: 1.12,
-      spd: 0.7,
-      grp: 1.45,
-      wgt: 1.5,
-      air: 0.75,
-      tank: 1.45,
-      color: "#8a5a2b",
-      art: ART({
-        tire: 5.6,
-        spokes: 5,
-        spokeW: 2.4,
-        tube: 6.2,
-        topDrop: -1,
-        coil: 1.9,
-        bar: "wide",
-        saddleW: 14,
-        helmR: 4.2,
-        vents: 3,
-        pose: POSE(-3, -4.5, -3.5, -4.5, -1, -4)
-      }),
-      phys: P(1.5, 1.35, 0.85, 0.9, 20, 1.12, 0.85),
-      ultra: {
-        name: "贴地模式",
-        icon: "\uD83D\uDEE1️",
-        cost: 1e6,
-        desc: "磁悬浮贴地：始终贴地，永不翻车"
-      }
-    }
-  ];
 
   // src/config/levels.js
   var STEP_W = 150;
@@ -1644,19 +1824,21 @@
         save();
       }
       if (lsGet("bike_trial") === "1") {
-        store.ownedVehicles = [0, 1, 2];
+        store.ownedVehicles = VEHICLES.map((v, i) => i);
         if (store.gold < 2000000)
           store.gold = 2000000;
-        for (const id of ["sport", "mud"]) {
+        for (const v of VEHICLES) {
+          if (!v.ultra)
+            continue;
+          const id = v.id;
           if (!store.upgrades[id])
             store.upgrades[id] = { engine: 0, tire: 0, frame: 0, susp: 0 };
           store.upgrades[id].engine = MAX_LV;
           store.upgrades[id].tire = MAX_LV;
           store.upgrades[id].frame = MAX_LV;
           store.upgrades[id].susp = MAX_LV;
+          store.ultra[v.id] = true;
         }
-        store.ultra.sport = true;
-        store.ultra.mud = true;
         if (!store.ownedVehicles.includes(store.currentVehicle))
           store.currentVehicle = 1;
       }
@@ -1821,6 +2003,17 @@
   // src/core/input.js
   var key = { left: false, right: false, rev: false };
   var touchWanted = false;
+  function modalOpen() {
+    return ["settings", "shop", "donate"].some((id) => {
+      const el = document.getElementById(id);
+      return !!el && !el.classList.contains("hidden");
+    });
+  }
+  var escForModal = false;
+  window.addEventListener("keydown", (e) => {
+    if (e.code === "Escape" && modalOpen())
+      escForModal = true;
+  }, true);
   var touchActive = false;
   function syncTouchVisibility() {
     const el = document.getElementById("touch");
@@ -1876,6 +2069,10 @@
         store.muted = !store.muted;
         save();
         showToast(store.muted ? "\uD83D\uDD07 已静音" : "\uD83D\uDD0A 声音开启", 600);
+        return;
+      }
+      if (escForModal) {
+        escForModal = false;
         return;
       }
       if ((e.code === "Escape" || e.code === "KeyP") && (st === "play" || st === "pause")) {
@@ -2585,11 +2782,22 @@
   function bikeVx() {
     return systemVel(bike).vx;
   }
-  function isUltraActive() {
-    return store.ultra[VEHICLES[store.currentVehicle].id] === true;
+  var ULTRA_SPEED_N = 10;
+  var ULTRA_RPM_N = 8;
+  var WARP_ACC = 6.5;
+  var WARP_V_CAP = 90;
+  function activeMode(veh) {
+    const v = veh || VEHICLES[store.currentVehicle];
+    if (!v || !v.ultra || store.ultra[v.id] !== true)
+      return "";
+    return v.ultra.mode || "";
   }
   function isUltraStable() {
-    return isUltraActive() && VEHICLES[store.currentVehicle].id === "mud";
+    return activeMode() === "stable";
+  }
+  function isCrashImmune() {
+    const m = activeMode();
+    return m === "shield" || m === "phase" || m === "stable";
   }
   function pinToGround() {
     const b = bike;
@@ -2622,13 +2830,24 @@
     store.phys.susp = deriveSuspension(v, up);
     store.phys.mu = deriveFriction(store.phys.TRACTION, v, up);
     store.phys.wheelI = wheelInertia(rb.mW);
-    if (isUltraActive() && v.id === "sport") {
-      store.phys.MAXV = Math.max(store.phys.MAXV, 4200);
-      store.phys.rpmK = 12;
+    store.phys.MAXVPhys = store.phys.MAXV;
+    const mode = activeMode(v);
+    if (mode === "surge") {
+      store.phys.rpmK *= ULTRA_RPM_N;
+      store.phys.MAXV = Math.max(store.phys.MAXV, ULTRA_SPEED_N * REF_SPEED);
       store.phys.mu = Math.max(store.phys.mu, 4);
       store.phys.airDragK = AIR_DRAG_K * 0.1;
-    } else {
-      store.phys.rpmK = 1;
+    } else if (mode === "railgun") {
+      store.phys.torquePeak *= ULTRA_TORQUE_N;
+      store.phys.rpmK *= ULTRA_RPM_N * 1.6;
+      store.phys.mu = Math.max(store.phys.mu, 3.4);
+      store.phys.airDragK = AIR_DRAG_K * 0.2;
+      store.phys.MAXV = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N;
+    } else if (mode === "warp") {
+      store.phys.MAXV = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N * 1.6;
+      store.phys.rpmK *= 2;
+    }
+    if (!mode || mode === "stable" || mode === "shield" || mode === "phase") {
       store.phys.airDragK = 0;
     }
     bike.rb = rb;
@@ -2677,6 +2896,8 @@
     b.speed = 0;
     b.wheelRear = 0;
     b.wheelFront = 0;
+    b.wheelStep = 0;
+    b.wheelStepF = 0;
     b.frontGr = false;
     b.rearGr = false;
     b.squash = 0;
@@ -2703,14 +2924,15 @@
     b.slip.front = 0;
     b.fn.rear = 0;
     b.fn.front = 0;
-    b._revHold = 0;
+    b.fricAcc.rear = 0;
+    b.fricAcc.front = 0;
     b.boostT = 0;
     b.angRate = 0;
     b.rb = store.phys.rb;
     bindMasses(store.phys.rb);
   }
   function crash() {
-    if (isUltraStable())
+    if (isCrashImmune())
       return;
     const run = store.run;
     if (run.crashed)
@@ -2797,7 +3019,7 @@
       const vx = sv.vx;
       let target = 0;
       if (rev)
-        target = -P.MAXV * REV_SPEED;
+        target = -(P.MAXVPhys || P.MAXV) * REV_SPEED;
       else if (drv)
         target = P.MAXV * 0.95;
       const maxAcc = P.MAXV * 2;
@@ -2812,14 +3034,16 @@
     }
     const veh = VEHICLES[store.currentVehicle];
     const IW = P.wheelI || wheelInertia(P.rb.mW);
+    const wheelieTau = P.rb.mTot * P.GRAV * WHEELBASE * 0.5;
     for (const wk of WHEELS) {
       let w = b.wheelRot[wk];
       let tau = 0;
       if (wk === "rear" && drv)
-        tau += torqueAt(veh, w, drv, P.torquePeak, P.rpmK || 1);
-      if (wk === "rear" && rev) {
-        const wantW = -P.MAXV * REV_SPEED / WHEEL_R;
-        tau += clamp((wantW - w) * IW / sub, -P.torquePeak, P.torquePeak);
+        tau += clamp(torqueAt(veh, w, drv, P.torquePeak, P.rpmK || 1), -wheelieTau, wheelieTau);
+      if (wk === "rear" && rev && !brk) {
+        const base = P.MAXVPhys || P.MAXV;
+        const wantW = -base * REV_SPEED / WHEEL_R;
+        tau += clamp(clamp((wantW - w) * IW / sub, -wheelieTau, wheelieTau), -wheelieTau, wheelieTau);
       }
       if (brk) {
         const cap = Math.min(P.brakePeak, Math.abs(w) * IW / sub);
@@ -2896,6 +3120,7 @@
       if (first) {
         b.fn[wk] = 0;
         b.slip[wk] = 0;
+        b.fricAcc[wk] = 0;
       }
       if (!isFinite(g.y))
         continue;
@@ -2928,13 +3153,19 @@
       const vt = W._vx * tx + W._vy * ty;
       const w = b.wheelRot[wk];
       const slip = vt - w * WHEEL_R;
-      let J = -slip / (W.im + WHEEL_R * WHEEL_R / IW);
+      let dJ = -slip / (W.im + WHEEL_R * WHEEL_R / IW);
       const Jmax = mu * Jn;
-      if (Math.abs(J) > Jmax)
-        J = Math.sign(J) * Jmax;
-      if (J !== 0) {
-        addVel(W, tx * J * W.im, ty * J * W.im);
-        b.wheelRot[wk] = w - J * WHEEL_R / IW;
+      const acc0 = b.fricAcc[wk];
+      const lo = -Jmax;
+      const hi = Jmax;
+      if (acc0 + dJ < lo)
+        dJ = lo - acc0;
+      else if (acc0 + dJ > hi)
+        dJ = hi - acc0;
+      b.fricAcc[wk] = acc0 + dJ;
+      if (dJ !== 0) {
+        addVel(W, tx * dJ * W.im, ty * dJ * W.im);
+        b.wheelRot[wk] = w - dJ * WHEEL_R / IW;
       }
       if (first) {
         const denom = Math.max(20, Math.abs(w * WHEEL_R));
@@ -3164,12 +3395,13 @@
     const SUS = P.susp;
     const mu = P.mu;
     const crashTol = Math.max(8, 30 - (P.crashMargin - 4) * 1.4);
-    const tiltMin = Math.min(0.7 * Math.PI, (0.55 + (P.crashMargin - 4) * 0.014) * Math.PI);
+    const tiltMin = crashTiltDeg(P.crashMargin) * Math.PI / 180;
     const drvK = key.right && !run.crashed ? 1 : 0;
     const revK = key.rev && !run.crashed && b.grounded > 0 ? 1 : 0;
     const revReady = revK && systemVel(b).vx < REV_ENTER_V;
     const brkK = (key.left || revK && !revReady) && !run.crashed ? 1 : 0;
     const rev = revReady ? 1 : 0;
+    const warp = activeMode() === "warp";
     const prevGrounded = b.grounded;
     const prevSpin = { rear: b.wheelRot.rear, front: b.wheelRot.front };
     const ang0 = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
@@ -3186,6 +3418,13 @@
       applySuspension(b, SUS, sub);
       applyDrive(b, P, sub, drvK, brkK, rev);
       applyDrag(b, P, sub);
+      if (warp && drvK && !run.crashed) {
+        const tgt = P.MAXV * 0.98;
+        const svw = systemVel(b);
+        const add = clamp((tgt - svw.vx) * WARP_ACC * sub, 0, WARP_V_CAP * sub);
+        for (const p of b.pts)
+          p._vx += add;
+      }
       solveVelocityConstraints(b, P, SUS, mu, sub);
       for (const p of b.pts) {
         if (!isFinite(p._vx) || Math.abs(p._vx) > NUM_CAP_V) {
@@ -7295,6 +7534,7 @@
     }).join("")}</div>` : emptyState("还没有已通关的场景：把任一支线的 6 关全部通关即可解锁对应场景") : ""}
   <button class="btn backBtn" data-act="back">返回</button>`);
   }
+  var MAXED = { engine: MAX_LV, tire: MAX_LV, frame: MAX_LV, susp: MAX_LV };
   function renderGaragePanel() {
     panelKind = "garage";
     showPanel(`<div class="modeTitle">\uD83C\uDFCD️ 车库</div>
@@ -7306,8 +7546,8 @@
         icon: v.icon,
         title: v.name,
         sub: v.desc,
-        meta: `速度${Math.round(v.spd * 100)}% · 驱动${Math.round(v.drv * 100)}% · 抓地${Math.round(v.grp * 100)}% · 旋转${Math.round(v.air * 100)}% · 油箱${Math.round(v.tank * 100)}%`,
-        right: sel ? "✅ 使用中" : own ? "已拥有" : "\uD83E\uDE99 " + v.price,
+        meta: `速度${Math.round(v.spd * 100)}% · 驱动${Math.round(v.drv * 100)}% · 抓地${Math.round(v.grp * 100)}% · 旋转${Math.round(v.air * 100)}% · 油箱${Math.round(v.tank * 100)}% · 满级极速 <b>${Math.round(toKmh(topSpeedOf(v, MAXED)))} km/h</b>`,
+        right: sel ? "✅ 使用中" : own ? "已拥有" : "\uD83E\uDE99 " + v.price.toLocaleString(),
         interactive: true,
         selected: sel,
         attrs: `data-act="veh" data-veh="${i}"`
@@ -7637,6 +7877,29 @@
 
   // src/ui/shop.js
   var shopEl = document.getElementById("shop");
+  var UP_LABEL = {
+    engine: "引擎",
+    tire: "轮胎",
+    frame: "车架",
+    susp: "减震"
+  };
+  function previewStats(veh, up) {
+    const h = deriveHandling(veh, up);
+    const s = deriveSuspension(veh, up);
+    return {
+      极速: Math.round(toKmh(h.MAXV)),
+      扭矩: Math.round(h.torquePeak / 1000),
+      抓地: Math.round(deriveFriction(1, veh, up) * 100) / 100,
+      抗摔: Math.round(crashTiltDeg(h.crashMargin)),
+      悬挂: Math.round(s.travel * 10) / 10
+    };
+  }
+  var UP_TOUCHES = {
+    engine: ["极速", "扭矩"],
+    tire: ["抓地", "极速"],
+    frame: ["抗摔", "悬挂"],
+    susp: ["悬挂"]
+  };
   function openShop() {
     store.shopOpen = true;
     renderShop();
@@ -7678,7 +7941,7 @@
         }
       } else {
         ultraEl.className = "upUltra";
-        ultraEl.textContent = "\uD83D\uDCA1 购买并升满「竞速车」或「越野车」，可解锁它们各自的特殊模式";
+        ultraEl.textContent = "\uD83D\uDCA1 除山地车外，每辆车都有专属特殊模式：四项升级全部升满后，到车库花金币解锁";
       }
     }
     for (const k of ["engine", "tire", "frame", "susp"]) {
@@ -7689,6 +7952,19 @@
       const btn = document.querySelector('[data-buy="' + k + '"]');
       if (!btn)
         continue;
+      const dg = document.getElementById("dg-" + k);
+      const now = previewStats(VEHICLES[store.currentVehicle], u);
+      if (dg) {
+        if (lv >= MAX_LV) {
+          dg.textContent = UP_TOUCHES[k].map((n) => n + " " + now[n]).join(" · ") + " · 已满级";
+          dg.className = "upDelta max";
+        } else {
+          const next = previewStats(VEHICLES[store.currentVehicle], { ...u, [k]: lv + 1 });
+          const changed = UP_TOUCHES[k].filter((n) => next[n] !== now[n]);
+          dg.textContent = changed.length ? changed.map((n) => n + " " + now[n] + " → " + next[n]).join(" · ") : "下一级已达该指标上限";
+          dg.className = "upDelta";
+        }
+      }
       if (lv >= MAX_LV) {
         btn.textContent = "已满级";
         btn.disabled = true;
@@ -7713,13 +7989,18 @@
         note.textContent = "金币不足，去关卡里收集吧！";
       return;
     }
+    const before = previewStats(VEHICLES[store.currentVehicle], u);
     store.gold -= c;
     u[k] = lv + 1;
     applyUpgrades();
     save();
     renderShop();
+    const after = previewStats(VEHICLES[store.currentVehicle], u);
+    const moved = Object.keys(after).filter((n) => after[n] !== before[n]);
+    const msg = UP_LABEL[k] + " Lv" + lv + " → Lv" + (lv + 1) + (moved.length ? "：" + moved.map((n) => n + " +" + Math.round((after[n] - before[n]) * 100) / 100).join(" · ") : "");
     if (note)
       note.textContent = "升级成功！";
+    showToast("\uD83D\uDD27 " + msg, 1600);
     playCoinSound();
   }
   function initShop() {

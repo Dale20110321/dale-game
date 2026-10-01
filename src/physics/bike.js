@@ -25,8 +25,8 @@ import {
   LAND_REF, CONTACT_BAND, CONTACT_BIAS, BIAS_MAX_V, STUN_TIME,
   REV_SPEED, REV_ENTER_V,
   SOLVER_TOL, SOLVER_ITERS, PEN_TOL, FN_MAX_K, NUM_CAP_V, HEAD_R,
-  ROLL_RES_K, AIR_DRAG_K, wheelInertia, torqueAt,
-  CRASH_FUEL_LOSS, CRASH_TIME_PENALTY,
+  ROLL_RES_K, AIR_DRAG_K, wheelInertia, torqueAt, topSpeedOf, crashTiltDeg,
+  CRASH_FUEL_LOSS, CRASH_TIME_PENALTY, MAX_LV, REF_SPEED,
   deriveHandling, deriveRigidBody, deriveSuspension, deriveFriction,
 } from "../config/constants.js";
 import { VEHICLES } from "../config/vehicles.js";
@@ -63,8 +63,33 @@ export function bikeVx() {
   return systemVel(bike).vx;
 }
 
-/** 竞速车「极速模式」的速度倍率（×10） */
+/** 竞速车「极速模式」把 MAXV 抬到基准极速的多少倍 */
 const ULTRA_SPEED_N = 10;
+/** 终极模式的扭矩转速域倍率 */
+const ULTRA_RPM_N = 8;
+/** 「光子跃迁」持续推力：加速度（/s）与单子步速度上限 */
+const WARP_ACC = 6.5;
+const WARP_V_CAP = 90;
+
+/**
+ * 当前生效的特殊模式代号（未解锁返回空串）。
+ *
+ * ★ 模式的**效果**按 mode 分派，而不是到处写 `v.id === "xxx"`：
+ *   每辆车的 ultra.mode 是一个稳定标识，物理层只认这一个字符串，
+ *   以后加车只要在 vehicles.js 里挂一个 mode，不用改物理层的任何 if。
+ * 模式表（vehicles.js 里的 ultra.mode）：
+ *   stable 贴地   —— 轮/轴钉在地表，永不腾空、摔车无效（越野车）
+ *   surge  极速   —— 红线与极速暴涨（竞速车）
+ *   shield 护盾   —— 摔车免疫，但保留全部腾空与操控（磁力堡垒）
+ *   phase  相位   —— 摔车免疫 + 燃料无限 + 危险段限速豁免（影行者）
+ *   railgun 轨道炮 —— 推力与红线同时暴涨（电磁王座）
+ *   warp   跃迁   —— 持续推力冲量 + 红线倍增（光子摩托）
+ */
+export function activeMode(veh) {
+  const v = veh || VEHICLES[store.currentVehicle];
+  if (!v || !v.ultra || store.ultra[v.id] !== true) return "";
+  return v.ultra.mode || "";
+}
 
 /** 当前车辆的专属特殊模式是否已解锁 */
 export function isUltraActive() {
@@ -73,7 +98,13 @@ export function isUltraActive() {
 
 /** 越野车「贴地模式」是否生效（已解锁并选用越野车） */
 export function isUltraStable() {
-  return isUltraActive() && VEHICLES[store.currentVehicle].id === "mud";
+  return activeMode() === "stable";
+}
+
+/** 是否处于"摔车免疫"模式（护盾 / 相位；贴地模式另行处理） */
+export function isCrashImmune() {
+  const m = activeMode();
+  return m === "shield" || m === "phase" || m === "stable";
 }
 
 /** 贴地模式：把车轮/轮轴垂直钉到各自下方地表，头保持在轴中线 SEAT_H 上方（水平滑行，永不腾空） */
@@ -111,26 +142,32 @@ export function applyUpgrades() {
   store.phys.mu = deriveFriction(store.phys.TRACTION, v, up);
   store.phys.wheelI = wheelInertia(rb.mW); // 轮转动惯量（实心圆盘近似）
 
-  // 倒挡的**物理**基准极速：必须在下面"极速模式"把 MAXV 抬到 4200 **之前**存一份。
-  // 4200 按其注释是"HUD 表盘 / 相机速度感的标定参考"，不是物理极速；
-  // 拿它当倒挡目标会让竞速车终极模式"倒着比正着还快"（实测倒速 1239 vs 正速 927 px/s）。
+  // 倒挡的**物理**基准极速：必须在下面特殊模式把 MAXV 抬高**之前**存一份。
+  // 拿"极速模式"的标称值当倒挡目标，会让终极模式"倒着比正着还快"。
   store.phys.MAXVPhys = store.phys.MAXV;
 
   // 特殊终极模式（放在所有派生量覆写之后：μ 由 deriveFriction 派生，
   // 若在前面放大会被覆盖，车会因打滑而极速上不去）
-  if (isUltraActive() && v.id === "sport") {
-    // 加速度收敛：极速模式不再放大扭矩（×10 起步太冲），保持普通档位的加速手感，
-    // 极速（MAXV=4200）仍由下面保留——慢加速、冲高极速。
-    // store.phys.torquePeak *= ULTRA_SPEED_N;
-    // store.phys.brakePeak *= ULTRA_SPEED_N;
-    // 极速标定参考（HUD 表盘 / 相机速度感）：贴近"实际可达"而不是虚标一个大数，
-    // 否则 speedN = 速度/MAXV 趋近 0，相机无前推、表盘只走 1%，极速感全无。
-    store.phys.MAXV = Math.max(store.phys.MAXV, 4200);
-    store.phys.rpmK = 12; // 扭矩域宽到高速段仍满功率
+  const mode = activeMode(v);
+  if (mode === "surge") {
+    // 极速模式：扭矩域拉到极高 → 扭矩曲线在高速段仍是满功率，配合极低风阻真的冲得上去。
+    store.phys.rpmK *= ULTRA_RPM_N;
+    store.phys.MAXV = Math.max(store.phys.MAXV, ULTRA_SPEED_N * REF_SPEED);
     store.phys.mu = Math.max(store.phys.mu, 4); // 高抓地：大扭矩不打滑
     store.phys.airDragK = AIR_DRAG_K * 0.1; // 极低风阻，极速真正冲上去
-  } else {
-    store.phys.rpmK = 1;
+  } else if (mode === "railgun") {
+    // 电磁轨道炮：推力与红线同时暴涨（"变态"到极速表读数本身都不够用了）
+    store.phys.torquePeak *= ULTRA_TORQUE_N;
+    store.phys.rpmK *= ULTRA_RPM_N * 1.6;
+    store.phys.mu = Math.max(store.phys.mu, 3.4);
+    store.phys.airDragK = AIR_DRAG_K * 0.2;
+    store.phys.MAXV = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N;
+  } else if (mode === "warp") {
+    // 光子跃迁：直接给整车注入持续推力冲量（见 stepPhysics 的 boost 段）
+    store.phys.MAXV = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N * 1.6;
+    store.phys.rpmK *= 2;
+  }
+  if (!mode || mode === "stable" || mode === "shield" || mode === "phase") {
     store.phys.airDragK = 0;
   }
   bike.rb = rb;
@@ -204,6 +241,7 @@ export function resetBike(x) {
   b.susp.front.t = 0; b.susp.front.v = 0;
   b.slip.rear = 0; b.slip.front = 0;
   b.fn.rear = 0; b.fn.front = 0;
+  b.fricAcc.rear = 0; b.fricAcc.front = 0;
   // 助推计时必须一并归零：boostImpulse 只要 boostT>0 就继续改写 Verlet 前一帧位置
   // （=注入速度）。压过加速带后 0.5s 内重开/换关，新一局会白送一段速度冲量。
   b.boostT = 0;
@@ -234,9 +272,9 @@ export function rotateBikeAround(mx, my, rot, count) {
   if (count !== false) b.rotAcc += rot;
 }
 
-/** 摔车（附惩罚：扣 8% 燃料 + 2s 计时惩罚）；贴地模式下永不摔车 */
+/** 摔车（附惩罚：扣 8% 燃料 + 2s 计时惩罚）；护盾 / 相位 / 贴地模式下永不摔车 */
 export function crash() {
-  if (isUltraStable()) return;
+  if (isCrashImmune()) return;
   const run = store.run;
   if (run.crashed) return;
   run.crashed = true;
@@ -372,11 +410,23 @@ function applyDrive(b, P, sub, drv, brk, rev) {
   }
   const veh = VEHICLES[store.currentVehicle];
   const IW = P.wheelI || wheelInertia(P.rb.mW);
+  /**
+   * 驱动扭矩的**翘头上限**：车轮收到的驱动扭矩会通过悬挂把车架向后掀，
+   * 而重力绕后接地点的恢复力矩只有 mTot·g·WHEELBASE/2。τ 一旦越过它，车必然后空翻
+   * ——实测引擎一升级扭矩就翻：扭矩峰值 18k→47k 时恢复力矩才 44.7k，
+   * 于是山地车 Lv50 起、竞速车 Lv50 起、光子摩托 Lv25 起就在后空翻摔车
+   * （光子摩托 480 帧里 370 帧在摔，越野车 Lv75 直接躺着不动 v=9px/s）。
+   *
+   * 限幅的**不是速度**而是扭矩，所以引擎升级带来的极速提升（来自抬红线 rpmK，
+   * 不来自堆扭矩）完全不受影响：τ 被压在恢复力矩之下，驱动力仍够把车推上去。
+   * 只限驱动扭矩，刹车 / 倒挡伺服 / 被动阻力都不动 —— 那三者本来就不产生这个力矩。
+   */
+  const wheelieTau = P.rb.mTot * P.GRAV * WHEELBASE * 0.5;
   for (const wk of WHEELS) {
     let w = b.wheelRot[wk];
     let tau = 0;
     // 油门只驱动后轮；刹车前后轮都作用（真车如此）
-    if (wk === "rear" && drv) tau += torqueAt(veh, w, drv, P.torquePeak, P.rpmK || 1);
+    if (wk === "rear" && drv) tau += clamp(torqueAt(veh, w, drv, P.torquePeak, P.rpmK || 1), -wheelieTau, wheelieTau);
     // 倒挡 = 反向驱动力矩，把后轮推向目标倒转角速度（同样只驱动后轮）。
     // 用"趋近目标轮速"的差动式扭矩而不是固定反向扭矩：倒车到极速后扭矩自然归零。
     //
@@ -388,7 +438,7 @@ function applyDrive(b, P, sub, drv, brk, rev) {
     if (wk === "rear" && rev && !brk) {
       const base = P.MAXVPhys || P.MAXV;
       const wantW = (-base * REV_SPEED) / WHEEL_R;
-      tau += clamp(((wantW - w) * IW) / sub, -P.torquePeak, P.torquePeak);
+      tau += clamp(clamp(((wantW - w) * IW) / sub, -wheelieTau, wheelieTau), -wheelieTau, wheelieTau);
     }
     if (brk) {
       // 刹车扭矩不得把轮子转成倒转（否则会变成"倒车"）；到 0 即抱死 → 转滑动摩擦
@@ -475,7 +525,7 @@ function solveContacts(b, P, mu, sub, first, geo) {
   for (const wk of WHEELS) {
     const W = b[wk];
     const g = geo[wk].info;
-    if (first) { b.fn[wk] = 0; b.slip[wk] = 0; }
+    if (first) { b.fn[wk] = 0; b.slip[wk] = 0; b.fricAcc[wk] = 0; }
     if (!isFinite(g.y)) continue;
     const n = geo[wk].norm;
     const cosT = -n.y; // 1/√(1+m²)
@@ -501,15 +551,30 @@ function solveContacts(b, P, mu, sub, first, geo) {
     }
     if (first) b.fn[wk] = Jn / sub;
     // 切向：接触点相对滑动 slip = v·t − ωR（<0 = 空转，>0 = 拖滞/抱死）
+    //
+    // ★ 摩擦冲量必须**按子步累加**并对**累计量**限幅，而不是每次迭代都从零算。
+    //   旧实现每轮迭代都重新求 J = −slip/(…) 再直接施加：一轮迭代里打滑一旦饱和
+    //   （|J| ≥ μ·Jn），J 就恒等于 ±μ·Jn，而 solveContacts 一轮迭代要跑 SOLVER_ITERS=8 次
+    //   —— 于是一个子步能施加**最多 8 倍**摩擦力。这条过量的力同时
+    //     ① 让实际推力远超物理上限（表观"凭空加速"）；
+    //     ② 通过 μ·Fn 的反作用力矩把车架向后掀 —— 引擎一升级扭矩就更容易后空翻摔车。
+    //   实测未修时：山地车 Lv50 有 190/480 帧在摔，越野车 Lv75 直接躺着不动（v=9px/s）。
+    //   现在每轮只施加**增量**，并要求 |累计| ≤ μ·Jn（标准 accumulated-impulse 限幅）。
     const vt = W._vx * tx + W._vy * ty;
     const w = b.wheelRot[wk];
     const slip = vt - w * WHEEL_R;
-    let J = (-slip) / (W.im + (WHEEL_R * WHEEL_R) / IW);
+    let dJ = (-slip) / (W.im + (WHEEL_R * WHEEL_R) / IW);
     const Jmax = mu * Jn;
-    if (Math.abs(J) > Jmax) J = Math.sign(J) * Jmax;
-    if (J !== 0) {
-      addVel(W, tx * J * W.im, ty * J * W.im);
-      b.wheelRot[wk] = w - (J * WHEEL_R) / IW;
+    const acc0 = b.fricAcc[wk];
+    // 累计值限幅：只允许本轮把 |acc| 推近 μ·Jn，不允许越界（越界即多给一次摩擦力）
+    const lo = -Jmax;
+    const hi = Jmax;
+    if (acc0 + dJ < lo) dJ = lo - acc0;
+    else if (acc0 + dJ > hi) dJ = hi - acc0;
+    b.fricAcc[wk] = acc0 + dJ;
+    if (dJ !== 0) {
+      addVel(W, tx * dJ * W.im, ty * dJ * W.im);
+      b.wheelRot[wk] = w - (dJ * WHEEL_R) / IW;
     }
     if (first) {
       const denom = Math.max(20, Math.abs(w * WHEEL_R));
@@ -744,7 +809,7 @@ export function stepPhysics() {
   //  · crashTol：头离地多近算"撑在地上"（0 级 30px → 摔得早，满级 16px → 摔得晚）
   //  · tiltMin：车架要翻过多大角度才算倒立（0 级 ≈99°，满级 ≈124°）
   const crashTol = Math.max(8, 30 - (P.crashMargin - 4) * 1.4);
-  const tiltMin = Math.min(0.7 * Math.PI, (0.55 + (P.crashMargin - 4) * 0.014) * Math.PI);
+  const tiltMin = (crashTiltDeg(P.crashMargin) * Math.PI) / 180;
   const drvK = key.right && !run.crashed ? 1 : 0;
   // 倒挡是**独立按键**（↓/S），不是"停住后继续踩刹车"——
   // 刹车在本项目里有一条刻意的不变量：永远只减速、绝不倒转轮子（见 applyDrive）。
@@ -756,6 +821,8 @@ export function stepPhysics() {
   const revReady = revK && systemVel(b).vx < REV_ENTER_V;
   const brkK = (key.left || (revK && !revReady)) && !run.crashed ? 1 : 0;
   const rev = revReady ? 1 : 0;
+  // 「光子跃迁」的持续推力在整帧内固定，每子步重查 mode 是纯浪费
+  const warp = activeMode() === "warp";
   const prevGrounded = b.grounded;
   const prevSpin = { rear: b.wheelRot.rear, front: b.wheelRot.front };
   const ang0 = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
@@ -777,6 +844,13 @@ export function stepPhysics() {
     applyDrive(b, P, sub, drvK, brkK, rev);
     // 5) 空气阻力
     applyDrag(b, P, sub);
+    // 5.5) 「光子跃迁」：踩住油门即持续注入水平推力冲量（0.7s 内逼近标称极速）
+    if (warp && drvK && !run.crashed) {
+      const tgt = P.MAXV * 0.98;
+      const svw = systemVel(b);
+      const add = clamp((tgt - svw.vx) * WARP_ACC * sub, 0, WARP_V_CAP * sub);
+      for (const p of b.pts) p._vx += add;
+    }
     // 6) 速度层约束（车架刚性 / 悬挂 / 单侧接触）
     solveVelocityConstraints(b, P, SUS, mu, sub);
     // 7) 数值异常兜底（正常游玩与全部测试都不应触发；触发即计数，供断言守护）

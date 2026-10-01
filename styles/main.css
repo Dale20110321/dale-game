@@ -367,6 +367,17 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 }
 .upT { font-size: 17px; font-weight: var(--font-title-weight); width: 66px; text-align: left; }
 .upD { font-size: var(--font-caption-size); color: var(--text-lo); flex: 1; text-align: left; }
+/* 升级预览：把"现在 → 下一级"的真实读数差打出来，让花钱之前就知道会变什么。
+   （旧版只有一句静态说明，点下去看不出变化 —— 这正是"升级没感觉"的另一半原因。） */
+.upDelta {
+  flex: 2.2; text-align: left; font-size: var(--font-caption-size);
+  color: var(--text-hi); font-variant-numeric: tabular-nums;
+}
+.upDelta.max { color: var(--text-lo); }
+@media (max-width: 420px) {
+  .upItm { flex-wrap: wrap; gap: var(--space-2); }
+  .upDelta { flex: 1 0 100%; }
+}
 .upL { width: 54px; color: var(--success); font-weight: var(--font-title-weight); }
 #shop .upNote { font-size: var(--font-caption-size); color: var(--gold); min-height: 18px; margin: var(--space-2) 0; }
 /* 特殊模式解锁提醒：随升级进度变化（锁定=info 色，可解锁=金色，已开启=成功色） */

@@ -654,20 +654,21 @@ export function loadSave() {
     }
 
     // 特殊模式体验包（localStorage 键 bike_trial=1）：每次加载都把
-    // "满级竞速车/越野车 + 两个特殊模式 + 200 万金币"备好，供直接体验终极模式。
-    // 玩家游玩/覆盖存档无妨——下次进入自动恢复；删除该键即回归"满级+100 万"正常规则。
+    // "满级的全部车辆 + 全部特殊模式 + 200 万金币"备好，供直接体验终极模式。
+    // 玩家游玩/覆盖存档无妨——下次进入自动恢复；删除该键即回归正常规则。
     if (lsGet("bike_trial") === "1") {
-      store.ownedVehicles = [0, 1, 2];
+      store.ownedVehicles = VEHICLES.map((v, i) => i);
       if (store.gold < 2000000) store.gold = 2000000;
-      for (const id of ["sport", "mud"]) {
+      for (const v of VEHICLES) {
+        if (!v.ultra) continue;
+        const id = v.id;
         if (!store.upgrades[id]) store.upgrades[id] = { engine: 0, tire: 0, frame: 0, susp: 0 };
         store.upgrades[id].engine = MAX_LV;
         store.upgrades[id].tire = MAX_LV;
         store.upgrades[id].frame = MAX_LV;
         store.upgrades[id].susp = MAX_LV;
+        store.ultra[v.id] = true;
       }
-      store.ultra.sport = true;
-      store.ultra.mud = true;
       if (!store.ownedVehicles.includes(store.currentVehicle)) store.currentVehicle = 1;
     }
   } catch (e) {
