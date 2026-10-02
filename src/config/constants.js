@@ -429,8 +429,8 @@ export const CAN_FUEL = 0.6;
  * 排位赛金币：胜利 = RANK_WIN_GOLD_BASE + rating × RANK_WIN_GOLD_K，失败 = RANK_LOSS_GOLD。
  * 胜利收益随段位分升高而升高，是"排位赛阶段也能把车升满"的收入来源。
  */
-export const RANK_WIN_GOLD_BASE = 500;
-export const RANK_WIN_GOLD_K = 0.25;
+export const RANK_WIN_GOLD_BASE = 800;
+export const RANK_WIN_GOLD_K = 0.5;
 export const RANK_LOSS_GOLD = 150;
 /** 排位赛金币（won 为胜负） */
 export const rankGold = (won, rating) =>
