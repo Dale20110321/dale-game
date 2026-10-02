@@ -20,7 +20,7 @@ const GATE_START_ALLOW = 900;
 
 /**
  * 加速带距限速区（危险段）的最小间距（px）：≥ 一次全力刹车的距离，
- * 保证"被加速"与"必须减速"不会挤在一处。tools/autotest.mjs 有断言守护。
+ * 保证"被加速"与"必须减速"不会挤在一处。
  */
 export const BOOST_HAZARD_GAP = 400;
 
