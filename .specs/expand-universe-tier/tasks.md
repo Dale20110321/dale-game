@@ -95,7 +95,7 @@
       （归墟 grip=6.0 会主导 max 归一，把其余 26 台压到 [0.09,0.5]）；
       mode 上限由 4 改为 5（27 辆 / 6 种通用 mode，"≤4" 算术上不可能）
 
-- [ ] Task 7: 宇宙级车辆（6 台）
+- [x] Task 7: 宇宙级车辆（6 台）
   - [x] Task 7.1: per-vehicle 升级上限
     - [x] Task 7.1.1: `vehicles.js` 宇宙车增加 `maxLv: 500`；`constants.js` 新增 `maxLvOf(veh)`
     - [x] Task 7.1.2: `storage.js` 的 `clampLv(v, maxLv)` / `shop.js` / `panels.js` 全部改读 `maxLvOf`
