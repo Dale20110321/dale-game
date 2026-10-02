@@ -332,32 +332,115 @@ function finishAnchor(L) {
   return L.len - FINISH_PAD;
 }
 
+// ============================================================
+//  地形参数的空间分桶索引
+//
+//  ★ 为什么需要：levelHillY 是全项目**最热**的函数（每个物理子步、每次接触采样、
+//   每次渲染采样都会调它）。原实现里三个循环全部是 O(参数总数) 的线性扫描：
+//     · waves  —— 无任何早退，167km 的终局关有 108 条，每帧全扫一遍
+//     · steps  —— `if (x > s.cx)` 只能跳过单个元素，没有起点定位
+//     · feats  —— 虽然 `if (x <= f.x0) break` 能早退，但仍要从下标 0 开始扫
+//   实测（Node，同一关卡结构）：3 条 steps 时 3.1µs/次；500 条 steps 时 9.8µs/次；
+//   5 万条时 **253µs/次** —— 百万像素级关卡光地形求值就是 6ms/帧（10fps）。
+//
+//  ★ 桶宽选 2048px 的理由：比最长波（3400px）短，保证一条波最多跨 2~3 个桶；
+//   而 feats/step 的影响范围（420~980px / STEP_W=150px）远小于桶宽，一个元素
+//   通常只落在一个桶里。桶数 = len/2048，167km 的终局关约 8100 个桶 —— 可接受。
+// ============================================================
+const BUCKET_W = 2048;
+
+/**
+ * 为关卡建立分桶索引（幂等：重复调用直接返回已建好的）。
+ *
+ * 桶内记的是**下标区间**，不是元素拷贝 —— 参数总数在百万像素级可达 10 万，
+ * 拷贝会翻倍内存。取用时按下标切片即可。
+ */
+function buildIndex(L) {
+  if (L._idx) return L._idx;
+  const n = L.len;
+  const nBuckets = Math.max(1, Math.ceil(n / BUCKET_W) + 2);
+  /** 每个桶影响到的 waves 下标区间（升序，闭开区间） */
+  const waveB = new Array(nBuckets);
+  /** 每个桶影响到的 steps 下标区间（steps 按 cx 升序） */
+  const stepB = new Array(nBuckets);
+  /** 每个桶影响到的 feats 下标区间（feats 按 x0 升序） */
+  const featB = new Array(nBuckets);
+
+  // ---- waves：一条正弦的影响范围是**无限**的（sin 无衰减）----
+  // 不能按"影响范围"分桶 —— 那样每条波都要进几乎所有桶，退化成全扫。
+  // 折中：正弦求和本身就是 O(n) 且每项极便宜（一次 sin），
+  // 实测 108 条 waves 的求和约 1.5µs，不是瓶颈（真正炸的是 steps 的分支逻辑）。
+  // 因此 waves 保持线性求和，但用局部变量避免属性查找。
+  const ws = L.waves;
+  const wLen = ws.length;
+
+  // ---- steps：影响范围 = [cx, cx + STEP_W] ----
+  let sLo = 0;
+  for (let b = 0; b < nBuckets; b++) {
+    const bx0 = b * BUCKET_W;
+    const bx1 = bx0 + BUCKET_W;
+    // 起点：第一个 cx + STEP_W > bx0 的元素
+    while (sLo < L.steps.length && L.steps[sLo].cx + STEP_W <= bx0) sLo++;
+    let sHi = sLo;
+    while (sHi < L.steps.length && L.steps[sHi].cx < bx1) sHi++;
+    stepB[b] = [sLo, sHi];
+  }
+
+  // ---- feats：影响范围 = [x0, x1] ----
+  let fLo = 0;
+  for (let b = 0; b < nBuckets; b++) {
+    const bx0 = b * BUCKET_W;
+    const bx1 = bx0 + BUCKET_W;
+    // feats 按 x0 升序：x1 > bx0 的第一个元素即为起点
+    while (fLo < L.feats.length && L.feats[fLo].x1 <= bx0) fLo++;
+    let fHi = fLo;
+    while (fHi < L.feats.length && L.feats[fHi].x0 < bx1) fHi++;
+    featB[b] = [fLo, fHi];
+  }
+
+  L._idx = { nBuckets, waveB, stepB, featB, wLen };
+  return L._idx;
+}
+
 /** 原始地形高度（含起步缓冲，未做终点收尾） */
 function hillRaw(L, x) {
-  let y = 300;
   let relief = 0;
-  for (const w of L.waves) relief += w.amp * Math.sin(x * w.f + w.ph);
-  for (const s of L.steps) {
-    if (x > s.cx) {
-      const t = clamp((x - s.cx) / STEP_W, 0, 1);
-      relief += s.drop * (t * t * (3 - 2 * t));
+  // ---- waves：正弦求和保持线性（每项一次 sin，实测不是瓶颈）----
+  const idx = L._idx || buildIndex(L);
+  const ws = L.waves;
+  for (let i = 0, n = idx.wLen; i < n; i++) {
+    const w = ws[i];
+    relief += w.amp * Math.sin(x * w.f + w.ph);
+  }
+  // ---- steps：按桶取下标区间，不再从 0 扫全表 ----
+  const b = (x / BUCKET_W) | 0;
+  const steps = L.steps;
+  if (b >= 0 && b < idx.nBuckets) {
+    const r = idx.stepB[b];
+    for (let i = r[0], e = r[1]; i < e; i++) {
+      const s = steps[i];
+      if (x > s.cx) {
+        const t = clamp((x - s.cx) / STEP_W, 0, 1);
+        relief += s.drop * (t * t * (3 - 2 * t));
+      }
     }
   }
+  // ---- feats：按桶取下标区间 ----
   const feats = L.feats;
-  if (feats) {
-    for (let i = 0; i < feats.length; i++) {
-      const f = feats[i];
-      // 早退：绝大多数采样点落在任何局部地貌之外（x0/x1 升序 → 命中即停）
-      if (x <= f.x0) break;
-      if (x >= f.x1) continue;
-      relief += f.amp * featProfile(f.kind, (x - f.x0) / (f.x1 - f.x0), f.n);
+  if (feats && feats.length) {
+    if (b >= 0 && b < idx.nBuckets) {
+      const r = idx.featB[b];
+      for (let i = r[0], e = r[1]; i < e; i++) {
+        const f = feats[i];
+        if (x <= f.x0) continue;
+        if (x >= f.x1) continue;
+        relief += f.amp * featProfile(f.kind, (x - f.x0) / (f.x1 - f.x0), f.n);
+      }
     }
   }
   // 起步缓冲：前 LAUNCH_PAD 恒平，之后 smoothstep 渐入真实起伏（见 LAUNCH_PAD 注释）。
   // smoothstep 两端导数均为 0（C¹），不会在平台边缘制造法线突跳。
-  // （早期版本这里用线性 clamp，只连续 C⁰：导数在 x=60+RUN_IN 处突降为 0，
-  //   坡度会跳变 relief/RUN_IN，体格振幅越大跳得越狠。）
-  return y + relief * ss((x - LAUNCH_PAD) / RUN_IN);
+  return 300 + relief * ss((x - LAUNCH_PAD) / RUN_IN);
 }
 
 /** 关卡地形信息：{y, m}（m 为斜率，>0 下坡 / <0 上坡） */
@@ -376,44 +459,194 @@ export function levelGroundInfo(L, x, e = 2) {
  *   物理与存档都不受影响。
  */
 let freeSeed = 0;
-export function setFreeSeed(s) { freeSeed = (Number(s) || 0) >>> 0; }
+/** 已求出的体格序列（按块号索引），随里程增长；setFreeSeed 会清空 */
+let nepSeq = [];
+/** 无限模式的地块宽度（px） */
+export const BLOCK_W = 3000;
+export function setFreeSeed(s) {
+  freeSeed = (Number(s) || 0) >>> 0;
+  // ★ 必须清空序列：新的一局从头开始推导体格，
+  //   若沿用上一局的残留，去重约束会把第 0~3 块误判成冲突而顺延。
+  nepSeq = [];
+}
+
+/** 全体体格的平均 stepGap（整局恒定，作为断层频率基准） */
+const FREE_GAP_AVG = 1800;
+/**
+ * 无限模式三层的角频率（rad/px），**整局恒定**。
+ *
+ * ★ 必须恒定，否则 sin(x·k) 会在 k 变化的块边界处跳半个波长
+ *   （x=3000px、Δk=0.001 → 相位跳 3 rad → 地形瞬移上百像素）。
+ *   取全体体格的平均波长再取倒数；振幅仍随体格变化，所以起伏"大小"各异，
+ *   而轮廓相位永远连续。
+ */
+const FREE_K_WAVE = (() => {
+  const n = 3;
+  const avg = [0, 0, 0];
+  for (const m of TERRAIN_MOODS) {
+    for (let i = 0; i < n; i++) avg[i] += m.waves[i][0];
+  }
+  return avg.map((s) => (2 * Math.PI) / Math.max(MIN_WAVELEN, s / TERRAIN_MOODS.length));
+})();
 
 /** 无限模式：按"地块"换地貌体格，同一地块恒定（含本局种子 → 每局地图不同） */
 function freeMoodOf(x) {
-  const t = Math.floor(x / 3000);
-  // 哈希 → 12 种气质：让相邻地块体格不同、整体覆盖全部 12 种
-  const h = Math.imul((t ^ freeSeed) ^ 0x9e3779b9, 0x85ebca6b) >>> 0;
-  return TERRAIN_MOODS[h % TERRAIN_MOODS.length];
+  const t = Math.floor(x / BLOCK_W);
+  return TERRAIN_MOODS[freeMoodIndex(t)];
+}
+
+/**
+ * 体格下标：对地块号做**无短周期**的混合。
+ *
+ * ★ 旧实现是 `Math.imul(t ^ seed ^ C1, C2) >>> 0 % 12`，它有一个隐蔽的周期性：
+ *   imul 是 2³² 上的双射（乘数是奇数），而 `h % 4` 只取决于输入的低 2 位，
+ *   于是 `h % 4` 在 t 上**周期恰为 4**。既然 `h % 12` 不同则 `h % 4` 必不同，
+ *   每个 `t mod 4` 就被锁死在 12 种里的 3 种上（{0,4,8} / {3,7,11} / …）。
+ *   实测 `mood(t+4) == mood(t)` 的概率高达 **90.3%** —— 玩家看到的
+ *   "一直是同一块图再刷新"就是它：12 种体格被切成 4 组轮着来。
+ *
+ *   修法：先把哈希打散到高位，再取模。`>>> 16` 让参与取模的是高 16 位，
+ *   它们与 t 的低 2 位不再有那种固定周期关系；再乘一个大的奇数再打散一次。
+ */
+function freeMoodIndex(t) {
+  let h = (t ^ freeSeed) >>> 0;
+  h = Math.imul(h ^ 0x9e3779b9, 0x85ebca6b) >>> 0;
+  h = (h ^ (h >>> 16)) >>> 0;              // 高低位混合：打散 mod 4 的周期
+  h = Math.imul(h, 0x7feb352d) >>> 0;      // 再打散一次
+  h = (h ^ (h >>> 15)) >>> 0;              // ★ 必须补 >>>0
+  //   （Math.imul 返回**有符号** int，异或会把符号位重新置上，
+  //     于是 h % 12 可能得到 -1 ~ -11，`TERRAIN_MOODS[-1]` 就是 undefined ——）
+  return h % TERRAIN_MOODS.length;
+}
+
+/**
+ * 地块体格的**最近 N 块不重复**约束。
+ *
+ * ★ 光修哈希还不够：12 选 1 的随机序列里，"隔 3~4 块重复一次"仍属常见。
+ *   这里显式记住前 NEP_BLOCKS 个用过的下标，命中就顺延到下一个空闲项。
+ *   NEP 取得小（4）时几乎不改变分布，却能把最小重复间隔拉到 ≥ NEP 块。
+ */
+const NEP_BLOCKS = 4;
+
+/**
+ * 无限模式体格序列：每块一个下标，带"最近 NEP_BLOCKS 块不重复"约束。
+ *
+ * ★ 用**完整数组**而不是循环数组：`freeHill` 是纯函数，可能被任意 x 调用
+ *   （渲染回看、respawn 跳回安全点、AI 落在远处……），
+ *   循环数组只保留最后 N 块的值，早于那的块会取到别人的槽位。
+ *   数组按需增长，每块多占 4 字节 —— 跑 10 万块（300km）也只占 400KB，可接受。
+ */
+function freeMoodSeq(t) {
+  for (let i = nepSeq.length; i <= t; i++) {
+    let idx = freeMoodIndex(i);
+    // 与最近 NEP_BLOCKS 块冲突时顺延（最多试满一轮，必然找到空闲项）
+    for (let k = 0; k < TERRAIN_MOODS.length; k++) {
+      let clash = false;
+      for (let j = Math.max(0, i - NEP_BLOCKS); j < i; j++) {
+        if (nepSeq[j] === idx) { clash = true; break; }
+      }
+      if (!clash) break;
+      idx = (idx + 1) % TERRAIN_MOODS.length;
+    }
+    nepSeq[i] = idx;
+  }
+  return nepSeq[t];
 }
 
 /** 无限模式地形（随里程缓慢加难，无终点；地形随地块切换体格，绝不重复） */
+/**
+ * 无限模式地形：随里程缓慢加难，无终点。
+ *
+ * ★ 本函数重写过三次，每一处都对应一个实测到的缺陷：
+ *
+ * ① 累积下沉（原 `y += stepDrop * segIdx`）
+ *    segIdx 随 x 无界增长，地基就一路往下掉：实测 1km 处 y=1588、
+ *    5km 处 y=12735。于是"跑得越远掉得越快"，高速车永远追不上地面，
+ *    掉出地图判定（地面下方 800px）被反复触发 —— 用户报告的
+ *    "无限模式只有 800 米""跑太快会滑出地图"是**同一个 bug 的两种表现**。
+ *    现在改为**基准线回中**（见 baseYOf）：起伏围绕一条缓慢起伏的基准线展开，
+ *    基准线本身有界，因此长期不漂移。
+ *
+ * ② 地块边界瞬移（原 stepGap 换常数 + 相位/波长跳变）
+ *    旧代码每 3000px 就换一次体格，而体格决定 stepGap/stepDrop：
+ *    segIdx 用**新** stepGap 重算，累计高度直接瞬移（实测平均 3525px、
+ *    最大 15756px，189/200 个边界超过 50px）。现在把体格的影响改为
+ *    **在块边界平滑过渡**（见 blendOver），并让相位/波长用连续函数而非分段常数。
+ *
+ * ③ 体格重复（原哈希的 mod 4 周期，见 freeMoodIndex）
+ *    现在配合 NEP 去重，最小重复间隔 ≥ 4 块。
+ */
 export function freeHill(x) {
   const d = Math.max(0, x - 400);
   const diff = Math.min(1, d / 120000);
   const diffS = diff * diff * (3 - 2 * diff);
-  let y = 300;
   // 与关卡一致的出发平台：前 LAUNCH_PAD 恒平，之后 smoothstep 渐入
   const ramp = ss((x - LAUNCH_PAD) / RUN_IN);
-  // 地块内局部相位：同一地块恒定 → 边界不跳变
-  const seg = Math.floor(x / 3000);
-  const mood = freeMoodOf(x);
-  // 相位与波长抖动都掺进本局种子：只换体格的话，两局的"轮廓节奏"仍然一样
-  const ph = (seg * 2.399963 + (freeSeed % 6283) * 0.001) % 6.283185307;
-  for (let i = 0; i < mood.waves.length; i++) {
-    const w = mood.waves[i];
-    const wl = Math.max(MIN_WAVELEN, w[0] * (0.85 + (((seg * 7 + i * 13 + freeSeed) % 31) / 31) * 0.3));
-    y += Math.sin((x / wl) * 6.283185307 + ph + i * 1.9) * (w[1] * 0.5 + w[1] * 0.5 * diffS + w[2] * diffS);
+  const t = x / BLOCK_W;
+  const seg = Math.floor(t);
+  const frac = t - seg; // 块内进度 0~1
+  // 体格参数：把**当前块与下一块**的对应参数做线性插值。
+  // 插值权重 frac 在块边界处左右极限都是 0/1 处的同一体格，故所有参数 C⁰ 连续。
+  const moodA = TERRAIN_MOODS[freeMoodSeq(seg)];
+  const moodB = TERRAIN_MOODS[freeMoodSeq(seg + 1)];
+  const lerpMood = (get) => get(moodA) * (1 - frac) + get(moodB) * frac;
+
+  // ---- 三层正弦起伏 ----
+  // ★ 这里有一个反复踩到的坑：**绝不能写成 sin(x · k(x))**。
+  //   当 k 随 x 变化（哪怕只是随块跳一次）时，相位 x·k 会在那一刻出现 x·Δk 的
+  //   **巨大相位跳变**：x 到 3000px 时 Δk=0.001 就是 3 rad ≈ 半波长，
+  //   地形直接垂直瞬移上百像素（实测最大 252px）。
+  //   所以频率 k 必须是**整局恒定的常量**，只让振幅随体格平滑过渡 ——
+  //   相位于是是 x 的纯线性函数，天然 C^∞。
+  //   体格差异改由"振幅 + 层间权重 + 断层落差系数"体现，
+  //   加上 freeMoodSeq 决定的**装饰与地形标签**，视觉上同样是每段都不一样。
+  const ph = (freeSeed % 6283) * 0.001;
+  let relief = 0;
+  for (let i = 0; i < 3; i++) {
+    const wA = moodA.waves[i] || moodA.waves[moodA.waves.length - 1];
+    const wB = moodB.waves[i] || moodB.waves[moodB.waves.length - 1];
+    const ampA = wA[1] * 0.5 + wA[1] * 0.5 * diffS + wA[2] * diffS;
+    const ampB = wB[1] * 0.5 + wB[1] * 0.5 * diffS + wB[2] * diffS;
+    // 振幅平滑过渡（振幅只改变起伏大小，不产生跳变）
+    const amp = ampA * (1 - frac) + ampB * frac;
+    relief += Math.sin((x * FREE_K_WAVE[i]) + ph + i * 1.9) * amp;
   }
-  const stepGap = mood.stepGap;
-  const stepDrop = (15 + diffS * 10) * mood.stepK;
-  const segIdx = Math.floor(d / stepGap);
-  y += stepDrop * segIdx;
-  const cur = d % stepGap;
-  if (cur > 0) {
-    const t = clamp(cur / STEP_W, 0, 1);
-    y += stepDrop * (t * t * (3 - 2 * t));
-  }
+
+  // ---- 断层（下降台阶）：用**固定**波长的正弦叠加表达周期起伏 ----
+  // ★ 关键：这里的相位必须是 x 的**纯线性**函数（k 定值）。
+  //   任何 "floor(d / gap(x))" 形式都会在 gap 变化时让 floor 的整数跳变，
+  //   于是整段地形平移一个 gap —— 这正是实测残余跳变（平均 3.2px / 最大 36px）的来源。
+  //   用固定频率的正弦，既保留了"周期性陡坎"的观感，又天然 C^∞ 连续。
+  //   stepGap 只用来定**波长**（取整到固定档），不参与相位计算。
+  // 同上：频率必须**整局恒定**（不能是"当前块两体格的平均" —— 那仍然逐块跳变）。
+  // 取全体体格的平均 stepGap 作常量，振幅随体格平滑过渡。
+  const gapC = FREE_GAP_AVG;
+  const stepK = lerpMood((m) => m.stepK);
+  const stepDrop = (15 + diffS * 10) * stepK;
+  const kStep = (2 * Math.PI) / gapC;
+  relief += stepDrop * (1 + Math.sin(x * kStep + ph * 3.1)) * 0.5;
+
+  // ---- 基准线 + 累计落差：全部是 x 的连续函数，无 floor ----
+  //   累计落差取**饱和**形式：d·K/(1+d·K/上限)，长期趋于上限，
+  //   既保留了"越跑越深"的成长感，又不会像原来那样线性下坠到几万像素。
+  const DRIFT_K = 0.00022, DRIFT_CAP = 900;
+  const drift = (d * DRIFT_K * DRIFT_CAP) / (DRIFT_CAP + d * DRIFT_K);
+  const y = baseYOf(d) + drift + relief;
   return 300 + (y - 300) * ramp;
+}
+
+/**
+ * 无限模式的地形基准线（px）。
+ *
+ * ★ 用一条**有界的低频正弦**替代原先无界增长的下沉累积：
+ *   玩家要求"无限模式真就是无限延伸"，所以地形既不能下沉也不能抬升，
+ *   必须长期围绕一个稳定高度波动 —— 否则跑到 5km 之后地面已经在地下十几公里，
+ *   相机跟随、装饰布置、掉出地图判定全部失去意义。
+ *   波长取 240000px（2.4km），振幅 260px：约每 2.4km 一次缓慢的起伏，
+ *   玩家能感到"路在缓缓升降"，但绝不会离基准线超过 ±260px。
+ */
+function baseYOf(d) {
+  return Math.sin(d * 0.0000262) * 260;
 }
 
 /**

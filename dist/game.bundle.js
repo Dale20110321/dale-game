@@ -48,6 +48,28 @@
   // src/core/utils.js
   var clamp = (v, a, b) => v < a ? a : v > b ? b : v;
   var lerp = (a, b, t) => a + (b - a) * t;
+  function toPlainDecimal(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0)
+      return "0";
+    if (n < 1)
+      return "0";
+    const s = BigInt(Math.floor(n)).toString();
+    return s;
+  }
+  function fromPlainDecimal(s) {
+    if (typeof s === "number")
+      return Number.isFinite(s) ? s : 0;
+    if (typeof s !== "string")
+      return 0;
+    const t = s.trim();
+    if (!/^\d+$/.test(t)) {
+      const n = Number(t);
+      return Number.isFinite(n) && n >= 0 ? n : 0;
+    }
+    const n = Number(t);
+    return Number.isFinite(n) ? n : 0;
+  }
   var wrapX = (v, m) => {
     const w = m || 1;
     return (v % w + w) % w;
@@ -219,6 +241,7 @@
   var crashTiltDeg = (crashMargin) => Math.min(0.7 * 180, (0.55 + (crashMargin - 4) * 0.014) * 180);
   var AIR_DRAG_K = 0.0026;
   var ROLL_RES_K = 0.02;
+  var LINEAR_DRAG_K = 2.2;
   var CONTACT_BIAS = 0.25;
   var BIAS_MAX_V = 400;
   var CONTACT_BAND = 2;
@@ -288,7 +311,7 @@
   var RANK_WIN_GOLD_K = 0.5;
   var RANK_LOSS_GOLD = 150;
   var rankGold = (won, rating) => Math.round(won ? RANK_WIN_GOLD_BASE + Math.max(0, rating || 0) * RANK_WIN_GOLD_K : RANK_LOSS_GOLD);
-  var GOLD_MAX = 1000000000000000;
+  var GOLD_MAX = 1000000000000000000000000;
   var safeGold = (v) => {
     const n = Math.floor(Number(v));
     if (!Number.isFinite(n))
@@ -2768,29 +2791,77 @@
   function finishAnchor(L) {
     return L.len - FINISH_PAD;
   }
+  var BUCKET_W = 2048;
+  function buildIndex(L) {
+    if (L._idx)
+      return L._idx;
+    const n = L.len;
+    const nBuckets = Math.max(1, Math.ceil(n / BUCKET_W) + 2);
+    const waveB = new Array(nBuckets);
+    const stepB = new Array(nBuckets);
+    const featB = new Array(nBuckets);
+    const ws = L.waves;
+    const wLen = ws.length;
+    let sLo = 0;
+    for (let b = 0;b < nBuckets; b++) {
+      const bx0 = b * BUCKET_W;
+      const bx1 = bx0 + BUCKET_W;
+      while (sLo < L.steps.length && L.steps[sLo].cx + STEP_W <= bx0)
+        sLo++;
+      let sHi = sLo;
+      while (sHi < L.steps.length && L.steps[sHi].cx < bx1)
+        sHi++;
+      stepB[b] = [sLo, sHi];
+    }
+    let fLo = 0;
+    for (let b = 0;b < nBuckets; b++) {
+      const bx0 = b * BUCKET_W;
+      const bx1 = bx0 + BUCKET_W;
+      while (fLo < L.feats.length && L.feats[fLo].x1 <= bx0)
+        fLo++;
+      let fHi = fLo;
+      while (fHi < L.feats.length && L.feats[fHi].x0 < bx1)
+        fHi++;
+      featB[b] = [fLo, fHi];
+    }
+    L._idx = { nBuckets, waveB, stepB, featB, wLen };
+    return L._idx;
+  }
   function hillRaw(L, x) {
-    let y = 300;
     let relief = 0;
-    for (const w of L.waves)
+    const idx = L._idx || buildIndex(L);
+    const ws = L.waves;
+    for (let i = 0, n = idx.wLen;i < n; i++) {
+      const w = ws[i];
       relief += w.amp * Math.sin(x * w.f + w.ph);
-    for (const s of L.steps) {
-      if (x > s.cx) {
-        const t = clamp((x - s.cx) / STEP_W, 0, 1);
-        relief += s.drop * (t * t * (3 - 2 * t));
+    }
+    const b = x / BUCKET_W | 0;
+    const steps = L.steps;
+    if (b >= 0 && b < idx.nBuckets) {
+      const r = idx.stepB[b];
+      for (let i = r[0], e = r[1];i < e; i++) {
+        const s = steps[i];
+        if (x > s.cx) {
+          const t = clamp((x - s.cx) / STEP_W, 0, 1);
+          relief += s.drop * (t * t * (3 - 2 * t));
+        }
       }
     }
     const feats = L.feats;
-    if (feats) {
-      for (let i = 0;i < feats.length; i++) {
-        const f = feats[i];
-        if (x <= f.x0)
-          break;
-        if (x >= f.x1)
-          continue;
-        relief += f.amp * featProfile(f.kind, (x - f.x0) / (f.x1 - f.x0), f.n);
+    if (feats && feats.length) {
+      if (b >= 0 && b < idx.nBuckets) {
+        const r = idx.featB[b];
+        for (let i = r[0], e = r[1];i < e; i++) {
+          const f = feats[i];
+          if (x <= f.x0)
+            continue;
+          if (x >= f.x1)
+            continue;
+          relief += f.amp * featProfile(f.kind, (x - f.x0) / (f.x1 - f.x0), f.n);
+        }
       }
     }
-    return y + relief * ss((x - LAUNCH_PAD) / RUN_IN);
+    return 300 + relief * ss((x - LAUNCH_PAD) / RUN_IN);
   }
   function levelGroundInfo(L, x, e = 2) {
     const yL = levelHillY(L, x - e);
@@ -2798,38 +2869,83 @@
     return { y: levelHillY(L, x), m: (yR - yL) / (2 * e) };
   }
   var freeSeed = 0;
+  var nepSeq = [];
+  var BLOCK_W = 3000;
   function setFreeSeed(s) {
     freeSeed = (Number(s) || 0) >>> 0;
+    nepSeq = [];
   }
-  function freeMoodOf(x) {
-    const t = Math.floor(x / 3000);
-    const h = Math.imul(t ^ freeSeed ^ 2654435769, 2246822507) >>> 0;
-    return TERRAIN_MOODS[h % TERRAIN_MOODS.length];
+  var FREE_GAP_AVG = 1800;
+  var FREE_K_WAVE = (() => {
+    const n = 3;
+    const avg = [0, 0, 0];
+    for (const m of TERRAIN_MOODS) {
+      for (let i = 0;i < n; i++)
+        avg[i] += m.waves[i][0];
+    }
+    return avg.map((s) => 2 * Math.PI / Math.max(MIN_WAVELEN, s / TERRAIN_MOODS.length));
+  })();
+  function freeMoodIndex(t) {
+    let h = (t ^ freeSeed) >>> 0;
+    h = Math.imul(h ^ 2654435769, 2246822507) >>> 0;
+    h = (h ^ h >>> 16) >>> 0;
+    h = Math.imul(h, 2146121005) >>> 0;
+    h = (h ^ h >>> 15) >>> 0;
+    return h % TERRAIN_MOODS.length;
+  }
+  var NEP_BLOCKS = 4;
+  function freeMoodSeq(t) {
+    for (let i = nepSeq.length;i <= t; i++) {
+      let idx = freeMoodIndex(i);
+      for (let k = 0;k < TERRAIN_MOODS.length; k++) {
+        let clash = false;
+        for (let j = Math.max(0, i - NEP_BLOCKS);j < i; j++) {
+          if (nepSeq[j] === idx) {
+            clash = true;
+            break;
+          }
+        }
+        if (!clash)
+          break;
+        idx = (idx + 1) % TERRAIN_MOODS.length;
+      }
+      nepSeq[i] = idx;
+    }
+    return nepSeq[t];
   }
   function freeHill(x) {
     const d = Math.max(0, x - 400);
     const diff = Math.min(1, d / 120000);
     const diffS = diff * diff * (3 - 2 * diff);
-    let y = 300;
     const ramp = ss((x - LAUNCH_PAD) / RUN_IN);
-    const seg = Math.floor(x / 3000);
-    const mood = freeMoodOf(x);
-    const ph = (seg * 2.399963 + freeSeed % 6283 * 0.001) % 6.283185307;
-    for (let i = 0;i < mood.waves.length; i++) {
-      const w = mood.waves[i];
-      const wl = Math.max(MIN_WAVELEN, w[0] * (0.85 + (seg * 7 + i * 13 + freeSeed) % 31 / 31 * 0.3));
-      y += Math.sin(x / wl * 6.283185307 + ph + i * 1.9) * (w[1] * 0.5 + w[1] * 0.5 * diffS + w[2] * diffS);
+    const t = x / BLOCK_W;
+    const seg = Math.floor(t);
+    const frac = t - seg;
+    const moodA = TERRAIN_MOODS[freeMoodSeq(seg)];
+    const moodB = TERRAIN_MOODS[freeMoodSeq(seg + 1)];
+    const lerpMood = (get) => get(moodA) * (1 - frac) + get(moodB) * frac;
+    const ph = freeSeed % 6283 * 0.001;
+    let relief = 0;
+    for (let i = 0;i < 3; i++) {
+      const wA = moodA.waves[i] || moodA.waves[moodA.waves.length - 1];
+      const wB = moodB.waves[i] || moodB.waves[moodB.waves.length - 1];
+      const ampA = wA[1] * 0.5 + wA[1] * 0.5 * diffS + wA[2] * diffS;
+      const ampB = wB[1] * 0.5 + wB[1] * 0.5 * diffS + wB[2] * diffS;
+      const amp = ampA * (1 - frac) + ampB * frac;
+      relief += Math.sin(x * FREE_K_WAVE[i] + ph + i * 1.9) * amp;
     }
-    const stepGap = mood.stepGap;
-    const stepDrop = (15 + diffS * 10) * mood.stepK;
-    const segIdx = Math.floor(d / stepGap);
-    y += stepDrop * segIdx;
-    const cur = d % stepGap;
-    if (cur > 0) {
-      const t = clamp(cur / STEP_W, 0, 1);
-      y += stepDrop * (t * t * (3 - 2 * t));
-    }
+    const gapC = FREE_GAP_AVG;
+    const stepK = lerpMood((m) => m.stepK);
+    const stepDrop = (15 + diffS * 10) * stepK;
+    const kStep = 2 * Math.PI / gapC;
+    relief += stepDrop * (1 + Math.sin(x * kStep + ph * 3.1)) * 0.5;
+    const DRIFT_K = 0.00022, DRIFT_CAP = 900;
+    const drift = d * DRIFT_K * DRIFT_CAP / (DRIFT_CAP + d * DRIFT_K);
+    const y = baseYOf(d) + drift + relief;
     return 300 + (y - 300) * ramp;
+  }
+  function baseYOf(d) {
+    return Math.sin(d * 0.0000262) * 260;
   }
   function measureMaxSlopeTan(P, len) {
     let mx = 0;
@@ -3325,7 +3441,7 @@
   }
   function save() {
     store.gold = safeGold(store.gold);
-    lsSet(SAVE_KEYS.gold, String(store.gold));
+    lsSet(SAVE_KEYS.gold, toPlainDecimal(store.gold));
     lsSet(SAVE_KEYS.up, JSON.stringify(store.upgrades));
     lsSet(SAVE_KEYS.unlocked, store.unlocked);
     lsSet(SAVE_KEYS.stars, JSON.stringify(store.stars));
@@ -3509,7 +3625,7 @@
     try {
       const persisted = parseInt(rawGet(META_KEYS.slot) || "0", 10);
       store.slot = Number.isFinite(persisted) && persisted >= 0 && persisted < MAX_SLOTS ? persisted : 0;
-      store.gold = Math.max(0, intOr(lsGet(SAVE_KEYS.gold)));
+      store.gold = safeGold(fromPlainDecimal(lsGet(SAVE_KEYS.gold)));
       const u = jsonOr(lsGet(SAVE_KEYS.up) || "{}", {});
       if (u && u.engine !== undefined) {
         const id = VEHICLES[store.currentVehicle].id;
@@ -3692,7 +3808,7 @@
       cleared,
       stars: totalStars,
       rating: Math.max(0, intOr(map[SAVE_KEYS.rating])),
-      gold: Math.max(0, intOr(map[SAVE_KEYS.gold]))
+      gold: safeGold(fromPlainDecimal(map[SAVE_KEYS.gold]))
     };
   }
   function importSave(data) {
@@ -4602,8 +4718,9 @@
     if (sp < 0.000001)
       return;
     const k = P.airDragK || AIR_DRAG_K;
-    const ax = -sv.vx / sp * (k * sp * sp) / sv.m;
-    const ay = -sv.vy / sp * (k * sp * sp) / sv.m;
+    const decel = k * sp * sp + LINEAR_DRAG_K * sp;
+    const ax = -sv.vx / sp * decel / sv.m;
+    const ay = -sv.vy / sp * decel / sv.m;
     for (const p of b.pts)
       addVel(p, ax * sub, ay * sub);
   }
@@ -4934,7 +5051,7 @@
     const crashTol = Math.max(8, 30 - (P.crashMargin - 4) * 1.4);
     const tiltMin = crashTiltDeg(P.crashMargin) * Math.PI / 180;
     const drvK = key.right && !run.crashed ? 1 : 0;
-    const revK = key.rev && !run.crashed && b.grounded > 0 ? 1 : 0;
+    const revK = key.rev && !run.crashed && (b.grounded > 0 || isFlighter()) ? 1 : 0;
     const revReady = revK && systemVel(b).vx < REV_ENTER_V;
     const brkK = (key.left || revK && !revReady) && !run.crashed ? 1 : 0;
     const rev = revReady ? 1 : 0;
@@ -5894,7 +6011,8 @@
       store.cam.x = 0;
       fillTank();
       const NL = levelAt(store.selLevel);
-      showToast("关卡 " + (store.selLevel + 1) + " · " + NL.name + " · " + (THEMES[segmentThemeAt(NL, 0)] || THEMES[0]).name, 800);
+      const label = store.selLevel === FINALE_INDEX ? NL.name : "关卡 " + (store.selLevel + 1) + " · " + NL.name;
+      showToast(label + " · " + (THEMES[segmentThemeAt(NL, 0)] || THEMES[0]).name, 800);
       store.state = "play";
       presenter.hideOverlay();
     } else {
@@ -6018,6 +6136,10 @@
       store.stars[store.selLevel] = Math.max(store.stars[store.selLevel] || 0, s);
       if (store.selLevel >= store.unlocked && store.selLevel < LEVELS.length - 1) {
         store.unlocked = store.selLevel + 1;
+      }
+      if (store.selLevel === FINALE_INDEX) {
+        store.progress.finaleDone = true;
+        showToast("\uD83C\uDFAF 通关「环大陆」！排位赛已解锁", 2200, "success");
       }
       addGold(L.goldBase);
       showToast("\uD83C\uDFC1 通关 " + "★".repeat(s) + "！\uD83E\uDE99+" + L.goldBase, 900, "success");
@@ -8207,7 +8329,8 @@
     const x = r.x;
     const L = levelAt(store.selLevel) || LEVELS[0];
     const compact = view.W < 520 || view.H < 480;
-    const title = store.mode === "free" ? "♾ 自由模式" : store.mode === "race" || store.mode === "ranked" ? "\uD83C\uDFC6 " + (store.mode === "ranked" ? "排位赛" : "比赛") + " 第" + (store.selLevel + 1) + "关" : "关卡 " + (store.selLevel + 1) + (compact ? "" : " · " + L.name);
+    const isFinale = store.mode === "level" && store.selLevel === FINALE_INDEX;
+    const title = store.mode === "free" ? "♾ 自由模式" : isFinale ? "\uD83C\uDFAF " + L.name : store.mode === "race" || store.mode === "ranked" ? "\uD83C\uDFC6 " + (store.mode === "ranked" ? "排位赛" : "比赛") + " 第" + (store.selLevel + 1) + "关" : "关卡 " + (store.selLevel + 1) + (compact ? "" : " · " + L.name);
     ctx.save();
     ctx.shadowColor = token("shadow-text-strong");
     ctx.shadowBlur = 6;
