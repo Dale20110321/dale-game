@@ -265,7 +265,8 @@ if (ONLY_MODULES) {
     const fpHtml = els("modePanel").innerHTML || "";
     const noStart = !fpHtml.includes('data-act="finaleStart"');
     check("未解锁时最终任务面板给出进度且无开局入口",
-      /当前 0\/72/.test(fpHtml) && noStart, noStart ? "含进度提示 · 无 finaleStart" : "仍可开局");
+      new RegExp(`当前 0/${LEVELS.length}`).test(fpHtml) && noStart,
+      noStart ? `含进度提示（当前 0/${LEVELS.length}）· 无 finaleStart` : "仍可开局");
     hidePanel();
 
     // 键盘导航：静态检查按键处理（方向键 / Escape）与焦点默认位
@@ -2409,17 +2410,17 @@ if (ONLY_MODULES) {
     check(`rating ${RATING_PEAK - 10} 未登顶`, deriveUnlocks(mkProg(RATING_PEAK - 10), starsAll).peak === false, `rating=${RATING_PEAK - 10}`);
     check(`rating ${RATING_PEAK + 10} 登顶`, deriveUnlocks(mkProg(RATING_PEAK + 10), starsAll).peak === true, `rating=${RATING_PEAK + 10}`);
 
-    // 72 关全通才解锁最终任务
+    // 全部关卡通关才解锁最终任务（末关下标必须派生，不能写死 71）
     const partial = starsAll.slice();
-    partial[71] = 0;
-    check("72 关全通才解锁最终任务",
+    partial[LEVELS.length - 1] = 0;
+    check(`${LEVELS.length} 关全通才解锁最终任务`,
       deriveUnlocks(mkProg(0), starsAll).finaleUnlocked === true &&
         deriveUnlocks(mkProg(0), partial).finaleUnlocked === false,
       "全通=true / 缺一关=false");
 
-    // 可用场景：支线 6 关全通才可选
+    // 可用场景：支线全通才可选（关数从 6 变 12 后，这里不打满就永远不会解锁）
     const st0 = Array.from({ length: LEVELS.length }, () => 0);
-    for (let k = 0; k < 6; k++) st0[k] = 1;
+    for (let k = 0; k < LEVELS_PER_BRANCH; k++) st0[k] = 1;
     check("availableFreeThemes 只在支线全通时包含该场景",
       availableFreeThemes(st0).includes(0) && !availableFreeThemes(st0).includes(1),
       `支线1全通 → [${availableFreeThemes(st0).join(",")}]`);
@@ -2898,7 +2899,7 @@ if (ONLY_MODULES) {
     renderLevelsPanel();
     const wallHtml = panelEl.innerHTML || "";
     const cardCount = (wallHtml.match(/class="[^"]*branchCard/g) || []).length;
-    check(`支线任务面板首屏为 ${N_BRANCHES} 张支线卡片（不铺全部关卡）`, cardCount === 12,
+    check(`支线任务面板首屏为 ${N_BRANCHES} 张支线卡片（不铺全部关卡）`, cardCount === N_BRANCHES,
       `卡片数 ${cardCount}；不含关卡格 ${!/class="[^"]*lvCell/.test(wallHtml) ? "✔" : "✘"}`);
     hidePanel();
 

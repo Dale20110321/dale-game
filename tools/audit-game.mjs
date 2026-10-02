@@ -247,7 +247,16 @@ export default async function (ctx) {
     world.gates = [];
     store.run.levelStartTime = store.time - elapsedSec;
     store.run.penaltyTime = penalty;
-    store.run.coinGot = Math.round(level.coinN * coinRatio);
+    // ★ 向下取整，不能四舍五入：coinN 变小后（432 关里早期关 coinN 只有 24），
+    //   Math.round(24 × 0.69) = 17，而 17/24 = 0.708 ≥ 0.7 的二星阈值 → 断言
+    //   声称"0.69 低于二星边界"却拿到 2 星。取整误差吃掉了整个余量。
+    // ★ coinRatio 可以是**分数**（如 69/100），表示"离二星阈值还差一枚金币"这种
+    //   精确边界。432 关里早期关 coinN 只有 24 → 1/coinN = 0.042 的粒度远粗于 0.01，
+    //   用小数（0.69 / 0.70）无论怎么取整都会落到同一个整数上，边界根本测不出来。
+    const coinN = level.coinN;
+    store.run.coinGot = Number.isInteger(coinRatio)
+      ? Math.floor(coinN * coinRatio)
+      : Math.floor(coinN * coinRatio);
     teleport(store.finishX + 10);
     update(DT);
     return level;
@@ -615,12 +624,18 @@ export default async function (ctx) {
     T('结果卡携带星级与金币字段', lastResult && lastResult.stars >= 1 && lastResult.goldGain === LEVELS[index].goldBase && lastResult.goldTotal === store.gold, `stars=${lastResult && lastResult.stars} goldGain=${lastResult && lastResult.goldGain}`);
     T('通关累计局数与里程（100px=1m）', store.stat.totalRuns === 1 && store.stat.totalMeters === toM(store.finishX), `runs=${store.stat.totalRuns} meters=${store.stat.totalMeters} 期望=${toM(store.finishX)}`);
 
+    // 二星边界用精确分数表达：ceil(0.7×coinN)/coinN 是"刚好够 2 星"的最小金币数，
+    // 再少一枚就掉回 1 星。这才是这条断言真正要验的东西（边界位置），而不是某个小数。
+    const N_COIN = LEVELS[index].coinN;
+    const at2Star = Math.ceil(0.7 * N_COIN);
     installPresenter(true);
-    runToFinish(index, limit * 2, 0.7);
-    T('金币比例 0.70 命中二星边界', store.stars[index] === 2, `stars=${store.stars[index]}`);
+    runToFinish(index, limit * 2, at2Star / N_COIN);
+    T(`金币恰在二星边界（${at2Star}/${N_COIN}=${(at2Star / N_COIN).toFixed(3)}）→ 2 星`,
+      store.stars[index] === 2, `stars=${store.stars[index]}`);
     installPresenter(true);
-    runToFinish(index, limit * 2, 0.69);
-    T('金币比例 0.69 低于二星边界', store.stars[index] === 1, `stars=${store.stars[index]}`);
+    runToFinish(index, limit * 2, (at2Star - 1) / N_COIN);
+    T(`金币差一枚低于二星边界（${at2Star - 1}/${N_COIN}=${((at2Star - 1) / N_COIN).toFixed(3)}）→ 1 星`,
+      store.stars[index] === 1, `stars=${store.stars[index]}`);
     installPresenter(true);
     runToFinish(index, limit - 1, 0);
     T('快于三星线即使零金币也拿三星', store.stars[index] === 3, `stars=${store.stars[index]}`);
