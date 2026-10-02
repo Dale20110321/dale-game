@@ -412,7 +412,7 @@ export const VEHICLES = [
     price: 800000000,
 
     speed: 2.6,
-    grip: 9.77,
+    grip: 11.13,
     weight: 1.48,
     airRot: 0.488,
     fuel: 4,
@@ -431,7 +431,7 @@ export const VEHICLES = [
     //   torque/rpm 刻意**低于**奇点号：终焉形态的加速由 flightStep 的推力伺服负责，
     //   扭矩路径在这台车上几乎不参与（见 bike.js 的 omega 分支），
     //   堆扭矩只会在 27,778 px/s 下让车轮空转到 ωR ≈ 2300 rad/s，纯属数值噪声。
-    phys: P(1.48, 2.05, 1.7, 1.5, 12, 18.09, 6.15, /* wheelieK */ 2.94, /* wheelieUp */ 14.65),
+    phys: P(1.48, 2.05, 1.7, 1.5, 12, 24.28, 6.15, /* wheelieK */ 3.95, /* wheelieUp */ 16.09),
     /** 最终形态：升满后花 100 亿解锁 */
     ultra: {
       /* 终焉形态不读 fx：极速与推力在 constants.js 按 1000 km/h 标定 */ fx: {},
@@ -473,7 +473,7 @@ export const VEHICLES = [
     price: 24000000000,
 
     speed: 2.6,
-    grip: 20.37,
+    grip: 22.44,
     weight: 1.32,
     airRot: 0.685,
     fuel: 5,
@@ -485,7 +485,7 @@ export const VEHICLES = [
       helmR: 5.4, peak: false, vents: 2,
       pose: POSE(6.5, 4.5, 8, 4, 2.5, 3),
     }),
-    phys: P(1.32, 1.46, 1.8, 1.5, 11, 27.02, 7.52, /* wheelieK */ 4.93, /* wheelieUp */ 31.75),
+    phys: P(1.32, 1.46, 1.8, 1.5, 11, 34.54, 7.52, /* wheelieK */ 6.31, /* wheelieUp */ 34.11),
     ultra: { fx: {}, name: "星殒形态", icon: "✴️", mode: "omega", cost: 300000000000,
       desc: "5000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
@@ -503,7 +503,7 @@ export const VEHICLES = [
     price: 720000000000,
 
     speed: 2.6,
-    grip: 44.25,
+    grip: 47.63,
     weight: 1.08,
     airRot: 0.862,
     fuel: 7,
@@ -515,7 +515,7 @@ export const VEHICLES = [
       helmR: 6.4, peak: true, vents: 5,
       pose: POSE(-1.5, -3, -2, -2.5, -2.5, -3.5),
     }),
-    phys: P(1.08, 1.16, 1.9, 1.5, 10, 41.05, 8.88, /* wheelieK */ 8.42, /* wheelieUp */ 71.29),
+    phys: P(1.08, 1.16, 1.9, 1.5, 10, 46.64, 8.88, /* wheelieK */ 10.4, /* wheelieUp */ 75.39),
     ultra: { fx: {}, name: "坍缩形态", icon: "🕳️", mode: "omega", cost: 9000000000000,
       desc: "10000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
@@ -533,7 +533,7 @@ export const VEHICLES = [
     price: 21600000000000,
 
     speed: 2.6,
-    grip: 81.17,
+    grip: 86.12,
     weight: 0.92,
     airRot: 0.980,
     fuel: 9,
@@ -545,7 +545,7 @@ export const VEHICLES = [
       helmR: 6.0, peak: false, vents: 6,
       pose: POSE(9, 7.5, 11, 7, 3.5, 5.5),
     }),
-    phys: P(0.92, 1.02, 2, 1.5, 9, 69.33, 12, /* wheelieK */ 14.05, /* wheelieUp */ 132.15),
+    phys: P(0.92, 1.02, 2, 1.5, 9, 73.56, 12, /* wheelieK */ 16.82, /* wheelieUp */ 138.3),
     ultra: { fx: {}, name: "虚掷形态", icon: "⚫", mode: "omega", cost: 270000000000000,
       desc: "25000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
@@ -563,7 +563,7 @@ export const VEHICLES = [
     price: 5184000000000000,
 
     speed: 2.6,
-    grip: 67.13,
+    grip: 70.28,
     weight: 1.88,
     airRot: 0.495,
     fuel: 11,
@@ -575,7 +575,7 @@ export const VEHICLES = [
       helmR: 5.2, peak: true, vents: 3,
       pose: POSE(0, -4, -1.5, -3.5, 0.5, -4.5),
     }),
-    phys: P(1.88, 2.02, 2.1, 1.5, 8, 135.2, 18, /* wheelieK */ 9.27, /* wheelieUp */ 111.64),
+    phys: P(1.88, 2.02, 2.1, 1.5, 8, 141.55, 18, /* wheelieK */ 10.85, /* wheelieUp */ 115.74),
     ultra: { fx: {}, name: "终末形态", icon: "💀", mode: "omega", cost: 64800000000000000,
       desc: "50000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
@@ -593,7 +593,7 @@ export const VEHICLES = [
     price: 155520000000000000,
 
     speed: 2.6,
-    grip: 276.68,
+    grip: 286.6,
     weight: 0.78,
     airRot: 1.163,
     fuel: 14,
@@ -605,7 +605,7 @@ export const VEHICLES = [
       helmR: 6.8, peak: false, vents: 8,
       pose: POSE(12, 10, 15, 9.5, 5, 8),
     }),
-    phys: P(0.78, 0.86, 2.2, 1.5, 7, 255.38, 26, /* wheelieK */ 30.42, /* wheelieUp */ 467.95),
+    phys: P(0.78, 0.86, 2.2, 1.5, 7, 264.54, 26, /* wheelieK */ 34.84, /* wheelieUp */ 481.39),
     ultra: { fx: {}, name: "无相形态", icon: "🌌", mode: "omega", cost: 1944000000000000000,
       desc: "100000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },

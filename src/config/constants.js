@@ -221,24 +221,46 @@ export const TOP_SPEED_CAP = 4e7;
  *   相机也不再前推，玩家自然觉得"升级没感觉"。现在表盘满量程 = 真能跑到的速度，
  *   每升一级指针都会多走一格，升级立刻可见。
  */
-export function topSpeedOf(veh, up) {
+/**
+ * @param o 形态覆写（**与实车同一套参数** —— 这是表盘不撒谎的唯一保证）：
+ *   `mu` 实际摩擦系数、`airDragK` 实际风阻系数、`wheelieMul` 实际翘头限幅倍率、
+ *   `torqueN` 扭矩峰值倍率、`rpmK` 转速域倍率。缺省项按裸车公式解算。
+ *
+ * ★ 为什么必须让表盘读实车参数（否则形态表盘系统性高估 3~5 倍）：
+ *   原实现里 loss(v) 恒用全局 AIR_DRAG_K，而实车用的是形态覆写过的
+ *   store.phys.airDragK；形态又把表盘直接乘 fx.speedN 写死。于是
+ *   玄铁形态表盘 311 km/h、实车只跑 65（21%），银箭形态 60 → 实车 11（18%）。
+ *   玩家看到的永远是"指针怎么都走不满"，形态的钱白花。
+ *   现在表盘 = 同一组参数解出来的**真实可达极速**，与 HUD/相机/倒挡同源。
+ */
+export function topSpeedOf(veh, up, o) {
   const p = (veh && veh.phys) || {};
   const u = up || {};
+  const ov = o || {};
   const eng = u.engine || 0;
   const tire = u.tire || 0;
   const k = p.mass || (veh && veh.weight) || 1;
   const mTot = (M_TOT + 2 * M_W) * k;
   const peak = TORQUE_PEAK_BASE * (p.torque || 1) *
-    (1 + ENGINE_TORQUE_UP * eng + TIRE_TORQUE_UP * tire);
-  const rpmK = 1 + ENGINE_RPM_UP * eng;
-  const mu = FRICTION_BASE * ((veh && veh.grip) || 1) * (1 + FRICTION_TIRE_UP * tire);
+    (1 + ENGINE_TORQUE_UP * eng + TIRE_TORQUE_UP * tire) * (ov.torqueN || 1);
+  const rpmK = (1 + ENGINE_RPM_UP * eng) * (ov.rpmK || 1);
+  const mu = ov.mu != null ? ov.mu
+    : FRICTION_BASE * ((veh && veh.grip) || 1) * (1 + FRICTION_TIRE_UP * tire);
   const grip = mu * mTot * GRAV_BASE * REAR_LOAD;
   const roll = ROLL_RES_K * mTot * GRAV_BASE;
   // ★ 限幅必须计入：驱动扭矩一旦越过 wheelieTau，多出来的部分只会把车掀翻而不是加速。
   //   漏掉它，表盘就按"无限扭矩"标定，而实车被限死 —— 满级高速档的指针只走 30%~65%。
-  const tauCap = wheelieTauOf(mTot, GRAV_BASE, wheelieMulOf(veh, u));
+  const tauCap = wheelieTauOf(mTot, GRAV_BASE,
+    ov.wheelieMul != null ? ov.wheelieMul : wheelieMulOf(veh, u));
   const avail = (v) => Math.min(Math.min(torqueAt(veh, v / WHEEL_R, 1, peak, rpmK), tauCap) / WHEEL_R, grip);
-  const loss = (v) => AIR_DRAG_K * v * v + roll;
+  // ★ 必须与 applyDrag 的 decel **逐项对齐**：k·v² + LINEAR_DRAG_K·v + roll。
+  //   漏掉线性阻力项时表盘系统性虚高 40%~50% —— 因为游戏实际速度在
+  //   500~2000 px/s，而 LINEAR_DRAG_K=2.2 在那里给出 1100~4400 px/s²，
+  //   与 0.0026·v² 的 650~10400 是同一量级（v=1000 时占 46%）。
+  //   实测全 32 台车达成率只有 52%~70%，零摔车的白毛风也只有 56% ——
+  //   那不是地形损耗，是这张表在自说自话。
+  const dragK = ov.airDragK != null ? ov.airDragK : AIR_DRAG_K;
+  const loss = (v) => dragK * v * v + LINEAR_DRAG_K * v + roll;
   let lo = 0;
   let hi = TOP_SPEED_CAP;
   for (let i = 0; i < 40; i++) {
