@@ -391,21 +391,24 @@ export const VEHICLES = [
     //   它不是靠刷得出来的目标，而是给长期存档的收束式彩蛋。
     //   车价 8 亿 / 满级升级 50 亿（costK=177054）/ 形态 100 亿，三段都远高于任何现有车，
     //   以保证"贵的车不能只是相对贵"。
-    tier: "神话",
-    costK: 177054,
+    tier: "宇宙",
+    // ★ 500 级：宇宙级车的升级上限（普通车 100）。判定一律走 maxLvOf(veh)，
+    //   不要再直接读全局 MAX_LV —— 那样宇宙车永远显示不满级。
+    maxLv: 500,
+    // ★ 该车「形态」的标称极速（km/h）。omega 形态据此 + 升级等级解算出实际极速，
+    //   所以 Lv0 只有裸车水平，升满才到这个数（见 constants.js 的 ultraCruiseOf）。
+    nominalKmh: 1000,
+    // ★ costK 由"四项升满 = 车价 × 40"反解：621,200 × 51,513 = 3.2e10。
+    //   500 级的单项升满是 100 级的 22 倍，所以升满倍率比 100 级时代（6.25×）更重。
+    costK: 51513,
     price: 800000000,
 
     speed: 2.6,
-    grip: 6.0,
+    grip: 3.4,
     weight: 1.48,
     airRot: 0.488,
     fuel: 4,
     color: "#e0f0ff",
-    // ★ hover：这是一台**飞行器**，裸车也悬停（物理层见 isFlighter）。
-    //   它的 μ 拉到 11 是为 omega 形态的推力上限服务的，而那个抓地在地面上
-    //   远超翘头临界 —— 实测不悬停时满级一踩油门就后空翻，只能跑 4.6 km/h。
-    //   悬停之后抓地只用来定推力量级（场景抓地缩放仍成立），不再产生翘头力矩。
-    hover: true,
     // 归墟号：极致的悬浮形态 —— 细高轮、无避震、超低趴姿、宽大尾翼式的长上管，
     // 视觉上要读出"这东西不属于地面"
     art: ART({
@@ -428,6 +431,153 @@ export const VEHICLES = [
       cost: 10000000000,
       desc: "1000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段",
     },
+  },
+
+  // ================================================================
+  //  宇宙级车辆（5 台 + 归墟共 6 台）
+  //
+  //  ★ 三条设计原则（都写进了 spec 的 R2）：
+  //   1. **价格与极速严格单调递增**。早期按"每级 ×30"递推会算出
+  //      "虚掷升满 7.4e13 < 形态解锁 2.7e14"这种倒挂 —— 更慢的车反而更贵。
+  //      现在统一按 **四项升满 = 车价 × 40 / 形态解锁 = 车价 × 12.5** 反解 costK，
+  //      三条曲线因此同时单调（升满 > 形态 > 车价）。
+  //   2. **500 级升级上限**（普通车 100）。判定一律走 maxLvOf(veh)。
+  //   3. **不开形态就是一台普通的、会摔的地面车**。飞行只由 omega 形态提供
+  //      （MODE_FLAGS.omega.fly），早期版本给 6 台全挂 `veh.hover` 让裸车也常驻
+  //      悬停，结果"没开最终形态也会摔车"这条需求整个落空 —— 实测 6 台
+  //      Lv0 不开形态跑 25 秒零摔车。μ 拉到 3.4~22 是为了让它们在地面上
+  //      又快又难驾驭（扭矩远超翘头临界，一脚油门就可能翻），这才是"关卡仍然
+  //      有危险"的本意；开到 omega 形态才解锁常驻飞行与标称极速。
+  // ================================================================
+  {
+    id: "astral",
+    name: "星殒",
+    icon: "✴️",
+    desc: "第二宇宙级：5000 km/h · 永远在天上",
+    tier: "宇宙",
+    maxLv: 500,
+    // ★ 该车「形态」的标称极速（km/h）。omega 形态据此 + 升级等级解算出实际极速，
+    //   所以 Lv0 只有裸车水平，升满才到这个数（见 constants.js 的 ultraCruiseOf）。
+    nominalKmh: 5000,
+    costK: 1545396,
+    price: 24000000000,
+
+    speed: 2.6,
+    grip: 9.0,
+    weight: 1.32,
+    airRot: 0.685,
+    fuel: 5,
+    color: "#b8a4ff",
+    art: ART({tire: 1.3, rim: false, spokes: 18, spokeW: 0.5, tube: 1.8,
+      topDrop: 15, coil: 0, bar: "drop", saddleW: 5, helmR: 5.7, peak: false, vents: 2,
+      pose: POSE(11, 12, 14, 11, 6, 10)}),
+    phys: P(1.32, 1.46, 1.8, 1.5, 11, 8, 4.6),
+    ultra: { fx: {}, name: "星殒形态", icon: "✴️", mode: "omega", cost: 300000000000,
+      desc: "5000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
+  },
+  {
+    id: "collapse",
+    name: "坍缩",
+    icon: "🕳️",
+    desc: "第三宇宙级：10000 km/h · 引力都追不上",
+    tier: "宇宙",
+    maxLv: 500,
+    // ★ 该车「形态」的标称极速（km/h）。omega 形态据此 + 升级等级解算出实际极速，
+    //   所以 Lv0 只有裸车水平，升满才到这个数（见 constants.js 的 ultraCruiseOf）。
+    nominalKmh: 10000,
+    costK: 46361880,
+    price: 720000000000,
+
+    speed: 2.6,
+    grip: 16.0,
+    weight: 1.08,
+    airRot: 0.862,
+    fuel: 7,
+    color: "#7b6cff",
+    art: ART({tire: 1.1, rim: false, spokes: 20, spokeW: 0.4, tube: 1.6,
+      topDrop: 17, coil: 0, bar: "drop", saddleW: 4, helmR: 5.9, peak: false, vents: 3,
+      pose: POSE(12, 13, 16, 12, 7, 12)}),
+    phys: P(1.08, 1.16, 1.9, 1.5, 10, 12, 8),
+    ultra: { fx: {}, name: "坍缩形态", icon: "🕳️", mode: "omega", cost: 9000000000000,
+      desc: "10000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
+  },
+  {
+    id: "void",
+    name: "虚掷",
+    icon: "⚫",
+    desc: "第四宇宙级：25000 km/h · 慢速状态就已如此",
+    tier: "宇宙",
+    maxLv: 500,
+    // ★ 该车「形态」的标称极速（km/h）。omega 形态据此 + 升级等级解算出实际极速，
+    //   所以 Lv0 只有裸车水平，升满才到这个数（见 constants.js 的 ultraCruiseOf）。
+    nominalKmh: 25000,
+    costK: 1390856407,
+    price: 21600000000000,
+
+    speed: 2.6,
+    grip: 26.0,
+    weight: 0.92,
+    airRot: 0.980,
+    fuel: 9,
+    color: "#3d2b6e",
+    art: ART({tire: 0.9, rim: false, spokes: 22, spokeW: 0.3, tube: 1.4,
+      topDrop: 19, coil: 0, bar: "drop", saddleW: 4, helmR: 6.1, peak: false, vents: 4,
+      pose: POSE(14, 15, 18, 14, 8, 14)}),
+    phys: P(0.92, 1.02, 2.0, 1.5, 9, 18, 12),
+    ultra: { fx: {}, name: "虚掷形态", icon: "⚫", mode: "omega", cost: 270000000000000,
+      desc: "25000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
+  },
+  {
+    id: "endgame",
+    name: "终末",
+    icon: "💀",
+    desc: "第五宇宙级：50000 km/h · 掠过一颗星只要一眨眼",
+    tier: "宇宙",
+    maxLv: 500,
+    // ★ 该车「形态」的标称极速（km/h）。omega 形态据此 + 升级等级解算出实际极速，
+    //   所以 Lv0 只有裸车水平，升满才到这个数（见 constants.js 的 ultraCruiseOf）。
+    nominalKmh: 50000,
+    costK: 333805537669,
+    price: 5184000000000000,
+
+    speed: 2.6,
+    grip: 34.0,
+    weight: 1.88,
+    airRot: 0.495,
+    fuel: 11,
+    color: "#1a0d2e",
+    art: ART({tire: 0.8, rim: false, spokes: 24, spokeW: 0.25, tube: 1.2,
+      topDrop: 21, coil: 0, bar: "drop", saddleW: 3, helmR: 6.3, peak: false, vents: 5,
+      pose: POSE(16, 17, 20, 16, 9, 16)}),
+    phys: P(1.88, 2.02, 2.1, 1.5, 8, 24, 18),
+    ultra: { fx: {}, name: "终末形态", icon: "💀", mode: "omega", cost: 64800000000000000,
+      desc: "50000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
+  },
+  {
+    id: "formless",
+    name: "无相",
+    icon: "🌌",
+    desc: "第六宇宙级：100000 km/h · 全宇宙几乎没有第二个人买得起",
+    tier: "宇宙",
+    maxLv: 500,
+    // ★ 该车「形态」的标称极速（km/h）。omega 形态据此 + 升级等级解算出实际极速，
+    //   所以 Lv0 只有裸车水平，升满才到这个数（见 constants.js 的 ultraCruiseOf）。
+    nominalKmh: 100000,
+    costK: 10014166130071,
+    price: 155520000000000000,
+
+    speed: 2.6,
+    grip: 44.0,
+    weight: 0.78,
+    airRot: 1.163,
+    fuel: 14,
+    color: "#ffffff",
+    art: ART({tire: 0.7, rim: false, spokes: 26, spokeW: 0.2, tube: 1.0,
+      topDrop: 23, coil: 0, bar: "drop", saddleW: 3, helmR: 6.5, peak: false, vents: 6,
+      pose: POSE(18, 19, 22, 18, 10, 18)}),
+    phys: P(0.78, 0.86, 2.2, 1.5, 7, 32, 26),
+    ultra: { fx: {}, name: "无相形态", icon: "🌌", mode: "omega", cost: 1944000000000000000,
+      desc: "100000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
 
 
