@@ -18,7 +18,6 @@ export const store = {
   // 进度
   /** 当前存档槽下标（0 = 存档1）。槽 0 沿用旧的 bike_* 键，老存档自动成为「存档1」。 */
   slot: 0,
-  lvIdx: 0,
   selLevel: 0,
   unlocked: 0,
   stars: [],
@@ -33,7 +32,7 @@ export const store = {
   /** 特殊终极模式解锁状态：{ vehicleId: true }（由车库购买） */
   ultra: {},
 
-  // 进度阶梯（Task 9）：支线通关 / 最终任务 / 比赛邀请 / 段位 / 登顶 / 无限模式可选场景
+  // 进度阶梯：支线通关 / 最终任务 / 比赛邀请 / 段位 / 登顶 / 无限模式可选场景
   progress: {
     /** 已通关的支线下标数组（支线 i 的 6 关全部有星 → 视为已通关）；完成度 = 通过数/6 由 stars 推导 */
     branchCleared: [],
@@ -53,7 +52,7 @@ export const store = {
     freeThemes: [],
   },
 
-  // 累计统计（Task 9.5，存档键 bike_stat）
+  // 累计统计（存档键 bike_stat）
   stat: {
     /** 总局数：每局结束结算时 +1 */
     totalRuns: 0,
@@ -75,19 +74,19 @@ export const store = {
   // 环境 + 车辆派生参数（buildLevel / applyUpgrades 维护）
   phys: {
     theme: 0, // 当前地形主题索引（渲染用）
-    minY: 0, // 当前关卡地形最低点（世界 y 最大），用于"掉出地图"判定
-    GRAV: 750,
-    TRACTION: 1,
-    MAXV: topSpeedOf(VEHICLES[0], { engine: 0, tire: 0, frame: 0, susp: 0 }),
+    floorY: 0, // 当前关卡地形最低点（世界 y 最大），用于"掉出地图"判定
+    gravity: 750,
+    traction: 1,
+    topSpeed: topSpeedOf(VEHICLES[0], { engine: 0, tire: 0, frame: 0, susp: 0 }),
     crashMargin: 4,
     fuel: 1,
     fuelMax: 1,
-    // ---- 第 3 期（Task 1）：由车辆/升级/场景派生的物理量 ----
+    // ---- ：由车辆/升级/场景派生的物理量 ----
     /** 三质点刚体：{ mass, mR, mF, mH, mTot, comUp, iBody }（applyUpgrades 写入） */
     rb: null,
     /** 悬挂：{ k, c, travel } */
     susp: null,
-    /** 摩擦系数 μ（场景 traction × 车辆 grp × 轮胎升级） */
+    /** 摩擦系数 μ（场景 traction × 车辆 grip × 轮胎升级） */
     mu: 1,
   },
 
@@ -97,9 +96,9 @@ export const store = {
     gen: 0,
     crashed: false,
     crashTimer: 0,
-    clearing: false,
+    settling: false,
     lastSafeX: START_X,
-    runCrashed: false,
+    hasCrashed: false,
     combo: 0,
     comboStamp: -99, // 上一次空翻结算的 store.time
     wheelieDist: 0,
@@ -127,7 +126,7 @@ export const store = {
 
 /**
  * 车身：车架刚体（后轴 / 前轴 / 骑手三质点）+ 两个独立车轮。
- *   · axleR / axleF / head —— 车架刚体（质量加权距离约束保持刚性）
+ *   · axleRear / axleFront / head —— 车架刚体（质量加权距离约束保持刚性）
  *   · rear / front         —— 车轮（独立刚体，由弹簧-阻尼悬挂连到对应轴）
  *   · pts                  —— 全部五质点（整体平移/旋转/传送时用，避免漏掉某一个）
  * 车轮与轴在"悬挂静止位"重合，压缩量见 susp.*.t。
@@ -136,18 +135,17 @@ export const bike = {
   rear: { x: 0, y: 0, px: 0, py: 0 },
   front: { x: 0, y: 0, px: 0, py: 0 },
   head: { x: 0, y: 0, px: 0, py: 0 },
-  axleR: { x: 0, y: 0, px: 0, py: 0 },
-  axleF: { x: 0, y: 0, px: 0, py: 0 },
+  axleRear: { x: 0, y: 0, px: 0, py: 0 },
+  axleFront: { x: 0, y: 0, px: 0, py: 0 },
   grounded: 0,
   speed: 0,
   /** 加速带助推剩余时长（秒）：触发后平滑缓进缓出的加速，避免一次性脉冲造成顿挫 */
   boostT: 0,
-  wheelRear: 0,
-  wheelFront: 0,
-  locked: true,
+  wheelAngleRear: 0,
+  wheelAngleFront: 0,
+  /** 出生后等待玩家第一次按键才起步（在此之前时钟与物理都不推进） */
+  awaitingStart: true,
   spawnX: START_X,
-  frontGr: false,
-  rearGr: false,
   squash: 0,
   squashVel: 0,
   lastAng: 0,
@@ -157,14 +155,14 @@ export const bike = {
   /** 本帧车轮视觉转角（rad/帧）：渲染层据此判断辐条是否已快到频闪、该糊掉了。
    *  后轮/前轮各一个 —— 渲染层两个轮子都要读，漏声明哪个，开局到首次按键之间
    *  （stepPhysics 尚未跑过）就会读到 undefined → NaN 污染 globalAlpha。 */
-  wheelStep: 0,
-  wheelStepF: 0,
+  wheelStepRear: 0,
+  wheelStepFront: 0,
   rotAcc: 0,
   // 骑手在"前轴→后轴连线"的哪一侧（刚体属性，旋转不变；用于防止约束求解把骑手甩到轮轴下方）
   headUp: -1,
 
-  // ---- 第 3 期新增物理状态量（Task 1.2）----
-  // 车轮"真状态"：角速度/角加速度（rad/s, rad/s²）。wheelRear/Front 降级为视觉角度（由它派生）。
+  // ---- 新增物理状态量----
+  // 车轮"真状态"：角速度/角加速度（rad/s, rad/s²）。wheelAngleRear/Front 降级为视觉角度（由它派生）。
   wheelRot: { rear: 0, front: 0 },
   wheelAcc: { rear: 0, front: 0 },
   // 悬挂：t = 压缩量（px，0 = 静止位、>0 = 被压缩），v = 压缩速度（px/s）
@@ -176,22 +174,22 @@ export const bike = {
   // 切向摩擦冲量的**子步累计量**：每轮迭代只施加增量，累计量按 μ×fn 限幅
   // （不累加的话一轮迭代能叠加 SOLVER_ITERS 份满摩擦力，把车掀翻）
   fricAcc: { rear: 0, front: 0 },
-  // 求解器诊断量（Task 2.2）：迭代次数与残差 → "是否收敛"可被断言
+  // 求解器诊断量：迭代次数与残差 → "是否收敛"可被断言
   solverIters: 0,
   solverResid: 0,
   // 穿透量（px）：沿法线的最大侵入深度，断言其 ≤ 容差
   penetration: 0,
 };
 /** 五质点列表（只在结构与质量变化时重建） */
-bike.pts = [bike.rear, bike.front, bike.head, bike.axleR, bike.axleF];
+bike.pts = [bike.rear, bike.front, bike.head, bike.axleRear, bike.axleFront];
 
 /** 世界实体（关卡模式与无限模式共用） */
 export const world = {
   coins: [],
   canisters: [],
   boosts: [],
-  decoTree: [],
-  decoRock: [],
+  decoFore: [],
+  decoBack: [],
   particles: [],
   freeGenX: 0,
   /** 变体"赛前预加油"比例（占油箱）：buildLevel 按变体规则计算 */

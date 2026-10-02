@@ -28,17 +28,6 @@ export function inferLevel(txt) {
   return "info";
 }
 
-/** 供断言观察：当前同屏 / 排队中的提示级别 */
-export function toastState() {
-  return { live: live.map((t) => t.level), queue: queue.map((t) => t.level) };
-}
-
-/** 清空全部提示（测试与场景重置用） */
-export function clearToasts() {
-  live.length = 0;
-  queue.length = 0;
-  if (toastEl) toastEl.innerHTML = "";
-}
 
 function present(item) {
   if (!toastEl) {

@@ -762,6 +762,10 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   #overlay .hero h1 { font-size: 20px; margin-bottom: 2px; }
   #overlay .heroStat { margin-bottom: var(--space-1); }
   #overlay .heroStat .chip { font-size: var(--font-caption-size); }
+  /* 打赏按钮在这一档同样收紧留白：下面的纵向预算是逐项算过的，
+     不压它的上下外边距就会从关卡地图那份里扣。收到 space-2 而不是 space-1 ——
+     space-1 + tab 内边距只剩 6px，按钮 6px 模糊的投影仍会压到 tab 栏上。 */
+  #overlay .heroCoffeeRow { margin-top: var(--space-2); margin-bottom: var(--space-2); }
   #overlay .modeTabs { margin-bottom: var(--space-2); padding: 2px; }
   #overlay .mtab { min-height: 32px; font-size: var(--font-caption-size); }
   /* 390px 高度里，标题 28 + 状态条 28 + tab 44 + 底部图标栏 46 + 上下 padding 16 = 162px，
@@ -813,12 +817,18 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 .slotNew { width: 100%; margin-bottom: var(--space-1); }
 
 /* 打赏按钮独占一行（heroCoffeeRow）：用**留白**而不是加重颜色来获得存在感。
-   上下留出 space-3/space-2 的呼吸位，与上方进度 chip 分属两个视觉区块 ——
-   视线扫过标题后自然停在第二行，而它本身不用喊。 */
+   上下留出 space-3 的呼吸位，与上方进度 chip 分属两个视觉区块 ——
+   视线扫过标题后自然停在第二行，而它本身不用喊。
+
+   ★ 下边距不是可有可无的：.modeTabs 是 `margin: 0 auto …`，上边距为 0。
+     这里原先只有 margin-top，于是打赏按钮底边与玩法 tab 栏**贴死在一起**，
+     再叠上按钮自身 `0 4px 12px` 的投影 —— 投影直接糊在半透明的 tab 栏上，
+     看着就像按钮压到了下面那排。两个区块之间必须留够这段距离。 */
 .heroCoffeeRow {
   position: relative; z-index: 1;
   display: flex; justify-content: center;
   margin-top: var(--space-3);
+  margin-bottom: var(--space-3);
 }
 .heroCoffee {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1);
@@ -831,7 +841,8 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
   cursor: pointer; white-space: nowrap;
-  box-shadow: 0 var(--space-1) var(--space-3) var(--shadow-md);
+  /* 投影刻意压扁：上下留白只有 space-3，12px 的模糊半径会一路洇到 tab 栏上 */
+  box-shadow: 0 2px 6px var(--shadow-md);
   transition: filter var(--dur-fast) var(--ease-std), transform var(--dur-fast) var(--ease-std);
 }
 .heroCoffee:hover { filter: brightness(1.08); }

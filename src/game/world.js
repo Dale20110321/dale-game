@@ -24,7 +24,7 @@ const GATE_START_ALLOW = 900;
  */
 export const BOOST_HAZARD_GAP = 400;
 
-/** 关卡地形真实最低点（世界 y 最大，即屏幕最下方），用于"掉出地图"判定：直接用纯地形函数，避免依赖当前 lvIdx */
+/** 关卡地形真实最低点（世界 y 最大，即屏幕最下方），用于"掉出地图"判定：直接用纯地形函数，避免依赖当前关卡状态 */
 function measureBottomY(L) {
   let max = -Infinity;
   for (let x = 0; x <= L.len; x += 25) {
@@ -47,14 +47,14 @@ function pickDecoIndex(list, r) {
 }
 
 /**
- * 「竖立/柱状」装饰白名单 —— 这类保持前景地位（带投影、正常对比，维持空间层次）。
- * 其余（岩石 / 灌木 / 花 / 瓦砾 / 冰山 / 陨坑…）一律退到背景层。
+ * 「竖立/柱状」装饰白名单 —— 这类保持**前景**地位（带投影、正常对比，维持空间层次）。
+ * 其余（岩石 / 灌木 / 花 / 瓦砾 / 冰山 / 陨坑…）一律退到**背景**层。
  *
- * 修掉一个长期存在的分组 bug：原实现按**数组下标**分流（`di === 0 ? trees : rocks`），
- * 于是月面的 moonrock、火山的 lavarock、冰川的 iceberg、峡谷的 mesarock 这些"最大最像
- * 障碍"的石头全被扔进 decoTree 画在最底层并套上高大投影；而绿野的 bush/flower 反而
- * 进 decoRock 被画在最前。结果是"草长得像石头、石头长得像树"。
- * 白名单按 themes.js 全部 12 个场景的 deco 列表逐一核对过。
+ * ★ 这两个分组是"前后景"，不是"树与石"：白名单里既有树也有 pillar/ruin/stump，
+ *   背景层里也有 bush/flower。早期实现按**数组下标**分流（`di === 0 ? 前景 : 背景`），
+ *   于是月面的 moonrock、火山的 lavarock、冰川的 iceberg 这些"最大最像障碍"的石头
+ *   全被扔进前景层画在最底层并套上高大投影，而绿野的 bush/flower 反而退到背景画在最前 ——
+ *   结果是"草长得像石头、石头长得像树"。
  */
 const TALL_DECO = new Set([
   "tree", "snowtree", "cactus", "fern", "pine", "reed", "stump", "pillar", "ruin",
@@ -63,8 +63,8 @@ const TALL_DECO = new Set([
 /** 生成装饰物（纯视觉）：只长在坡度平缓的地方；类型按"该处所属分段场景"的 deco 列表加权选择 */
 function buildDeco(L, rng) {
   const T0 = THEMES[segmentThemeAt(L, 0)] || THEMES[0];
-  const trees = [];
-  const rocks = [];
+  const fore = [];
+  const back = [];
   for (let x = 220; x < L.len - 120; x += 55 + rng() * 150) {
     const gi = groundInfo(x);
     if (gi.y === Infinity) continue;
@@ -74,10 +74,10 @@ function buildDeco(L, rng) {
     const T = THEMES[segmentThemeAt(L, x)] || T0;
     const di = pickDecoIndex(T.deco, rng());
     const item = { x, y: gi.y, kind: T.deco[di], s, ph };
-    if (TALL_DECO.has(item.kind)) trees.push(item);
-    else rocks.push(item);
+    if (TALL_DECO.has(item.kind)) fore.push(item);
+    else back.push(item);
   }
-  return { trees, rocks };
+  return { fore, back };
 }
 
 /**
@@ -144,19 +144,26 @@ function buildJumps(L) {
   return out;
 }
 
-/** 构建关卡（金币、油罐、加速带、装饰、机制实体、环境物理） */
-export function buildLevel(idx) {
-  store.lvIdx = idx;
+/**
+ * 构建关卡（金币、油罐、加速带、装饰、机制实体、环境物理）。
+ *
+ * ★ 不接收关卡下标：唯一事实来源是 `store.selLevel`（"当前选中关卡"）。
+ *   过去这里另存了一份 `store.lvIdx`，两份字段靠调用顺序保持同步 ——
+ *   而首屏 `buildLevel(0)` 造的是第 1 关地形，`selLevel` 却可能来自存档是别的关，
+ *   两者当场就不一致。现在只留一个字段，顺带让菜单背景直接显示玩家当前所在的那一关。
+ */
+export function buildLevel() {
+  const idx = store.selLevel;
   const L = levelAt(idx);
   const rng = mulberry32(1000 + idx * 97);
   store.finishX = L.len;
   const th0 = segmentThemeAt(L, 0);
   store.phys.theme = th0;
-  store.phys.minY = measureBottomY(L);
+  store.phys.floorY = measureBottomY(L);
 
   const T = THEMES[th0] || THEMES[0];
-  store.phys.GRAV = T.g;
-  store.phys.TRACTION = T.traction;
+  store.phys.gravity = T.g;
+  store.phys.traction = T.traction;
 
   // ---------------- 金币 ----------------
   const coins = [];
@@ -173,11 +180,11 @@ export function buildLevel(idx) {
   //   容错余量 M：前期 1.30（撒开了跑），末关 1.05（每一罐都得吃到）
   const vh = VEHICLES[store.currentVehicle];
   const up = getUp();
-  const fMax = vh.tank * (1 + 0.004 * up.frame);
-  const kIdle = ((0.005 * vh.wgt) / fMax) * L.fuelK;
-  const kFull = ((0.021 * vh.wgt) / fMax) * L.fuelK;
+  const fMax = vh.fuel * (1 + 0.004 * up.frame);
+  const kIdle = ((0.005 * vh.weight) / fMax) * L.fuelK;
+  const kFull = ((0.021 * vh.weight) / fMax) * L.fuelK;
   const kAvg = kIdle + 0.62 * (kFull - kIdle);
-  const vAvg = 0.78 * REF_SPEED * vh.spd;
+  const vAvg = 0.78 * REF_SPEED * vh.speed;
   const range = vAvg / kAvg;
   const need = L.len / range;
   const M = 1.30 - 0.25 * L.ramp;
@@ -245,8 +252,8 @@ export function buildLevel(idx) {
   world.coins = coins;
   world.canisters = canisters;
   world.boosts = boosts;
-  world.decoTree = deco.trees;
-  world.decoRock = deco.rocks;
+  world.decoFore = deco.fore;
+  world.decoBack = deco.back;
   world.hazards = hazards;
   world.gates = buildGates(L);
   world.jumps = buildJumps(L);
@@ -263,13 +270,13 @@ export function syncSegmentTheme(L, x) {
   if (th === store.phys.theme) return false;
   const T = THEMES[th] || THEMES[0];
   store.phys.theme = th;
-  store.phys.GRAV = T.g;
-  store.phys.TRACTION = T.traction;
+  store.phys.gravity = T.g;
+  store.phys.traction = T.traction;
   return true;
 }
 
 /**
- * 无限模式初始化（Task 12.2）。
+ * 无限模式初始化。
  * @param {number} [theme] 场景下标（0~11）。不传 = 随机地形（现状行为，取 THEMES[0] 的环境参数）。
  *   · 未登顶（!progress.peak）时忽略该参数：不切场景，保持随机地形。
  *   · 登顶后接受合法下标；非法/越界回退 0。
@@ -278,7 +285,6 @@ export function syncSegmentTheme(L, x) {
  */
 export function freeInit(theme) {
   store.mode = "free";
-  store.lvIdx = 0;
   store.finishX = Infinity;
   // ★ 每局重摇地形种子：不然每次打开都是同一条路（地形函数本身没有随机源）
   setFreeSeed((Math.random() * 0xffffffff) >>> 0);
@@ -287,14 +293,14 @@ export function freeInit(theme) {
   const picked = Number.isInteger(theme) ? freeThemeOf(theme) : rollFreeTheme();
   const th = picked;
   store.phys.theme = th;
-  store.phys.minY = 0; // 无限模式用"当前位置地面以下 800px"判定
-  store.phys.GRAV = (THEMES[th] || THEMES[0]).g;
-  store.phys.TRACTION = (THEMES[th] || THEMES[0]).traction;
+  store.phys.floorY = 0; // 无限模式用"当前位置地面以下 800px"判定
+  store.phys.gravity = (THEMES[th] || THEMES[0]).g;
+  store.phys.traction = (THEMES[th] || THEMES[0]).traction;
   world.coins = [];
   world.canisters = [];
   world.boosts = [];
-  world.decoTree = [];
-  world.decoRock = [];
+  world.decoFore = [];
+  world.decoBack = [];
   world.hazards = [];
   world.gates = [];
   world.jumps = [];
@@ -346,17 +352,17 @@ export function freeFill() {
       const T = THEMES[store.phys.theme] || THEMES[0];
       const deco = T.deco && T.deco.length ? T.deco : THEMES[0].deco;
       if (rng() < 0.6) {
-        world.decoTree.push({ x: x + 60, y: groundY(x + 60), kind: deco[0], s: 0.7 + rng() * 0.7, ph: rng() * 6.28 });
+        world.decoFore.push({ x: x + 60, y: groundY(x + 60), kind: deco[0], s: 0.7 + rng() * 0.7, ph: rng() * 6.28 });
       } else if (rng() < 0.3) {
-        world.decoRock.push({ x: x + 90, y: groundY(x + 90), kind: deco[1] || deco[0], s: 0.7 + rng() * 0.7, ph: rng() * 6.28 });
+        world.decoBack.push({ x: x + 90, y: groundY(x + 90), kind: deco[1] || deco[0], s: 0.7 + rng() * 0.7, ph: rng() * 6.28 });
       }
     }
     world.freeGenX += Math.round(170 + diffS * 260 + rng() * 280);
   }
   world.coins = world.coins.filter((c) => c.x > store.cam.x - 400 && !c.taken);
   world.canisters = world.canisters.filter((c) => c.x > store.cam.x - 400 && !c.taken);
-  world.decoTree = world.decoTree.filter((c) => c.x > store.cam.x - 500);
-  world.decoRock = world.decoRock.filter((c) => c.x > store.cam.x - 500);
+  world.decoFore = world.decoFore.filter((c) => c.x > store.cam.x - 500);
+  world.decoBack = world.decoBack.filter((c) => c.x > store.cam.x - 500);
 }
 
 /** 骑尘：贴地行驶 + 高速冲刺扬尘 */

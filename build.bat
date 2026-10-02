@@ -32,6 +32,7 @@ if errorlevel 1 (
 )
 echo.
 echo 打包完成：dist\game.bundle.js
-echo 该文件不会被 index.html 自动加载（主入口是 src/main.js）；
-echo 想离线双击游玩，请另存一份 index.html 并把 script 标签指向它。
+echo ★ 这个文件必须跟着源码一起提交（.gitignore 特意没排除它）：
+echo   index.html 的主入口就是它，src/main.js 只是兜底。
+echo   不重新打包就提交，线上会脚本 404 —— 页面能看，但所有按钮点不动。
 pause

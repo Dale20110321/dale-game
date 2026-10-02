@@ -7,6 +7,7 @@ import { LEVELS } from "../config/levels.js";
 import { isStorageAvailable } from "../core/storage.js";
 import { statRow, badge, chip } from "./components.js";
 import { nextLevel } from "../game/game.js";
+import { clearedCount } from "../game/progress.js";
 
 const overlay = document.getElementById("overlay");
 const ovTitle = document.getElementById("ovTitle");
@@ -53,18 +54,8 @@ if (homeFloat) {
   });
 }
 
-/** 已通关关卡数（星级 ≥ 1）——阶梯入口的显示依据 */
-function clearedCount() {
-  let n = 0;
-  for (let i = 0; i < LEVELS.length; i++) if ((store.stars[i] || 0) >= 1) n++;
-  return n;
-}
-
-/** 总星数（只统计 72 个支线关，不含最终任务槽位） */
-
-
 /**
- * Hero 区状态摘要：只留「通关 n/72」与「金币」两个数。
+ * Hero 区状态摘要：只留「通关 n/432」与「金币」两个数。
  * 结算后回到菜单会重新调用，因此数值始终与 store 一致（无需刷新页面）。
  */
 export function renderHeroSummary() {
@@ -213,7 +204,7 @@ export function showMenu() {
 }
 
 /**
- * 结算结果卡（Task 8.3）：星级逐颗点亮 + 金币滚动计数 + 段位分变化 + 下一关/返回菜单。
+ * 结算结果卡：星级逐颗点亮 + 金币滚动计数 + 段位分变化 + 下一关/返回菜单。
  * 由 game 层通过 presenter.presentResult 注入调用（game 不 import ui）。
  * @param {{title?:string,sub?:string,stars?:number,goldGain?:number,goldTotal?:number,
  *          ratingDelta?:number,rating?:number,time?:number,nextLabel?:string}} res

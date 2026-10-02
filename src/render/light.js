@@ -53,13 +53,3 @@ export function getLight() {
     isNight: y > 120,
   };
 }
-
-/**
- * 光源的屏幕坐标 —— 直接就是 `getLight()` 的 x/y（本来就是屏幕量纲）。
- * 保留这个别名是因为它明确表达了"这是屏幕坐标"，比调用方自己记着"x 已经是 px
- * 但 y 也是 px、别再乘 W"更不容易用错。
- */
-export function lightScreenPos() {
-  const L = getLight();
-  return { x: L.x, y: L.y };
-}

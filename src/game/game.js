@@ -3,7 +3,8 @@
 import {
   START_X, WHEELBASE, toM, toKmh, LAND_REF,
   RATING_MIN, RANK_GAIN_BASE, RANK_GAIN_BASE_ADV, RATING_LOSS, RATING_LOSS_ADVANCED,
-  rankName, rankStars, rankPromoReward, rankDelta, rankGold } from "../config/constants.js";
+  rankName, rankStars, rankPromoReward, rankDelta, rankGold,
+  RACE_FORMATS, RACE_PLACE_GOLD } from "../config/constants.js";
 import { LEVELS, levelAt, segmentThemeAt, variantRule } from "../config/levels.js";
 import { THEMES } from "../config/themes.js";
 import { store, bike, world } from "../core/store.js";
@@ -26,11 +27,11 @@ import {
   buildLevel, freeInit, freeFill, syncSegmentTheme,
   updateBoosts, updateCanisters, updateCoins, emitRideDust, updateJumps,
 } from "./world.js";
-import { raceInit, raceUpdate, raceFormat, racePlace, RACE_FORMATS, RACE_PLACE_GOLD } from "./race.js";
+import { raceInit, raceUpdate, raceFormat, racePlace } from "./race.js";
 
 let presenter = { hideOverlay() {}, toMenu() {} };
 
-// ---------------- 物理事件 → 表现（第 3 期 Task 8） ----------------
+// ---------------- 物理事件 → 表现 ----------------
 // 物理层只派发事件；震屏 / 音效 / 粒子 / 提示 / 落地结算在 game 层接线。
 // 颜色一律来自设计令牌或场景数据（不引入新的裸色值）。
 initPhysicsEvents({
@@ -78,9 +79,9 @@ function resetRunState() {
   run.gen++; // 开启新的一局：世代号 +1，作废上一局的延迟结算回调
   run.crashed = false;
   run.crashTimer = 0;
-  run.clearing = false;
+  run.settling = false;
   run.lastSafeX = START_X;
-  run.runCrashed = false;
+  run.hasCrashed = false;
   run.combo = 0;
   run.comboStamp = -99;
   run.wheelieDist = 0;
@@ -131,7 +132,7 @@ function beginRun() {
 }
 
 /**
- * 排位赛结算（Task 11.1 / 11.3 / 11.4）。
+ * 排位赛结算。
  *  · 胜 +N / 负 -M（高档位高级赛的数值更高），下限 RATING_MIN=0，绝不出现负数
  *  · 战绩累加 wins / losses；rating ≥ RATING_PEAK 由 settleProgress → deriveUnlocks 永久置 peak
  *  · settleProgress() 刷新阶梯派生态并立即落盘
@@ -195,7 +196,7 @@ export function startGame(m, lv, opt) {
       store.raceFormat = opt.format;
     }
     if (store.mode === "free") freeInit(opt && opt.theme);
-    else buildLevel(store.selLevel);
+    else buildLevel();
     applyUpgrades();
     beginRun();
   } catch (err) {
@@ -213,7 +214,7 @@ export function restart() {
 export function nextLevel() {
   if (store.mode === "level" && store.selLevel < LEVELS.length - 1) {
     store.selLevel++;
-    buildLevel(store.selLevel);
+    buildLevel();
     applyUpgrades();
     resetBike(START_X);
     resetRunState();
@@ -274,7 +275,7 @@ function handleFuelEmpty() {
       record = true;
     }
     store.state = "ended";
-    // 结束结算：累计统计（本局 +1 次、里程按 100px=1m 换算）（Task 9.5）
+    // 结束结算：累计统计（本局 +1 次、里程按 100px=1m 换算）
     addStat({
       runs: 1,
       meters: dist,
@@ -298,8 +299,8 @@ function handleFuelEmpty() {
 function finishLevel() {
   const run = store.run;
   const L = levelAt(store.selLevel);
-  run.clearing = true;
-  // 结算结果卡（Task 8.3）：由 presenter 注入到 ui 层渲染（game 不 import ui）
+  run.settling = true;
+  // 结算结果卡：由 presenter 注入到 ui 层渲染（game 不 import ui）
   const result = {
     title: "🏁 本局结束",
     stars: undefined,
@@ -363,13 +364,13 @@ function finishLevel() {
     result.goldGain = L.goldBase;
     result.time = elapsed;
     result.nextLabel = store.selLevel < LEVELS.length - 1 ? "下一关 →" : "🏠 返回菜单";
-    if (!run.runCrashed) checkAch("noc");
+    if (!run.hasCrashed) checkAch("noc");
     if (run.totalCoins > 0 && run.coinGot >= run.totalCoins) checkAch("coinall");
     if (store.stars.length >= LEVELS.length && store.stars.every((v) => v >= 3)) checkAch("allstar");
-    // 通关结算：刷新阶梯派生态（支线通关 / 邀请 / 登顶）并立即写盘（Task 9.4 / 9.6）
+    // 通关结算：刷新阶梯派生态（支线通关 / 邀请 / 登顶）并立即写盘
     settleProgress();
   }
-  // 累计统计：本局 +1 次、里程按 100px=1m 换算、时长为本局有效游玩时间（Task 9.5）
+  // 累计统计：本局 +1 次、里程按 100px=1m 换算、时长为本局有效游玩时间
   addStat({
     runs: 1,
     meters: toM(store.finishX),
@@ -391,7 +392,7 @@ function crashWithReason(msg) {
 /** 限时门超时：本局判负（不计星、不解锁），回到关卡入口 */
 function gateFail() {
   const run = store.run;
-  run.clearing = true;
+  run.settling = true;
   run.failed = true;
   showToast("⏱ 限时门超时！本关判负（不计星、不解锁）", 1800);
   setTimeout(runGuard(() => {
@@ -404,7 +405,7 @@ function gateFail() {
 function belowWorld(midX, midY) {
   // 关卡模式：低于本关地形真实最低点（世界 y 最大）以下 800px 判定掉坑；
   // 无限模式：低于"当前位置地面以下 800px"判定掉坑。
-  const base = store.mode === "free" ? groundY(midX) + 800 : store.phys.minY + 800;
+  const base = store.mode === "free" ? groundY(midX) + 800 : store.phys.floorY + 800;
   return midY > base;
 }
 
@@ -424,9 +425,9 @@ export function update(dt) {
   const b = bike;
   const P = store.phys;
 
-  if (b.locked) {
+  if (b.awaitingStart) {
     if (key.right || key.left) {
-      b.locked = false;
+      b.awaitingStart = false;
     } else {
       pinBike();
       return; // 等待起步：不推进时钟
@@ -438,12 +439,12 @@ export function update(dt) {
   stepPhysics();
   // 最终任务多场景串联：按车身中点所属分段同步渲染主题与重力/抓地。
   // 放在 stepPhysics 之后：渲染主题始终与"本帧实际渲染的车身位置"一致（不会滞后 1 帧）。
-  // ★ 物理连续性（Task 8.3）：本函数只改写 store.phys 的 theme / GRAV / TRACTION，
+  // ★ 物理连续性：本函数只改写 store.phys 的 theme / gravity / traction，
   //   绝不触碰 bike.rear / bike.front / bike.head 的 x / y / px / py；重力与抓地是按分段
   //   取值的常量，切换只改变"后续子步的加速度"，已经积分的当前帧状态不受影响。
   //   因此跨越分界点绝不会出现位置瞬移、速度突变或 NaN。
   if (store.mode === "level") {
-    syncSegmentTheme(levelAt(store.lvIdx), (b.rear.x + b.front.x) / 2);
+    syncSegmentTheme(levelAt(store.selLevel), (b.rear.x + b.front.x) / 2);
   }
   updateParticles();
   emitRideDust();
@@ -478,7 +479,7 @@ export function update(dt) {
   if (toKmh(Math.abs(b.speed)) >= 30) checkAch("fast");
 
   // ---- 机制判定：危险段超速必摔 / 限时门准时通过 ----
-  if (store.mode === "level" && !run.clearing) {
+  if (store.mode === "level" && !run.settling) {
     if (!run.crashed && world.hazards.length) {
       const spd = Math.abs(bikeVx());
       for (const h of world.hazards) {
@@ -506,8 +507,8 @@ export function update(dt) {
 
   if (store.mode === "race" || store.mode === "ranked") {
     raceUpdate(dt);
-    if (store.raceAI && store.raceAI.finish && !run.clearing) {
-      run.clearing = true;
+    if (store.raceAI && store.raceAI.finish && !run.settling) {
+      run.settling = true;
       if (store.mode === "ranked") {
         settleRanked(false); // 对手先到终点 → 排位判负，立即结算段位分
       } else {
@@ -518,7 +519,7 @@ export function update(dt) {
   }
   if (store.mode === "free") {
     freeFill();
-  } else if (!run.clearing && mid > store.finishX) {
+  } else if (!run.settling && mid > store.finishX) {
     finishLevel();
   }
 }

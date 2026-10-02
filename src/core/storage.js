@@ -1,7 +1,7 @@
 // localStorage 存档读写 + 每辆车的升级数据访问 + 进度阶梯 / 累计统计 / 导入导出
 // 键名与历史版本完全一致（见 constants.SAVE_KEYS），保证老存档不丢。
 //
-// 容错纪律（Task 9.7）：
+// 容错纪律：
 //  · 所有读写都经过 lsGet / lsSet / lsRemove 包装；localStorage 抛异常（隐私模式 / 配额满 /
 //    被禁用）时把模块级 available 置 false 并吞掉异常，游戏仍可正常游玩。
 //  · 任一 bike_* 键缺失或 JSON 损坏 → 回退默认值，不崩溃。
@@ -281,7 +281,7 @@ function intOr(v) {
  *
  * ★ 坏存档会让**物理直接算出 NaN**，而不只是"数值难看"：
  *   deriveHandling 算 `1 + 0.020 * up.engine`，engine 若是 undefined / "a" / 负数，
- *   MAXV / torquePeak / brakePeak 全变 NaN → applyUpgrades 写进 store.phys，
+ *   topSpeed / torquePeak / brakePeak 全变 NaN → applyUpgrades 写进 store.phys，
  *   之后车推不动、速度恒 0，而 store.state 仍显示 play —— 玩家看着"在玩"却完全无法操控。
  *   所以这里对**四个字段逐一**校验，而不是只判断对象存不存在。
  */
@@ -336,7 +336,7 @@ export function saveAchList() {
 
 /**
  * 主存档写盘（gold / up / unlocked / stars / veh / owned / mute / best）。
- * 同时落盘进度阶梯 / 段位分 / 累计统计（Task 9.6）：通关结算、解锁关卡/场景、购车、
+ * 同时落盘进度阶梯 / 段位分 / 累计统计：通关结算、解锁关卡/场景、购车、
  * 升级、成就、段位变化等既有落盘点都走这里，因此一处委托即可全覆盖。
  */
 export function save() {
@@ -357,7 +357,7 @@ export function save() {
   touchSlotMeta(slotIndex(), clearedCountOfCurrent());
 }
 
-// ---------------- 进度阶梯：纯函数（Task 9.4） ----------------
+// ---------------- 进度阶梯：纯函数 ----------------
 
 /** 由星级数组推导"已通关支线下标"（纯函数：星级是唯一事实来源） */
 function clearedBranchesOf(stars) {
@@ -379,7 +379,7 @@ export function deriveBranchCleared() {
 }
 
 /**
- * "已通关场景"推导（纯函数，Task 12.2）：某支线 6 关全部 ≥1 星 → 该支线绑定的场景可选。
+ * "已通关场景"推导（纯函数）：某支线 12 关全部 ≥1 星 → 该支线绑定的场景可选。
  * 支线的场景下标与支线下标 1:1（BRANCHES[i].theme === i），因此返回的是场景下标数组。
  * 只依赖星级，不含登顶判定（登顶是"能否选图"的准入，由 syncFreeThemes / freeInit 单独把关）。
  */
@@ -401,13 +401,13 @@ export function isAdvancedUnlocked(rating) {
 /**
  * 阶梯解锁判定（纯函数，不修改入参）。
  * @param {object} progress store.progress 形态的对象
- * @param {number[]} stars 72 关星级数组
+ * @param {number[]} stars 全部关卡的星级数组
  * @returns {{allCleared:boolean, finaleUnlocked:boolean, finaleDone:boolean,
  *            invited:boolean, advancedUnlocked:boolean, peak:boolean}}
- *  · 72 关全通（每关星级 ≥1）→ finaleUnlocked = true
+ *  · 全部关卡通关（每关星级 ≥1）→ finaleUnlocked = true
  *  · 最终任务通关 → finaleDone = true 且 invited = true
- *  · rating ≥ 1200 → advancedUnlocked = true
- *  · rating ≥ 2400 → peak = true（登顶后永久保持）
+ *  · rating ≥ RATING_ADVANCED(1200) → advancedUnlocked = true
+ *  · rating ≥ RATING_PEAK(3300) → peak = true（登顶后永久保持）
  */
 export function deriveUnlocks(progress, stars) {
   const p = progress && typeof progress === "object" ? progress : {};
@@ -544,7 +544,7 @@ export function saveAll() {
 }
 
 /**
- * 接线自动保存（Task 9.6）：由 main.js 在首屏调用一次。
+ * 接线自动保存：由 main.js 在首屏调用一次。
  *  · 先探测 localStorage 可用性（探测键不以 bike_ 开头，不污染导出内容）
  *  · 骑行中每 intervalMs（默认 30s）兜底写盘
  *  · visibilitychange 切到后台时立即写盘
@@ -614,7 +614,7 @@ export function loadSave() {
     } else {
       // ★ 这里原来是把整个对象原样赋给 store.upgrades（只判断"是不是对象"）。
       //   坏值如 {"trail":5} / {"trail":"x"} / {"trail":{"engine":"a"}} 会一路进到
-      //   getUp() → deriveHandling()，算出 NaN 的 MAXV，车直接推不动而 state 仍是 play。
+      //   getUp() → deriveHandling()，算出 NaN 的 topSpeed，车直接推不动而 state 仍是 play。
       //   与上面 bike_owned 的注释是同一类故障，必须逐字段校验。
       store.upgrades = sanitizeUpgrades(u);
     }
@@ -716,7 +716,7 @@ export function loadSave() {
   }
 }
 
-// ---------------- 存档导入 / 导出（Task 10） ----------------
+// ---------------- 存档导入 / 导出 ----------------
 
 /** 需要纳入导入/导出的键：受管理的键 + localStorage 里实际存在的其它 bike_ 前缀键 */
 /**

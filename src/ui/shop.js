@@ -34,7 +34,7 @@ function previewStats(veh, up) {
   const h = deriveHandling(veh, up);
   const s = deriveSuspension(veh, up);
   return {
-    极速: Math.round(toKmh(h.MAXV)),                       // km/h
+    极速: Math.round(toKmh(h.topSpeed)),                    // km/h
     扭矩: Math.round(h.torquePeak / 1000),                 // k
     抓地: Math.round(deriveFriction(1, veh, up) * 100) / 100,
     抗摔: Math.round(crashTiltDeg(h.crashMargin)),         // 度

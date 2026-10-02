@@ -203,10 +203,6 @@ export const SEMANTIC = Object.freeze({
   accent: "accent",
 });
 
-/** 语义名 → 色值（未知级别回退 info） */
-export function semColor(name) {
-  return TOKENS[SEMANTIC[name] || "info"] || TOKENS.info;
-}
 
 /** 取令牌原文；未定义的键回退空串（调用方应保证键存在，断言另有守护） */
 export function token(name) {
@@ -220,11 +216,6 @@ export function tokenNum(name, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-/** 取令牌毫秒数（动效时长） */
-export function tokenMs(name, fallback = 0) {
-  const n = parseFloat(TOKENS[name]);
-  return Number.isFinite(n) ? n : fallback;
-}
 
 /**
  * 组装 Canvas 的 font 字符串（字号取排版阶梯，字重取同层字重）。

@@ -124,10 +124,6 @@ export function setQuality(q) {
   return quality;
 }
 
-/** 是否开启了模糊类效果（拖影 / 天气流动） */
-export function blurEnabled() {
-  return quality === "high" && !reduced;
-}
 
 /** 作废离屏层缓存的渐变（尺寸 / 渲染倍率 / 场景变化后必须重建，否则合成时被拉伸糊掉） */
 function invalidateOff() {

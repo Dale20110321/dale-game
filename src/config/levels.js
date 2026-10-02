@@ -1,5 +1,5 @@
 // 关卡数据与地形数学（纯函数，不依赖任何运行时状态）
-//  · 12 条支线 × 6 关 = 72 关（扁平数组，索引 = 全局索引，与旧代码路径兼容）
+//  · 36 条支线 × 12 关 = 432 关（扁平数组，索引 = 全局索引，与旧代码路径兼容）
 //  · 难度沿"全局进度 gi"单调递增（坡度 / 落差 / 颠簸 / 燃料 / 三星时限）
 //  · 地形 = 主坡(大起伏) + 中波(连续坡) + 颠簸(细碎) + 下坡断层
 //  · 支线 i 绑定 THEMES[i]（场景下标 1:1）
@@ -15,7 +15,7 @@ const RUN_IN = 430;
  * 收尾缓冲长度（px）：终点前这一段把地形平滑地收平。
  *
  * ★ 起步有 LAUNCH_PAD 平缓段、终点却没有，于是终点前 200px 的坡度完全由随机波形决定，
- *   偶发落到断崖上（72 关时样本少，432 关后必现）。过线即刻结算，坡度再大都无碍，
+ *   偶发落到断崖上（72 关时样本少，扩到 432 关后必现）。过线即刻结算，坡度再大都无碍，
  *   所以这里按构造把终点收平，而不是去放宽那条断言。
  */
 const FINISH_PAD = 900;
@@ -33,17 +33,16 @@ const TOTAL = N_BRANCHES * LEVELS_PER_BRANCH;
 export const VARIANTS = ["normal", "sprint", "gauntlet", "airtime", "fuelrun", "downhill"];
 
 /**
- * 每条支线的特殊变体关位（k 值）。12 关规模下用 6 个位：2/4/6/8/10/11。
+ * 每条支线的特殊变体关位（k 值）。12 关规模下取 5 个位：2/4/6/8/10。
  *
- * ★ 为什么是这 6 个位、且要错开两轮轮转：原 6 关版只有 k=2、4 两个特殊位，
- *   6 种变体在 72 关里只出现 36 次、分布很不均。扩到 12 关后若只补位不补齐，
- *   变体分布仍会偏斜（checklist 要求 6 种出现次数两两差 ≤ 2）。
+ * ★ 为什么是 5 个位、且要错开两轮轮转：最早的 6 关版只有 k=2、4 两个特殊位，
+ *   5 种特殊变体在 72 关里分布很不均。扩到 12 关后若只补位不补齐，分布仍然偏斜。
  *   `SPECIAL_SLOTS` 给出位，`bi` 与 `bi+2` 错开轮转，保证相邻支线不会撞同一个变体。
  */
 export const SPECIAL_SLOTS = [2, 4, 6, 8, 10];
-// ★ 特殊变体只有 5 种（VARIANTS 去掉 normal），所以位也取 5 个。
-//   6 位 × 5 种会让 sprint 出现 72 次、其余各 36 次（实测差 36，远超"差 ≤2"）。
-//   5 位 × 5 种 × 36 条支线 = 900 / 5 = 每种正好 36 次。
+// ★ 特殊变体只有 5 种（VARIANTS 去掉 normal），位也必须正好取 5 个 ——
+//   位与种数必须相等，否则分布会偏：36 条支线 × 5 位 = 180 个特殊关，
+//   180 / 5 种 = 每种正好 36 次。多一个位就会让先轮到的变体多出现 36 次。
 const SPECIALS = ["sprint", "gauntlet", "airtime", "fuelrun", "downhill"];
 
 /** 变体展示信息（HUD / 面板） */
@@ -127,7 +126,7 @@ export const BRANCHES = Array.from({ length: N_BRANCHES }, (_, i) =>
 // ============================================================
 
 /**
- * 12 种"地貌气质"——一条支线一种体格；支线内 6 关各自再掷一次地形种子。
+ * 12 种"地貌气质"——按支线下标取模轮转；支线内 12 关各自再掷一次地形种子。
  *
  * ★ 关键设计：体格只决定**形状**（波长配比、局部地貌、断层节奏），
  *   难度（实测最大坡度）由 fitSlope() 反解振幅统一标定，两者彻底解耦。
@@ -221,7 +220,7 @@ function targetSlopeDeg(gN) {
  *   · 12 种地貌体格（波长配比 / 断层节奏 / 地貌组合各不相同）
  *   · 每关独立随机种子（波长抖动 / 相位 / 地貌落点 / 断层位置）
  *   · ramp 长直坡（不抬曲率的难度）
- *   · 72 关地形指纹两两不同
+ *   · 432 关地形指纹两两不同
  */
 const FEAT_AMP_MAX = 0;
 
@@ -300,7 +299,7 @@ const RAMP_GRADE = 0.34;
  *
  * ★ 只做"够用"的一段：随机相位会让每关出生点的坡度各不相同
  *   （实测 −0.03 ~ +0.21），同油门加速度对比这类测量会被出生点坡度污染。
- *   一段短水平起跑区（~150px）让 72 关出生条件接近一致即可；
+ *   一段短水平起跑区（~150px）让各关出生条件接近一致即可；
  *   不宜过长——物理测试（悬挂压缩、约束残差）在 x≈220 处固定投放车辆，
  *   平台太长会把那里的地形压平，测量就失去意义。
  *   两端导数均为 0（C¹），不会在平台边缘制造法线突跳。
@@ -378,7 +377,6 @@ export function levelGroundInfo(L, x, e = 2) {
  */
 let freeSeed = 0;
 export function setFreeSeed(s) { freeSeed = (Number(s) || 0) >>> 0; }
-export function getFreeSeed() { return freeSeed; }
 
 /** 无限模式：按"地块"换地貌体格，同一地块恒定（含本局种子 → 每局地图不同） */
 function freeMoodOf(x) {
@@ -578,14 +576,13 @@ function makeLevel(gi) {
   const len = Math.round(4200 + gN * 9000); // 路程 4200 → 13200
   // 赛道金币数量随全局进度递增（24 → 72）
   const coinN = Math.round(24 + gN * 48);
-  // 通关固定奖励随进度递增（240 → 900）：玩家在**闯关阶段**（前 36 关）
+  // 通关固定奖励随进度递增（700 → 2500）：玩家在**闯关阶段**（前 36 关）
   // 就能把一台入门车四项升满，不必刷几百关才看得到升级效果。
-  // 系数是反推出来的：432 关里前 36 关（闯关阶段）按 60% 收集率要能攒够 28,240
-  // （一台入门车四项升满）。240/660 时实测只到 27,090，差一点；抬到 280/720 后有富余。
+  // 系数是反推出来的：前 36 关按 60% 收集率要能攒够 28,240（一台入门车四项升满）。
   const goldBase = Math.round(700 + 1800 * gN);
-  // 单枚赛道金币的面值（30 → 60）：与 coinN 相乘，单关总产出 720 → 4320
+  // 单枚赛道金币的面值（40 → 90）：与 coinN 相乘，单关总产出 960 → 6480
   const coinVal = Math.round(40 + 50 * gN);
-  // 体格：一条支线一种（按支线下标错开轮转，12 条支线覆盖 12 种气质），
+  // 体格：按支线下标对 12 种气质取模轮转（36 条支线覆盖 12 种气质），
   // 再叠加每关独立的种子 → 相邻关卡的波形 / 局部地貌 / 断层节奏都不同
   const mood = TERRAIN_MOODS[bi % TERRAIN_MOODS.length];
   const rng = mulberry32(0x51ed + gi * 2654435761);
@@ -617,7 +614,7 @@ function makeLevel(gi) {
   return L;
 }
 
-// ---------------- 72 关 ----------------
+// ---------------- 全部 432 关 ----------------
 export const LEVELS = Array.from({ length: TOTAL }, (_, gi) => makeLevel(gi));
 
 // ---------------- 最终任务（索引 FINALE_INDEX，已接进 buildLevel） ----------------
@@ -687,12 +684,12 @@ export const FINALE = (() => {
   return L;
 })();
 
-/** 最终任务的全局索引（= 72）：LEVELS 之后的一个逻辑关卡 */
+/** 最终任务的全局索引（= LEVELS.length）：LEVELS 之后的一个逻辑关卡 */
 export const FINALE_INDEX = LEVELS.length;
 
 // ---------------- 关卡访问（含最终任务） ----------------
 
-/** 按全局索引取关卡定义：0~71 为支线关，FINALE_INDEX 为最终任务 */
+/** 按全局索引取关卡定义：0~431 为支线关，FINALE_INDEX 为最终任务 */
 export function levelAt(idx) {
   return idx === FINALE_INDEX ? FINALE : LEVELS[idx];
 }
@@ -720,11 +717,6 @@ export function segmentThemeAt(L, x) {
 
 // ---------------- 支线查询辅助（供后续 UI/HUD 使用） ----------------
 
-/** 取支线定义 */
-export function getBranch(bi) {
-  return BRANCHES[bi];
-}
-
 /** 支线 bi 的第 k 关（0 起） */
 export function branchLevel(bi, k) {
   return LEVELS[bi * LEVELS_PER_BRANCH + k];
@@ -745,10 +737,6 @@ export function branchProgress(gi) {
   return { bi: Math.floor(gi / LEVELS_PER_BRANCH), k: gi % LEVELS_PER_BRANCH };
 }
 
-/** 全局索引 → 归一化进度 0~1 */
-export function globalProgress(gi) {
-  return gi / (TOTAL - 1);
-}
 
 /** 三星时限（秒），任务书/测试可用 */
 export function starTime(L) {
