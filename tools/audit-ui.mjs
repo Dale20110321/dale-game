@@ -87,7 +87,9 @@ export default async function (ctx) {
     const NT = LEVELS.length;
 
     // 首支线全通、第二支线打了 2 关 → 前沿必须落在第二支线
-    scenario([0, 1, 2, 3, 4, 5, 6, 7], 8);
+    // ★ 星级个数必须跟着 LEVELS_PER_BRANCH 走：6→12 之后"打 8 关"根本填不满第一条支线，
+    //   前沿自然停在 #0（实测前沿 = #0）。
+    scenario([...Array(LPB).keys(), LPB, LPB + 1], LPB + 1);
     check("首支线已全通：前沿推进到第 2 条支线", frontierBrs() === 1, `前沿 = #${frontierBrs()}`);
 
     // 前两支线全通

@@ -705,9 +705,19 @@ export default async function (ctx) {
       check(tag + " · 摩擦系数 μ 随场景抓地线性缩放（μ_冰/μ_绿 = 0.62）",
         Math.abs(lo.mu / hi.mu - 0.62) < 1e-9,
         `μ ${hi.mu.toFixed(4)} → ${lo.mu.toFixed(4)}（比 ${(lo.mu / hi.mu).toFixed(6)}）`);
+      // ★ 「抓地无敌」的车（扭矩 < 冰面摩擦上限）显式跳过，不是阈值放宽。
+      //   越野车 grp=1.45 → 冰面 μ=1.03，摩擦上限 43,825；它的 τ=20,160 远低于此，
+      //   轮胎在冰面也碰不到极限，于是绿野与冰面跑出**逐位相同**的速度（291 vs 291）——
+      //   这是"抓地强"这个角色定位的物理必然。
+      //   另一条"冰面 1s 末更慢"同理。
+      //   （想让它在冰面真打滑就得 τ>43,825，但那与"最陡上坡不可爬"要求 τ<28,884 直接冲突。）
+      const iceCap = store.phys.mu * store.phys.rb.mTot * store.phys.GRAV * WHEEL_R;
+      const iceGripFree = store.phys.torquePeak < iceCap;
+      const why = iceGripFree
+        ? `该车扭矩 ${store.phys.torquePeak.toFixed(0)} < 冰面摩擦上限 ${iceCap.toFixed(0)}，轮胎碰不到极限（抓地无敌车型，按设计跳过）`
+        : `绿野 ${hi.meanSlip.toFixed(4)} → 冰面 ${lo.meanSlip.toFixed(4)}（差 ${(hi.meanSlip - lo.meanSlip).toFixed(4)}）`;
       check(tag + " · 冰面同油门空转明显更多（滑移率差 ≥ 0.04）",
-        lo.meanSlip < hi.meanSlip - 0.04 && isFinite(lo.meanSlip),
-        `绿野 ${hi.meanSlip.toFixed(4)} → 冰面 ${lo.meanSlip.toFixed(4)}（差 ${(hi.meanSlip - lo.meanSlip).toFixed(4)}）`);
+        iceGripFree || (lo.meanSlip < hi.meanSlip - 0.04 && isFinite(lo.meanSlip)), why);
       // 阈值随车辆参数变：竞速车 grp=0.72（低抓地）且 torque=1.35（高扭矩），
       // 扭矩/抓地比 h 是默认山地车的 2.4 倍，本来就该打滑更多（实测 −0.41）。
       // 用固定阈值标定等于拿"默认车的手感"去要求所有车。实测 |滑移|/h 在三辆车上
@@ -717,8 +727,9 @@ export default async function (ctx) {
         Math.abs(hi.meanSlip) < slipLim,
         `平均滑移 ${hi.meanSlip.toFixed(4)} < ${slipLim.toFixed(3)}（μ=${hi.mu.toFixed(2)} · 扭矩/抓地 h=${hi.h.toFixed(1)} → 上界 0.06h）`);
       check(tag + " · 冰面同油门 1s 末推进速度更低",
-        lo.v1s < hi.v1s && lo.v1s > 0,
-        `1.0s 车速：绿野 ${hi.v1s.toFixed(0)} > 冰面 ${lo.v1s.toFixed(0)}px/s`);
+        iceGripFree || (lo.v1s < hi.v1s && lo.v1s > 0),
+        iceGripFree ? why
+          : `1.0s 车速：绿野 ${hi.v1s.toFixed(0)} > 冰面 ${lo.v1s.toFixed(0)}px/s`);
       check(tag + " · 全程滑移率有限且在 [-1,1] 内（无滑移爆炸）",
         hi.slipBad === 0 && lo.slipBad === 0 &&
         hi.maxOmega < NUM_CAP_V && lo.maxOmega < NUM_CAP_V &&
@@ -799,14 +810,19 @@ export default async function (ctx) {
     // 最陡上坡打滑工况
     setup(0, 0, 0, {});
     let steep = { lv: 0, x: 0, m: 0 };
-    for (let i = 0; i < LEVELS.length; i++) {
+    // ★ 只在**末期难度带**（后 1/3 关）里找最陡点。
+    //   这条断言守的是"最难的关卡不能让全油门硬爬"，而不是"整局任意一个像素的最陡处"。
+    //   432 关的采样量是原来的 6 倍，全局最陡点已退化成统计离群值（一个孤立陡坎），
+    //   用它当难度基准会让"末期能不能爬"这条结论随关卡总数漂移。
+    const steepFrom = Math.floor(LEVELS.length * 0.66);
+    for (let i = steepFrom; i < LEVELS.length; i++) {
       setup(0, 0, i, {});
       for (let x = 700; x < LEVELS[i].len - 700; x += 9) {
         const m = terrain.groundSlope(x);
         if (m < steep.m) steep = { lv: i, x, m };
       }
     }
-    check("全 72 关最陡上坡可定位（坡度为负且足够陡）",
+    check(`末期难度带（第${steepFrom + 1}~${LEVELS.length}关）最陡上坡可定位（坡度为负且足够陡）`,
       steep.m < -0.3,
       `第${steep.lv + 1}关 x=${steep.x} m=${steep.m.toFixed(3)}（${(Math.atan(steep.m) * 57.3).toFixed(0)}°）`);
     /**
@@ -902,7 +918,12 @@ export default async function (ctx) {
   // ============================================================
   //  7. 约束求解器：残差 / 刚性 / 逆质量加权
   // ============================================================
-  const SOLVE_LV = [0, 10, 20, 30, 40, 50, 60, 71];
+  // ★ 按难度分位取 8 关，不要写死下标。
+  //   makeLevel 的难度是 gN = gi/(TOTAL-1)：72 关时下标 71 落在 gN=0.99（末期），
+  //   432 关后同一个下标只有 gN=0.16（前期）—— 8 个采样点全落在前期平缓段，
+  //   满油门跑 300 帧一帧不摔，"摔车帧 / 重生帧"两个桶直接采不到（实测 0 帧 / 0 次重生）。
+  const SOLVE_LV = Array.from({ length: 8 }, (_, i) =>
+    Math.min(LEVELS.length - 1, Math.floor((LEVELS.length - 1) * (i / 7))));
   section("约束求解器（残差按物理状态分桶：正常帧严格收敛 / 摔车帧结构有界 / 重生帧 1 帧恢复）");
   guard("约束求解器", () => {
     // ★ 必须按物理状态分桶，而不是把三种状态揉进一个平均值。原口径把 300 帧
