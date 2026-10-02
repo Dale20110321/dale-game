@@ -74,7 +74,8 @@ export function toggleShop() {
 
 export function renderShop() {
   const goldEl = document.getElementById("shopGold");
-  if (goldEl) goldEl.textContent = store.gold;
+  if (goldEl) goldEl.textContent = store.gold.toLocaleString();
+  const vehNow = VEHICLES[store.currentVehicle];
   const st = document.getElementById("shopTitle");
   if (st) st.textContent = "🛠 升级 " + VEHICLES[store.currentVehicle].icon + " " + VEHICLES[store.currentVehicle].name;
   const u = getUp();
@@ -134,27 +135,67 @@ export function renderShop() {
       btn.style.opacity = 0.5;
     } else {
       const c = upCostOf(VEHICLES[store.currentVehicle], lv + 1);
-      btn.textContent = "升级 " + c + " 🪙";
+      btn.textContent = "升级 " + c.toLocaleString() + " 🪙";
       btn.disabled = store.gold < c;
       btn.style.opacity = 1;
     }
   }
+  // 批量升级按钮：全满 → 禁用；否则按"最便宜的那一级"判断是否点得动
+  const allBtn = document.getElementById("btnUpAll");
+  if (allBtn) {
+    const full = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= MAX_LV);
+    if (full) {
+      allBtn.textContent = "✅ 四项已满级";
+      allBtn.disabled = true;
+      allBtn.classList.add("done");
+    } else {
+      // 升满还需要多少钱 = 各项剩余级次的总价
+      let need = 0;
+      for (const k of ["engine", "tire", "frame", "susp"]) {
+        const lv = u[k] || 0;
+        for (let i = lv + 1; i <= MAX_LV; i++) need += upCostOf(vehNow, i);
+      }
+      allBtn.textContent = "⚡ 一键升满（还需 " + need.toLocaleString() + " 🪙）";
+      allBtn.disabled = store.gold < need;
+      allBtn.classList.remove("done");
+    }
+  }
+}
+
+/**
+ * 升级一项的**核心动作**（不弹提示、不播音效）：扣钱 → 加级 → 落盘 → 重算派生量。
+ *
+ * ★ 抽出来是为了让"单级升级"与"批量升级"共用同一条路径 ——
+ *   两份实现迟早会漂移（批量少算一次 applyUpgrades，或少扣一次钱），
+ *   而那种 bug 只在玩家点了批量之后才出现，极难复现。
+ * @returns {boolean} 是否真的买了这一级（金币不足 / 已满级返回 false）
+ */
+function applyUpgradeStep(k) {
+  const u = getUp();
+  const lv = u[k] || 0;
+  if (lv >= MAX_LV) return false;
+  const c = upCostOf(VEHICLES[store.currentVehicle], lv + 1);
+  if (store.gold < c) return false;
+  store.gold -= c;
+  u[k] = lv + 1;
+  return true;
 }
 
 function buyUpgrade(k) {
   const u = getUp();
   const lv = u[k] || 0;
-  if (lv >= MAX_LV) return;
-  const c = upCostOf(VEHICLES[store.currentVehicle], lv + 1);
   const note = document.getElementById("shopNote");
-  if (store.gold < c) {
-    if (note) note.textContent = "金币不足，去关卡里收集吧！";
+  if (lv >= MAX_LV) {
+    if (note) note.textContent = "已经满级了";
     return;
   }
-  // 先记下旧读数，升级后逐项播报"变了多少"——把变化说出口，玩家才知道自己买了什么
+  if (!applyUpgradeStep(k)) {
+    if (note) note.textContent = "金币不足，去关卡里收集吧！";
+    showToast("🪙 金币不足：" + UP_LABEL[k] + " Lv" + lv + " 升不到 Lv" + (lv + 1), 1200, "danger");
+    return;
+  }
+  // 先记下旧读数，升级后播报"变了多少"——把变化说出口，玩家才知道自己买了什么
   const before = previewStats(VEHICLES[store.currentVehicle], u);
-  store.gold -= c;
-  u[k] = lv + 1;
   applyUpgrades();
   save();
   renderShop();
@@ -164,6 +205,69 @@ function buyUpgrade(k) {
     (moved.length ? "：" + moved.map((n) => n + " +" + Math.round((after[n] - before[n]) * 100) / 100).join(" · ") : "");
   if (note) note.textContent = "升级成功！";
   showToast("🔧 " + msg, 1600);
+  playCoinSound();
+}
+
+/**
+ * 「⚡ 一键升满」：把当前车辆四项在**金币允许的范围内**一次升满。
+ *
+ * ★ 为什么要它（两个原因，一个是体验、一个是修 bug）：
+ *   1. 四项升满是一万两千次点击的事（神话档单项 7060 级次 × 40 倍价），
+ *      逐级点既累又容易在中途分神。
+ *   2. **连点 20 次会排 20 条 toast**（这就是"批量升级后消息太多"的由来）：
+ *      每条内容几乎相同，玩家要等 30 秒才看得到最后一条。
+ *      批量入口把 N 次购买收敛成**一条**汇总提示，从根上消掉这个问题。
+ *
+ * 只在金币买得起的范围内升（可能升不满），并如实播报"升了多少级 / 还差多少"。
+ */
+function buyUpgradeAll() {
+  const veh = VEHICLES[store.currentVehicle];
+  const u = getUp();
+  const before = previewStats(veh, u);
+  const beforeLv = { engine: u.engine, tire: u.tire, frame: u.frame, susp: u.susp };
+  let spent = 0;
+  let bought = 0;
+  // 逐项循环购买：每次都重新读当前等级与下一级价格（价格随等级递增，
+  // 所以必须边买边算，不能一次性算总和 —— 那会算错）
+  let progress = true;
+  while (progress) {
+    progress = false;
+    for (const k of ["engine", "tire", "frame", "susp"]) {
+      const lv = u[k] || 0;
+      if (lv >= MAX_LV) continue;
+      const c = upCostOf(veh, lv + 1);
+      if (store.gold < c) continue; // 这项买不起，试下一项
+      store.gold -= c;
+      u[k] = lv + 1;
+      spent += c;
+      bought++;
+      progress = true;
+    }
+    // 四项都已满级，或金币连最便宜的一级都买不起 → 退出
+    if (["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= MAX_LV)) break;
+  }
+  const note = document.getElementById("shopNote");
+  if (!bought) {
+    if (note) note.textContent = "金币不足，暂时升不了";
+    showToast("🪙 金币不足，无法升级", 1200, "danger");
+    return;
+  }
+  applyUpgrades();
+  save();
+  renderShop();
+  const after = previewStats(veh, u);
+  const moved = Object.keys(after).filter((n) => after[n] !== before[n]);
+  const gotFull = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= MAX_LV);
+  const parts = ["买 " + bought + " 级 · 🪙-" + spent.toLocaleString()];
+  for (const k of ["engine", "tire", "frame", "susp"]) {
+    if (u[k] !== beforeLv[k]) parts.push(UP_LABEL[k] + " Lv" + beforeLv[k] + "→Lv" + u[k]);
+  }
+  if (moved.length) {
+    parts.push(moved.map((n) => n + " +" + Math.round((after[n] - before[n]) * 100) / 100).join(" · "));
+  }
+  if (note) note.textContent = gotFull ? "四项全部满级 🎉" : "已升 " + bought + " 级";
+  // ★ 一条汇总提示，而不是每级一条
+  showToast((gotFull ? "⚡ 四项满级" : "⚡ 批量升级") + " · " + parts.join(" · "), 2600, "success");
   playCoinSound();
 }
 
@@ -177,6 +281,8 @@ export function initShop() {
   }
   const closeBtn = document.getElementById("closeShop");
   if (closeBtn) closeBtn.addEventListener("click", closeShop);
+  const allBtn = document.getElementById("btnUpAll");
+  if (allBtn) allBtn.addEventListener("click", buyUpgradeAll);
   for (const k of ["engine", "tire", "frame", "susp"]) {
     const btn = document.querySelector('[data-buy="' + k + '"]');
     if (btn) btn.addEventListener("click", () => buyUpgrade(k));

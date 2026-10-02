@@ -85,10 +85,13 @@ export function initInput(handlers = {}) {
 
     if (e.code === "Minus" || e.code === "Equal") {
       e.preventDefault();
-      const z = clamp(store.cam.zoom + (e.code === "Equal" ? 0.15 : -0.15), 0.6, 2.5);
-      if (z !== store.cam.zoom) {
-        store.cam.zoom = z;
-        showToast("缩放 " + Math.round(store.cam.zoom * 100) + "%", 600);
+      // ★ 改的是 zoomBase（用户基准），不是 zoom。
+      //   zoom 每帧都会被速度自适应覆盖（render/camera.js 的 camZoomOf），
+      //   直接写它的话按键会被立刻抹掉，看起来就是"+/- 没反应"。
+      const z = clamp(store.cam.zoomBase + (e.code === "Equal" ? 0.15 : -0.15), 0.6, 2.5);
+      if (z !== store.cam.zoomBase) {
+        store.cam.zoomBase = z;
+        showToast("缩放基准 " + Math.round(z * 100) + "%", 600);
       }
       return;
     }

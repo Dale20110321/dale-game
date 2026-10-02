@@ -84,7 +84,16 @@ export function hudLayout(hasWarn = false, touch = false) {
   // 底部居中的 A/D ←→ 键位提示只对键盘用户有意义；触摸时已有屏幕方向键，再挂一条纯属噪音
   const drive = touch ? null : { x: (W - 104) / 2, y: H - pad - 14, w: 104, h: 14 };
 
-  return { info, fuel, race, warn, speed, drive };
+  // 「结束本局」：只在无限模式出现，贴在速度表**上方**、左上信息栏的下方 ——
+  //   这两个角分别是"速度表 + 触摸油门"和"关卡信息"的占位区，中间这条窄带是唯一
+  //   在三种屏幕形态（横屏 / 竖屏 / 矮屏）下都不会与任何既有元素打架的位置。
+  //   无限模式没有终点，高极速车（奇点 350 / 归墟 1000）几乎不可能"跑完"，
+  //   没有这个按钮就只能把燃料硬跑光才能收手。
+  const quit = store.mode === "free"
+    ? { x: W / 2 - 62, y: H - pad - 30 - (touch ? 74 : 0), w: 124, h: 30 }
+    : null;
+
+  return { info, fuel, race, warn, speed, drive, quit };
 }
 
 /** 玻璃卡片底座（深色） */
@@ -177,8 +186,42 @@ export function drawHud() {
   if (store.mode === "race" || store.mode === "ranked") drawRaceBar(L.race);
   drawSpeedGauge(L.speed);
   if (L.drive) drawDriveIndicator(L.drive);
+  if (L.quit) drawQuitButton(L.quit);
   if (w) drawWarning(L.warn, w);
   drawSpeedLines();
+}
+
+/**
+ * 「⏹ 结束本局」按钮（仅无限模式）。
+ *
+ * ★ 命中区用 HTML 元素而不是 Canvas：Canvas 里的按钮要自己做命中测试，
+ *   而这一条要保证在手机上"点得中"（≥44px 触控目标），用真按钮才天然满足，
+ *   也顺带拿到 hover / focus / 无障碍语义。位置由 hudLayout 给出，两边共用一份口径。
+ */
+function drawQuitButton(r) {
+  const el = quitBtn();
+  if (!el) return;
+  el.style.left = r.x + "px";
+  el.style.top = r.y + "px";
+  el.style.width = r.w + "px";
+  el.style.height = r.h + "px";
+  if (el.style.display !== "flex") el.style.display = "flex";
+}
+
+/** 惰性创建「结束本局」DOM 按钮（hud.js 只在无限模式渲染时才会走到这里） */
+let _quitEl = null;
+function quitBtn() {
+  if (_quitEl) return _quitEl;
+  if (typeof document === "undefined" || !document.createElement) return null;
+  const el = document.createElement("button");
+  el.id = "btnQuitRun";
+  el.type = "button";
+  el.className = "hudQuit";
+  el.textContent = "⏹ 结束本局";
+  el.setAttribute("aria-label", "结束无限模式本局并结算里程");
+  document.body.appendChild(el);
+  _quitEl = el;
+  return el;
 }
 
 function drawInfoCard(r) {
@@ -227,7 +270,7 @@ function drawInfoCard(r) {
       const rem = Math.max(0, g.limit - ride);
       info.push("⏱ 第" + (store.run.gateIdx + 1) + "门 " + rem.toFixed(1) + "s");
     }
-    if (!info.length) info.push("缩放 " + Math.round(store.cam.zoom * 100) + "% · R 重启 · +/- 缩放");
+    if (!info.length) info.push("缩放 " + Math.round(store.cam.zoomBase * 100) + "% · R 重启 · +/- 缩放");
   }
   label(info.join("   "), x, r.y + 30, "caption", token("text-mid"));
 

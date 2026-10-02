@@ -266,33 +266,60 @@ export function pitRewind() {
 /** 燃料耗尽 */
 function handleFuelEmpty() {
   if (store.mode === "free") {
-    const mx = (bike.rear.x + bike.front.x) / 2;
-    const dist = Math.round(toM(mx));
-    let record = false;
-    if (dist > store.best) {
-      store.best = dist;
-      save();
-      record = true;
-    }
-    store.state = "ended";
-    // 结束结算：累计统计（本局 +1 次、里程按 100px=1m 换算）
-    addStat({
-      runs: 1,
-      meters: dist,
-      seconds: Math.max(0, store.time - store.run.levelStartTime),
-    });
-    showToast("⛽ 燃料耗尽 · 本次 " + dist + "m" + (record ? " 🏅 新纪录！" : ""), 1600);
-    setTimeout(runGuard(() => {
-      store.state = "menu";
-      presenter.toMenu();
-      store.raceAI = null;
-      store.racers = [];
-    }), 1600);
+    endFreeRun("⛽ 燃料耗尽");
   } else {
     setFuel(store.phys.fuelMax * 0.3);
     respawn();
     showToast("⛽ 燃料耗尽！回到安全点", 900);
   }
+}
+
+/**
+ * 结束无限模式本局（燃料耗尽 / 玩家主动退出）。
+ *
+ * ★ 抽出来是因为两条路径的结算完全相同（里程、破纪录、累计统计），
+ *   只有提示文案与延迟不同。原先只有燃料耗尽一条路，
+ *   于是"想收手"只能硬生生把油跑光 —— 而高极速车（奇点 350 / 归墟 1000）
+ *   的油量根本撑不到玩家想停的时候，无限模式因此变成"不敢开始"。
+ * @param {string} reason 提示前缀（⛽ 燃料耗尽 / 🏁 主动结束）
+ */
+function endFreeRun(reason) {
+  const mx = (bike.rear.x + bike.front.x) / 2;
+  const dist = Math.round(toM(mx));
+  let record = false;
+  if (dist > store.best) {
+    store.best = dist;
+    save();
+    record = true;
+  }
+  store.state = "ended";
+  store.run.settling = true;
+  // 结束结算：累计统计（本局 +1 次、里程按 100px=1m 换算）
+  addStat({
+    runs: 1,
+    meters: dist,
+    seconds: Math.max(0, store.time - store.run.levelStartTime),
+  });
+  showToast(reason + " · 本次 " + dist + "m" + (record ? " 🏅 新纪录！" : ""), 1600);
+  setTimeout(runGuard(() => {
+    store.state = "menu";
+    presenter.toMenu();
+    store.raceAI = null;
+    store.racers = [];
+  }), 1600);
+}
+
+/**
+ * 无限模式「中途退出」：玩家主动结束本局，走与燃料耗尽完全相同的结算。
+ *
+ * ★ 由 ui/menu.js 的「⏹ 结束本局」按钮调用。非无限模式下一律拒绝
+ *   （闯关/比赛的中途退出要走暂停菜单，那里已经有一整排按钮，再加一个反而更乱）。
+ */
+export function quitFreeRun() {
+  if (store.mode !== "free" || store.state !== "play") return false;
+  if (store.run.settling) return false;
+  endFreeRun("🏁 主动结束");
+  return true;
 }
 
 /** 到达终点结算 */

@@ -7,13 +7,27 @@ import { DECO_COLORS } from "../config/themes.js";
 import { toKmh } from "../config/constants.js";
 import { getQuality } from "./postfx.js";
 
+/**
+ * 当前视口覆盖的**世界**宽度（px）。
+ *
+ * ★ 所有实体剔除都必须用它，而不是 view.W：绘制发生在 ctx.scale(zoom) 之内，
+ *   所以屏幕右缘对应 cam.x + view.W/zoom。相机在高速时会主动缩到 0.42
+ *   （见 render/camera.js 的 camZoomOf），按 view.W 剔除会让右半屏的
+ *   金币 / 油罐 / 加速带 / 危险段 / 限时门**整片不画** —— 玩家会以为路上没有东西。
+ *   zoom > 1 时反倒是多剔一点（无碍），所以这个 bug 只在高速时才暴露。
+ */
+function visW() {
+  const z = store.cam.zoom;
+  return view.W / (z > 0.01 ? z : 1);
+}
+
 /** 按主题绘制装饰物（纯视觉）；中/高画质给装饰加上地面投影 */
 export function drawDeco(cx, cy) {
   const q = getQuality();
   const shade = q === "medium" || q === "high";
   for (const t of world.decoFore) {
     const sx = t.x - cx;
-    if (sx < -60 || sx > view.W + 60) continue;
+    if (sx < -60 || sx > visW() + 60) continue;
     if (shade) {
       ctx.fillStyle = token("obj-shadow");
       ctx.beginPath();
@@ -35,7 +49,7 @@ export function drawDeco(cx, cy) {
   ctx.globalAlpha = 0.62;
   for (const r of world.decoBack) {
     const sx = r.x - cx;
-    if (sx < -60 || sx > view.W + 60) continue;
+    if (sx < -60 || sx > visW() + 60) continue;
     drawDecoItem(sx, r.y - cy, r.kind, r.s * 0.8, r.ph);
   }
   ctx.globalAlpha = 1;
@@ -423,7 +437,7 @@ export function drawCoins(cx, cy) {
   for (const c of world.coins) {
     if (c.taken) continue;
     const sx = c.x - cx;
-    if (sx < -20 || sx > view.W + 20) continue;
+    if (sx < -20 || sx > visW() + 20) continue;
     const y = c.y - cy;
     const sxr = Math.sin(c.ph) * 6; // ph 由固定步推进（updateCoins），渲染层只读不写
     ctx.fillStyle = token("obj-coin");
@@ -444,7 +458,7 @@ export function drawCanisters(cx, cy) {
   for (const c of world.canisters) {
     if (c.taken) continue;
     const sx = c.x - cx;
-    if (sx < -30 || sx > view.W + 30) continue;
+    if (sx < -30 || sx > visW() + 30) continue;
     const y = c.y - cy;
     const bob = Math.sin(c.ph) * 3; // ph 由固定步推进（updateCanisters），渲染层只读不写
     ctx.fillStyle = token("obj-canister-glow");
@@ -472,7 +486,7 @@ export function drawBoosts(cx, cy) {
   for (const b of world.boosts) {
     if (b.taken) continue;
     const sx = b.x - cx;
-    if (sx < -60 || sx > view.W + 60) continue;
+    if (sx < -60 || sx > visW() + 60) continue;
     const y = b.y - cy;
     const t = store.time * 3.2 + b.ph;
     ctx.save();
@@ -503,7 +517,7 @@ export function drawBoosts(cx, cy) {
 export function drawFlag(cx, cy, finishX) {
   if (!isFinite(finishX)) return;
   const sx = finishX - cx;
-  if (sx < -20 || sx > view.W + 20) return;
+  if (sx < -20 || sx > visW() + 20) return;
   const gy = groundY(finishX);
   if (gy === Infinity) return;
   const y = gy - cy;
@@ -536,7 +550,7 @@ export function drawFlag(cx, cy, finishX) {
 export function drawJumps(cx, cy) {
   for (const j of world.jumps) {
     const sx = j.x - cx;
-    if (sx < -90 || sx > view.W + 90) continue;
+    if (sx < -90 || sx > visW() + 90) continue;
     const y = j.y - cy;
     if (!isFinite(y)) continue;
     ctx.save();
@@ -636,7 +650,7 @@ export function drawHazards(cx, cy) {
   for (const h of world.hazards) {
     const a = h.x0 - cx;
     const b = h.x1 - cx;
-    if (b < -80 || a > view.W + 80) continue;
+    if (b < -80 || a > visW() + 80) continue;
     const top = [];
     for (let x = h.x0; x <= h.x1; x += 22) {
       const y = groundY(x);
@@ -673,7 +687,7 @@ export function drawHazards(cx, cy) {
     if (!isFinite(gy)) continue;
     const px = midX - cx;
     const py = gy - cy;
-    if (px < -80 || px > view.W + 80) continue;
+    if (px < -80 || px > visW() + 80) continue;
     ctx.fillStyle = token("obj-hazard-fill");
     ctx.beginPath();
     ctx.roundRect(px - 4, py - 96, 96, 30, 7);
@@ -696,7 +710,7 @@ export function drawHazards(cx, cy) {
 export function drawGates(cx, cy) {
   for (const g of world.gates) {
     const sx = g.x - cx;
-    if (sx < -80 || sx > view.W + 80) continue;
+    if (sx < -80 || sx > visW() + 80) continue;
     const gy = groundY(g.x);
     if (!isFinite(gy)) continue;
     const y = gy - cy;

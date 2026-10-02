@@ -69,7 +69,10 @@ export const store = {
   donateOpen: false,
 
   // 相机
-  cam: { x: 0, y: 0, zoom: 1.4, shake: 0 },
+  // ★ zoomBase = 用户用 +/- 设定的基准缩放；zoom = 实际用于渲染的缩放，
+  //   由 render/camera.js 按车速从 zoomBase 自动缩放得出（见 camZoomOf）。
+  //   两者必须分开：若让 +/- 直接改 zoom，速度自适应每帧都会把它覆盖回去。
+  cam: { x: 0, y: 0, zoom: 1.4, zoomBase: 1.4, shake: 0 },
 
   // 环境 + 车辆派生参数（buildLevel / applyUpgrades 维护）
   phys: {
@@ -141,6 +144,12 @@ export const bike = {
   speed: 0,
   /** 加速带助推剩余时长（秒）：触发后平滑缓进缓出的加速，避免一次性脉冲造成顿挫 */
   boostT: 0,
+  /**
+   * 飞行形态的悬停高度线（世界 y）：由 restY 低通而来（见 bike.js flightStep）。
+   * 逐帧直接追 restY 会在 1000 km/h 下抽搐（目标每帧跳 ±145px），
+   * 先滤出这条平滑的"飞行高度线"，伺服再去追它。
+   */
+  hoverY: 0,
   wheelAngleRear: 0,
   wheelAngleFront: 0,
   /** 出生后等待玩家第一次按键才起步（在此之前时钟与物理都不推进） */

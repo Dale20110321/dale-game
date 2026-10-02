@@ -331,7 +331,12 @@ export function freeThemeOf(theme) {
 /** 无限模式：按需生成前方实体（随里程缓慢加难） */
 export function freeFill() {
   const rng = Math.random;
-  const viewR = store.cam.x + view.W * 2;
+  // ★ 生成范围必须按**世界**宽度算：可视世界宽度 = view.W / zoom，
+  //   相机在高速时会缩到 0.32（见 camZoomOf），此时可视范围是屏幕宽的 3 倍。
+  //   沿用 view.W 的话，无限模式在高速下会"前方一段路完全没有金币/油罐"——
+  //   这正是"地图跟不上"的另一种表现：不是画不出来，是压根没生成。
+  const z = store.cam.zoom > 0.01 ? store.cam.zoom : 1;
+  const viewR = store.cam.x + (view.W / z) * 2;
   let guard = 0;
   while (world.freeGenX < viewR && guard++ < 200) {
     const d = Math.max(0, world.freeGenX - 400);
