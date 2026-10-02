@@ -569,9 +569,9 @@ function makeLevel(gi) {
   // 就能把一台入门车四项升满，不必刷几百关才看得到升级效果。
   // 系数是反推出来的：432 关里前 36 关（闯关阶段）按 60% 收集率要能攒够 28,240
   // （一台入门车四项升满）。240/660 时实测只到 27,090，差一点；抬到 280/720 后有富余。
-  const goldBase = Math.round(280 + 720 * gN);
+  const goldBase = Math.round(700 + 1800 * gN);
   // 单枚赛道金币的面值（30 → 60）：与 coinN 相乘，单关总产出 720 → 4320
-  const coinVal = Math.round(30 + 30 * gN);
+  const coinVal = Math.round(40 + 50 * gN);
   // 体格：一条支线一种（按支线下标错开轮转，12 条支线覆盖 12 种气质），
   // 再叠加每关独立的种子 → 相邻关卡的波形 / 局部地貌 / 断层节奏都不同
   const mood = TERRAIN_MOODS[bi % TERRAIN_MOODS.length];
