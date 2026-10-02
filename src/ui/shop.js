@@ -1,6 +1,6 @@
 // 升级车间
 import {
-  MAX_LV, upCostOf, toKmh,
+  MAX_LV, maxLvOf, upCostOf, toKmh,
   deriveHandling, deriveSuspension, deriveFriction, crashTiltDeg,
 } from "../config/constants.js";
 import { VEHICLES } from "../config/vehicles.js";
@@ -73,6 +73,9 @@ export function toggleShop() {
 }
 
 export function renderShop() {
+  // ★ 当前车的升级上限：宇宙级车 500，其余 100。
+  //   下面所有"是否满级"的判断都读它，不要直接用全局 MAX_LV。
+  const ML = maxLvOf(VEHICLES[store.currentVehicle]);
   const goldEl = document.getElementById("shopGold");
   if (goldEl) goldEl.textContent = store.gold.toLocaleString();
   const vehNow = VEHICLES[store.currentVehicle];
@@ -90,14 +93,14 @@ export function renderShop() {
         ultraEl.textContent = v.ultra.icon + " 「" + v.ultra.name + "」已内置生效 · " + v.ultra.desc + fxLine(v);
       } else {
         const got = store.ultra[v.id] === true;
-        const full4 = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= MAX_LV);
+        const full4 = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= ML);
         ultraEl.className = "upUltra" + (got ? " got" : full4 ? " canBuy" : "");
         if (got) {
           ultraEl.textContent = v.ultra.icon + " 特殊模式「" + v.ultra.name + "」已开启 · " + v.ultra.desc + fxLine(v);
         } else if (full4) {
           ultraEl.textContent = "⭐ 已全部升满！到车库花 " + v.ultra.cost.toLocaleString() + " 🪙 解锁「" + v.ultra.name + "」" + fxLine(v);
         } else {
-          ultraEl.textContent = "🔒 全部升级升到 Lv" + MAX_LV + " 后可解锁特殊模式「" + v.ultra.name + "」：" + v.ultra.desc + fxLine(v);
+          ultraEl.textContent = "🔒 全部升级升到 Lv" + ML + " 后可解锁特殊模式「" + v.ultra.name + "」：" + v.ultra.desc + fxLine(v);
         }
       }
     } else {
@@ -115,7 +118,7 @@ export function renderShop() {
     const dg = document.getElementById("dg-" + k);
     const now = previewStats(VEHICLES[store.currentVehicle], u);
     if (dg) {
-      if (lv >= MAX_LV) {
+      if (lv >= ML) {
         dg.textContent = UP_TOUCHES[k]
           .map((n) => n + " " + now[n])
           .join(" · ") + " · 已满级";
@@ -129,7 +132,7 @@ export function renderShop() {
         dg.className = "upDelta";
       }
     }
-    if (lv >= MAX_LV) {
+    if (lv >= ML) {
       btn.textContent = "已满级";
       btn.disabled = true;
       btn.style.opacity = 0.5;
@@ -143,7 +146,7 @@ export function renderShop() {
   // 批量升级按钮：全满 → 禁用；否则按"最便宜的那一级"判断是否点得动
   const allBtn = document.getElementById("btnUpAll");
   if (allBtn) {
-    const full = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= MAX_LV);
+    const full = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= ML);
     if (full) {
       allBtn.textContent = "✅ 四项已满级";
       allBtn.disabled = true;
@@ -153,7 +156,7 @@ export function renderShop() {
       let need = 0;
       for (const k of ["engine", "tire", "frame", "susp"]) {
         const lv = u[k] || 0;
-        for (let i = lv + 1; i <= MAX_LV; i++) need += upCostOf(vehNow, i);
+        for (let i = lv + 1; i <= ML; i++) need += upCostOf(vehNow, i);
       }
       allBtn.textContent = "⚡ 一键升满（还需 " + need.toLocaleString() + " 🪙）";
       allBtn.disabled = store.gold < need;
@@ -173,7 +176,7 @@ export function renderShop() {
 function applyUpgradeStep(k) {
   const u = getUp();
   const lv = u[k] || 0;
-  if (lv >= MAX_LV) return false;
+  if (lv >= maxLvOf(VEHICLES[store.currentVehicle])) return false;
   const c = upCostOf(VEHICLES[store.currentVehicle], lv + 1);
   if (store.gold < c) return false;
   store.gold -= c;
@@ -185,7 +188,7 @@ function buyUpgrade(k) {
   const u = getUp();
   const lv = u[k] || 0;
   const note = document.getElementById("shopNote");
-  if (lv >= MAX_LV) {
+  if (lv >= maxLvOf(VEHICLES[store.currentVehicle])) {
     if (note) note.textContent = "已经满级了";
     return;
   }
@@ -229,12 +232,13 @@ function buyUpgradeAll() {
   let bought = 0;
   // 逐项循环购买：每次都重新读当前等级与下一级价格（价格随等级递增，
   // 所以必须边买边算，不能一次性算总和 —— 那会算错）
+  const ML = maxLvOf(veh);
   let progress = true;
   while (progress) {
     progress = false;
     for (const k of ["engine", "tire", "frame", "susp"]) {
       const lv = u[k] || 0;
-      if (lv >= MAX_LV) continue;
+      if (lv >= ML) continue;
       const c = upCostOf(veh, lv + 1);
       if (store.gold < c) continue; // 这项买不起，试下一项
       store.gold -= c;
@@ -244,7 +248,7 @@ function buyUpgradeAll() {
       progress = true;
     }
     // 四项都已满级，或金币连最便宜的一级都买不起 → 退出
-    if (["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= MAX_LV)) break;
+    if (["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= ML)) break;
   }
   const note = document.getElementById("shopNote");
   if (!bought) {
@@ -257,7 +261,7 @@ function buyUpgradeAll() {
   renderShop();
   const after = previewStats(veh, u);
   const moved = Object.keys(after).filter((n) => after[n] !== before[n]);
-  const gotFull = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= MAX_LV);
+  const gotFull = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= ML);
   const parts = ["买 " + bought + " 级 · 🪙-" + spent.toLocaleString()];
   for (const k of ["engine", "tire", "frame", "susp"]) {
     if (u[k] !== beforeLv[k]) parts.push(UP_LABEL[k] + " Lv" + beforeLv[k] + "→Lv" + u[k]);

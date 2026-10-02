@@ -112,6 +112,19 @@ export const OMEGA_DRAG_K = 0.000115;
 export const OMEGA_THRUST_K = 1.0;
 /** 推力对"与目标速度的偏差"的响应速度（/s）：决定从 0 爬到 1000 km/h 要多久 */
 export const OMEGA_SERVO_ACC = 0.55;
+/**
+ * 推力上限 = 目标速度 × 本系数（即最快也在 4 秒内从 0 加速到目标速度）。
+ *
+ * ★ 这条是"宇宙级车能不能真跑到标称速度"的唯一决定项（两端各栽过一次）：
+ *   1. 上限只取 μ·mTot·g·REAR_LOAD（轮胎抓地极限）时，风阻 ∝ v² 在 10 万 km/h
+ *      上要 590 万 px/s² 的推力，是抓地上限的 36 倍 → 前馈被削光，平衡点落在
+ *      标称速度之前，实测只能跑出 6749 km/h。
+ *   2. 上限改取"维持目标速度所需的风阻"时同样失败：那是个**速度相关**的量，
+ *      v=0 时全额施加会把车一步推到目标的 2.18 倍，下一步风阻再甩回去，
+ *      形成两周期极限环（实测稳定在 73,275 km/h）。
+ *   正比于目标速度的上限与速度量级无关，每步位移 ≤ 0.42% 目标 → 恒定收敛。
+ */
+export const OMEGA_ACC_FRAC = 0.25;
 
 /**
  * 常驻飞行时的悬停高度（px，车轮底面离地表的高度）。
@@ -163,9 +176,9 @@ export const wheelieTauOf = (mTot, gravity) => mTot * gravity * WHEELBASE * 0.5 
  *
  * ★ 必须 ≥ 任何形态的目标极速，否则二分会在上界处提前收敛、
  *   把极速**静默截断**成一个假的平衡点（表盘与 HUD 一起说谎）。
- *   终焉形态 1000 km/h = 27778 px/s，故上界抬到 40000。
+ *   无相形态 100,000 km/h = 2,777,778 px/s，故上界抬到 4e7。
  */
-export const TOP_SPEED_CAP = 40000;
+export const TOP_SPEED_CAP = 4e7;
 
 /**
  * 平路上**真实可达的极速**（px/s）——驱动能力与阻力的交点。
@@ -285,9 +298,10 @@ export const HEAD_R = 18;
  *
  *   终焉形态（1000 km/h = 27778 px/s）把这条余量要求又推高了一档，
  *   故抬到 60000：它每帧走 463px，接触瞬态与竖直伺服瞬态都远超 350 km/h 那一档。
- *   常态极速仍远低于此值（27778 / 60000 ≈ 0.46），兜底不会成为性能保护。
+ *   无相形态 100,000 km/h = 2,777,778 px/s（每帧 46,296px = 1218 个轴距），
+ *   故上界抬到 3e8。常态极速 27778 / 3e8 ≈ 0.0093，兜底不会成为性能保护。
  */
-export const NUM_CAP_V = 60000;
+export const NUM_CAP_V = 3e8;
 
 /** 轮上扭矩峰值基准（游戏单位 px·px/s²） */
 export const TORQUE_PEAK_BASE = 18000;
@@ -470,7 +484,56 @@ export const KICK_MIN_V = 220;
 export const KICK_TARGET = 0.62;
 
 // ---------------- 升级 ----------------
+/**
+ * 普通车的升级上限（历史沿用值，保留为全局默认）。
+ * ★ 不要在别处直接用 MAX_LV 做"某车是否满级"的判断 ——
+ *   宇宙级车是 500 级，必须按车取，见 maxLvOf。
+ */
 export const MAX_LV = 100;
+/**
+ * 某辆车的升级上限（纯函数，便于断言）。
+ *
+ * ★ 为什么需要 per-vehicle：宇宙级车 500 级 —— 全局常量表达不了"按车不同上限"，
+ *   而把判断散落在各处各读一次 MAX_LV，迟早漏掉某一处（升级按钮还亮着但点不动）。
+ *   缺省回落 MAX_LV，向后兼容既有 27 台车。
+ * @param {object} veh 车辆定义（VEHICLES 的一项）
+ * @returns {number} 该车的升级上限（普通车 100 / 宇宙级车 500）
+ */
+export const maxLvOf = (veh) => (veh && veh.maxLv) || MAX_LV;
+
+/**
+ * 该车在**指定等级**下的"形态极速"（px/s）—— 由裸车解算比归一化插值得到。
+ *
+ * ★ 为什么形态极速必须随等级变化（这是 spec 的 R2.2）：
+ *   早期实现把 omega 的目标速度直接写死成 OMEGA_V，于是 Lv0 与 Lv100 都是 1000 km/h
+ *   —— "500 级"这条成长线对极速完全没有意义，玩家升满级只是多花了 20 倍的钱。
+ *   用户明确要求："所有车没有升到满级的状态，达不到这么快的速度"。
+ *
+ *   口径：r = (当前解算比 − Lv0解算比) / (满级解算比 − Lv0解算比)，摊到 0~1；
+ *        形态极速 = 裸车满级极速 + (标称极速 − 裸车满级极速) × r。
+ *   于是 Lv0 只有裸车水平，Lv100 才达标称值，中间平滑过渡。
+ *
+ * @param {object} veh 车辆定义
+ * @param {object} up  升级等级 {engine,tire,frame,susp}
+ * @param {number} nominal 该车形态的标称极速（px/s，如归墟 1000km/h = 27778）
+ * @returns {number} 该等级下的形态极速（px/s）
+ */
+export function ultraCruiseOf(veh, up, nominal) {
+  if (!veh) return 0;
+  const u = up || {};
+  const lv = (k) => u[k] || 0;
+  const full = maxLvOf(veh);
+  // ★ 权重取**等级比例**，不是"极速解算比"。
+  //   旧写法 r = (nowTop − base) / (fullTop − base) 借了 topSpeedOf 的曲线形状，
+  //   而那条曲线前段陡后段平（扭矩线性、极速却受转速域与 v² 阻力双重压制），
+  //   结果归墟 Lv100 就吃掉 83% 权重 → 形态极速 828/1000，Lv250 直接顶格。
+  //   那样 500 级里后面 250 级完全无效，"升满才到标称"这条需求直接落空。
+  //   等级线性保证：Lv0 = 裸车、只有 Lv500 才恰好等于标称，中间每一级都吃得到。
+  const prog = Math.max(0, Math.min(1, ((lv("engine") + lv("tire") + lv("frame") + lv("susp")) / 4) / full));
+  const base = topSpeedOf(veh, { engine: 0, tire: 0, frame: 0, susp: 0 });
+  return base + (nominal - base) * prog;
+}
+
 /**
  * 升到第 lv 级所需金币。
  *

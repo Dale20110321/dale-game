@@ -6,7 +6,7 @@
 //    被禁用）时把模块级 available 置 false 并吞掉异常，游戏仍可正常游玩。
 //  · 任一 bike_* 键缺失或 JSON 损坏 → 回退默认值，不崩溃。
 import {
-  SAVE_KEYS, MAX_LV, RATING_ADVANCED, RATING_PEAK, SAVE_APP, SAVE_FORMAT,
+  SAVE_KEYS, MAX_LV, maxLvOf, RATING_ADVANCED, RATING_PEAK, SAVE_APP, SAVE_FORMAT,
   safeGold,
 } from "../config/constants.js";
 import { VEHICLES } from "../config/vehicles.js";
@@ -286,10 +286,11 @@ function intOr(v) {
  *   之后车推不动、速度恒 0，而 store.state 仍显示 play —— 玩家看着"在玩"却完全无法操控。
  *   所以这里对**四个字段逐一**校验，而不是只判断对象存不存在。
  */
-function clampLv(v) {
+function clampLv(v, maxLv) {
   const n = Math.round(Number(v));
   if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(MAX_LV, n));
+  const hi = maxLv || MAX_LV;
+  return Math.max(0, Math.min(hi, n));
 }
 
 /** 把任意值夹成 0..3 的星级 */
@@ -306,11 +307,12 @@ function sanitizeUpgrades(u) {
   for (const veh of VEHICLES) {
     const rec = u[veh.id];
     if (!rec || typeof rec !== "object" || Array.isArray(rec)) continue;
+    const ml = maxLvOf(veh);
     out[veh.id] = {
-      engine: clampLv(rec.engine),
-      tire: clampLv(rec.tire),
-      frame: clampLv(rec.frame),
-      susp: clampLv(rec.susp),
+      engine: clampLv(rec.engine, ml),
+      tire: clampLv(rec.tire, ml),
+      frame: clampLv(rec.frame, ml),
+      susp: clampLv(rec.susp, ml),
     };
   }
   return out;
@@ -612,10 +614,10 @@ export function loadSave() {
       const id = VEHICLES[store.currentVehicle].id;
       store.upgrades = {};
       store.upgrades[id] = {
-        engine: clampLv(u.engine),
-        tire: clampLv(u.tire),
-        frame: clampLv(u.frame),
-        susp: clampLv(u.susp),
+        engine: clampLv(u.engine, maxLvOf(VEHICLES[store.currentVehicle])),
+        tire: clampLv(u.tire, maxLvOf(VEHICLES[store.currentVehicle])),
+        frame: clampLv(u.frame, maxLvOf(VEHICLES[store.currentVehicle])),
+        susp: clampLv(u.susp, maxLvOf(VEHICLES[store.currentVehicle])),
       };
     } else {
       // ★ 这里原来是把整个对象原样赋给 store.upgrades（只判断"是不是对象"）。
@@ -709,10 +711,11 @@ export function loadSave() {
         if (!v.ultra) continue;
         const id = v.id;
         if (!store.upgrades[id]) store.upgrades[id] = { engine: 0, tire: 0, frame: 0, susp: 0 };
-        store.upgrades[id].engine = MAX_LV;
-        store.upgrades[id].tire = MAX_LV;
-        store.upgrades[id].frame = MAX_LV;
-        store.upgrades[id].susp = MAX_LV;
+        const ml = maxLvOf(v);
+        store.upgrades[id].engine = ml;
+        store.upgrades[id].tire = ml;
+        store.upgrades[id].frame = ml;
+        store.upgrades[id].susp = ml;
         store.ultra[v.id] = true;
       }
       if (!store.ownedVehicles.includes(store.currentVehicle)) store.currentVehicle = 1;

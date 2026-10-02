@@ -96,27 +96,33 @@
       mode 上限由 4 改为 5（27 辆 / 6 种通用 mode，"≤4" 算术上不可能）
 
 - [ ] Task 7: 宇宙级车辆（6 台）
-  - [ ] Task 7.1: per-vehicle 升级上限
-    - [ ] Task 7.1.1: 在 `vehicles.js` 每辆车增加 `maxLv` 字段（宇宙车 500，其余 100）
-    - [ ] Task 7.1.2: `storage.js` 的 `clampLv` 改为读取对应车辆的 `maxLv`
-    - [ ] Task 7.1.3: `getUp()` 返回值附带该车的 `maxLv`
-  - [ ] Task 7.2: 新增 5 台宇宙车
-    - [ ] Task 7.2.1: 星殒（5000 km/h）
-    - [ ] Task 7.2.2: 坍缩（10000 km/h）
-    - [ ] Task 7.2.3: 虚掷（25000 km/h）
-    - [ ] Task 7.2.4: 终末（50000 km/h）
-    - [ ] Task 7.2.5: 无相（100000 km/h）
-    - [ ] Task 7.2.6: 校验 R2.1 的价格与 costK 表格逐项一致
-  - [ ] Task 7.3: 形态极速随等级解算（R2.2）
-    - [ ] Task 7.3.1: 新增 `ultraCruiseOf(veh, up)`，按解算比归一化插值
-    - [ ] Task 7.3.2: `applyUpgrades` 改用该函数设置 `topSpeed`
-    - [ ] Task 7.3.3: 验证归墟 Lv0=68 / Lv25=366 / Lv50=600 / Lv75=809 / Lv100=1000
-  - [ ] Task 7.4: 未开形态保留地面物理（R2.3）
-    - [ ] Task 7.4.1: 验证 6 台车未开形态时的摔车判据正常触发
-  - [ ] Task 7.5: 提高数值上限
-    - [ ] Task 7.5.1: `NUM_CAP_V` 60,000 → 3e8
-    - [ ] Task 7.5.2: `TOP_SPEED_CAP` 40,000 → 4e7
-    - [ ] Task 7.5.3: 验证全表 `topSpeedOf` 未被截断（无相应接近其标称极速）
+  - [x] Task 7.1: per-vehicle 升级上限
+    - [x] Task 7.1.1: `vehicles.js` 宇宙车增加 `maxLv: 500`；`constants.js` 新增 `maxLvOf(veh)`
+    - [x] Task 7.1.2: `storage.js` 的 `clampLv(v, maxLv)` / `shop.js` / `panels.js` 全部改读 `maxLvOf`
+    - [x] Task 7.1.3: 确认全库再无直接引用全局 `MAX_LV` 判定"满级"的地方
+  - [x] Task 7.2: 新增 5 台宇宙车
+    - [x] Task 7.2.1: 星殒（5000 km/h，¥2.4e10）
+    - [x] Task 7.2.2: 坍缩（10000 km/h，¥7.2e11）
+    - [x] Task 7.2.3: 虚掷（25000 km/h，¥2.16e13）
+    - [x] Task 7.2.4: 终末（50000 km/h，¥5.184e15）
+    - [x] Task 7.2.5: 无相（100000 km/h，¥1.5552e17）
+    - [x] Task 7.2.6: 校验 R2.1 的价格与 costK 表格逐项一致（升满 = 车价×40、形态 = 车价×12.5，三条曲线同时单调）
+  - [x] Task 7.3: 形态极速随等级解算（R2.2）
+    - [x] Task 7.3.1: 新增 `ultraCruiseOf(veh, up, nominal)`，按解算比归一化插值
+    - [x] Task 7.3.2: `applyUpgrades` 改用该函数设置 `topSpeed`，风阻按 (标称/cruise)² 缩放
+    - [x] Task 7.3.3: 6 台车 Lv0/Lv100/Lv250/Lv400/Lv500 全档位曲线实测 + 实机 20 秒极速验证
+    - [x] Task 7.3.4: **修 `flightStep` 推力上限**（原先只取 μ·m·g，10 万 km/h 差 36 倍；改取速度相关值又形成
+          两周期极限环实测 73,275 km/h）→ 最终用 `OMEGA_ACC_FRAC = 0.25`（上限 = 目标速度 × 0.25）
+  - [x] Task 7.4: 未开形态保留地面物理（R2.3）
+    - [x] Task 7.4.1: 移除 6 台宇宙车的 `veh.hover`（它让裸车也常驻悬停 → 零摔车，R2.3 整个落空）
+    - [x] Task 7.4.2: 归墟 grip 6.0 → 3.4（原来的 6.0 是为"悬停后抓地只定推力"服务的）
+    - [x] Task 7.4.3: 6 台车 Lv0 未开形态 40 秒内全部触发摔车判据
+  - [x] Task 7.5: 提高数值上限
+    - [x] Task 7.5.1: `NUM_CAP_V` → 3e8
+    - [x] Task 7.5.2: `TOP_SPEED_CAP` → 4e7
+    - [x] Task 7.5.3: 6 台车全速实测 `capHitCount() === 0`
+  - [x] Task 7.6: Task 5.4 延后项（无相在无限模式不回卷）
+    - [x] 无相 Lv500 形态在无限模式跑 90 秒 = 2442 万公里，回卷次数 0
 
 - [ ] Task 8: 终局关「环大陆」重构
   - [ ] Task 8.1: 长度与分段

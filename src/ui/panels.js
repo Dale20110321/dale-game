@@ -3,7 +3,7 @@
 //  · 全部面板交互走 #modePanel 上的事件委托（面板 HTML 重绘不会丢监听）
 //  · 本模块只 import 其它层，绝不反向被 import
 import {
-  ACHS, toM, toKmh, rankName, MAX_LV, topSpeedOf,
+  ACHS, toM, toKmh, rankName, maxLvOf, topSpeedOf,
   RATING_ADVANCED, RATING_PEAK, RATING_TOP,
   RANKS, rankStars, rankIndexOf, rankNextOf, rankDelta, RATING_LOSS, RATING_LOSS_ADVANCED,
   RACE_FORMATS, RACE_FORMAT_IDS, RACE_PLACE_GOLD,
@@ -653,8 +653,15 @@ export function renderFreePanel() {
 
 // ---------------- 车库 ----------------
 
-/** 满级四项的升级表（车库卡片用它算"这台车满级能跑多快"） */
-const MAXED = { engine: MAX_LV, tire: MAX_LV, frame: MAX_LV, susp: MAX_LV };
+/**
+ * 满级四项的升级表（车库卡片用它算"这台车满级能跑多快"）。
+ * ★ 必须按车取上限：宇宙级车 500 级，用全局 MAX_LV=100 算出来的"满级极速"是错的
+ *   （那只是它 Lv100 的速度）。
+ */
+const MAXED_OF = (veh) => {
+  const m = maxLvOf(veh);
+  return { engine: m, tire: m, frame: m, susp: m };
+};
 
 /**
  * 车库展示顺序 = 车价升序。
@@ -679,7 +686,7 @@ function vehStatGrid(v) {
   const cell = (k, val, hi) =>
     `<div class="vsCell${hi ? " hi" : ""}"><span>${k}</span><b>${val}</b></div>`;
   return `<div class="vsGrid">
-    ${cell("极速", Math.round(toKmh(topSpeedOf(v, MAXED))) + " <i>km/h</i>", true)}
+    ${cell("极速", Math.round(toKmh(topSpeedOf(v, MAXED_OF(v)))) + " <i>km/h</i>", true)}
     ${cell("抓地", Math.round(v.grip * 100) + "%")}
     ${cell("驱动", Math.round(v.phys.torque * 100) + "%")}
     ${cell("油箱", Math.round(v.fuel * 100) + "%")}
@@ -809,7 +816,10 @@ function fxLine(v) {
 /** 车辆全部升级（引擎/轮胎/车架/减震）是否已满级 —— 解锁特殊模式的前提 */
 function allMaxed(id) {
   const u = store.upgrades[id];
-  return !!u && u.engine >= MAX_LV && u.tire >= MAX_LV && u.frame >= MAX_LV && u.susp >= MAX_LV;
+  if (!u) return false;
+  // ★ 按该车的上限判断（宇宙级车 500 级）
+  const m = maxLvOf(VEHICLES.find((v) => v.id === id));
+  return u.engine >= m && u.tire >= m && u.frame >= m && u.susp >= m;
 }
 
 /** 车库卡片下的特殊模式区块（已开启 / 未满级提示 / 可购买三态） */
@@ -818,7 +828,7 @@ function ultraBlock(v, i) {
     return `<div class="ultraRow got">${v.ultra.icon} 特殊模式「${v.ultra.name}」已开启 · ${v.ultra.desc}</div>`;
   }
   if (!allMaxed(v.id)) {
-    return `<div class="ultraRow lock">🔒 ${v.ultra.icon} ${v.ultra.name}：${v.ultra.desc}${fxLine(v)}（全部升级满级 Lv${MAX_LV} 后解锁）</div>`;
+    return `<div class="ultraRow lock">🔒 ${v.ultra.icon} ${v.ultra.name}：${v.ultra.desc}${fxLine(v)}（全部升级满级 Lv${maxLvOf(v)} 后解锁）</div>`;
   }
   return `<div class="ultraRow buy">
     <button class="btn sm" data-act="buyUltra" data-veh="${i}">${v.ultra.icon} 解锁「${v.ultra.name}」 · ${v.ultra.cost.toLocaleString()} 🪙</button>

@@ -27,7 +27,8 @@ import {
   SOLVER_TOL, SOLVER_ITERS, PEN_TOL, FN_MAX_K, NUM_CAP_V, HEAD_R,
   ROLL_RES_K, AIR_DRAG_K, LINEAR_DRAG_K, wheelInertia, torqueAt, topSpeedOf, crashTiltDeg,
   ABSOLUT_V, ABSOLUT_DRAG_K, ABSOLUT_THRUST_K, ABSOLUT_SERVO_ACC,
-  OMEGA_V, OMEGA_DRAG_K, OMEGA_THRUST_K, OMEGA_SERVO_ACC,
+  OMEGA_V, OMEGA_DRAG_K, OMEGA_THRUST_K, OMEGA_SERVO_ACC, OMEGA_ACC_FRAC,
+  PX_PER_M, ultraCruiseOf,
   FLIGHT_HOVER, FLIGHT_HOVER_K, FLIGHT_HOVER_LP, FLIGHT_PITCH_K,
   REAR_LOAD, wheelieTauOf,
   CRASH_FUEL_LOSS, CRASH_TIME_PENALTY, MAX_LV, REF_SPEED,
@@ -170,10 +171,10 @@ export function isUltraStable() {
 /**
  * 「常驻飞行」是否生效。
  *
- * ★ 两个来源：形态的 fly 开关（omega），或车辆自带的 `veh.hover`。
- *   归墟裸车也要飞 —— 它 μ=11 的抓地在地面上根本没法开（一踩油门就后空翻，
- *   实测满级只能跑 4.6 km/h）。它是飞行器，"落地模式"对它没有意义。
- *   hover 让它始终走 flightStep，形态只决定**飞多快**（裸车慢、终焉 1000）。
+ * ★ 目前只有形态的 fly 开关（omega）一个来源。车辆自带的 `veh.hover` 这条通路
+ *   保留着，但**没有任何车再用它** —— 早期给 6 台宇宙车全挂了 hover，让它们
+ *   不开形态也常驻悬停，结果"没开最终形态也会摔车"这条需求整个落空
+ *   （实测 6 台 Lv0 不开形态跑 25 秒零摔车）。飞行是形态给的特权，不是车的。
  */
 export function isFlighter() {
   if (ultraFlags().fly === true) return true;
@@ -218,7 +219,7 @@ function pinToGround() {
 }
 
 /**
- * 「常驻飞行」推进：归墟号（omega 终焉形态 / 裸车 hover）。
+ * 「常驻飞行」推进：宇宙级车的 omega 终焉形态。
  *
  * ★ 为什么完全不走 solveVelocityConstraints：
  *   1000 km/h = 27,778 px/s，一个物理帧走 463px = **12.2 个轴距**。
@@ -240,8 +241,6 @@ function flightStep(P, dt, throttle, brk, rev) {
   const base = P.baseTopSpeed || P.topSpeed;
 
   // ---- 水平：目标速度 = 前馈（维持极速所需推力） + 反馈（与目标的偏差） ----
-  // 可用推力量级沿用 μ·mTot·g·REAR_LOAD 的标度，低抓地场景推力随之下降。
-  const cap = P.mu * P.rb.mTot * P.gravity * REAR_LOAD * OMEGA_THRUST_K;
   // 终焉形态 1000 km/h；裸车悬停则回到这辆车平路可达的极速（torqueAt 解算值）
   const cruise = activeMode() === "omega" ? P.topSpeed : (P.baseTopSpeed || P.topSpeed);
   let target;
@@ -249,9 +248,29 @@ function flightStep(P, dt, throttle, brk, rev) {
   else if (brk) target = 0;
   else if (throttle) target = cruise;
   else target = 0;
-  const dragK = activeMode() === "omega" ? OMEGA_DRAG_K : P.airDragK;
-  // 前馈 = 目标速度处的风阻减速，使 target 本身成为平衡点
-  const ff = Math.min(cap, (dragK * target * target) / P.rb.mTot);
+  // ★ 用 P.airDragK 而不是常量 OMEGA_DRAG_K：applyUpgrades 已按当前目标速度
+  //   对风阻做过 (V_标称/cruise)² 的缩放（否则 Lv0 推不动、Lv250 差一口气），
+  //   这里再用常量就把那次缩放绕过去了。
+  const dragK = P.airDragK;
+  // ★ 推力上限必须与目标速度**成正比**，这是能否跑满标称速度的关键。
+  //
+  //   上一版用"维持目标速度所需的风阻"当上限（need·1.25），结果在 10 万 km/h 上
+  //   数值发散：v=0 时前馈全额施加，一步冲到目标的 2.18 倍；下一步风阻 1.7e9
+  //   又把它甩到 −1.5e6，两周期往复形成极限环，HUD 上的低通把它平均成
+  //   73,275 km/h（实测）。**推力上限只要正比于目标速度**，每步位移就被
+  //   限制在 0.42% 目标以内，恒定收敛，不再振荡。
+  //
+  //   取 0.25 → 从 0 加速到目标速度约 4 秒，且与速度量级无关（6 台车一致）。
+  //   第一项（抓地上限）保留，低抓地场景推力随之下降这条不变式不能破。
+  const need = (dragK * target * Math.abs(target)) / P.rb.mTot;
+  const cap = Math.max(
+    P.mu * P.rb.mTot * P.gravity * REAR_LOAD * OMEGA_THRUST_K,
+    Math.abs(target) * OMEGA_ACC_FRAC,
+  );
+  // 前馈 = 目标速度处的风阻减速，使 target 本身成为平衡点。
+  // ★ 不在这里限幅：push 减去当前风阻后自然抵消，稳态精确落在 target；
+  //   提前截断会把前馈削掉一大截，平衡点就退到标称速度之前（实测差 36 倍）。
+  const ff = need;
   // ★ 必须同时减掉**当前速度**下的风阻，前馈才有意义：
   //   net = (target − v)·G + ff − drag(v)。在 v = target 处 net = ff − drag(target) = 0，
   //   那才是平衡点。只加不减的话车会一路冲过 target 无限加速
@@ -402,12 +421,25 @@ export function applyUpgrades() {
     //   350 km/h 由下面那段附加推力负责，扭矩路径保持正常尺度。
     store.phys.airDragK = ABSOLUT_DRAG_K;
   } else if (mode === "omega") {
-    // 终焉形态：1000 km/h + 常驻飞行（见 flightStep）。
-    // 风阻按同一口径标定，使 OMEGA_V 成为 flightStep 里那个稳定平衡点。
-    store.phys.topSpeed = OMEGA_V;
-    store.phys.airDragK = OMEGA_DRAG_K;
-    // rpmK 同样不放大：扭矩路径在这台车上几乎不参与加速（见 flightStep 的说明），
-    // 放大只会让车轮在 27778 px/s 下空转到 ωR ≈ 2300 rad/s，纯属浪费与数值噪声。
+    // 宇宙级形态：按**当前升级等级**解算目标极速（见 constants.js 的 ultraCruiseOf）。
+    // ★ 早期把目标速度写死成 OMEGA_V，于是 Lv0 与 Lv100 都是标称极速，
+    //   "500 级"这条成长线对速度毫无意义。现在 Lv0 只有裸车水平，升满才达标称值。
+    const veh = VEHICLES[store.currentVehicle];
+    const nominal = ((veh && veh.nominalKmh) || 1000) / 3.6 * PX_PER_M;
+    const cruise = ultraCruiseOf(veh, getUp(), nominal);
+    store.phys.topSpeed = cruise;
+    // 风阻随目标速度**反比缩放**，使 cruise 成为 flightStep 里的稳定平衡点。
+    // ★ 为什么必须缩放：维持极速的推力上限 cap = μ·mTot·g·REAR_LOAD 是固定的
+    //   （它只由抓地决定，与速度无关）。平衡要求 dragK·cruise²/mTot = cap，
+    //   即 dragK = cap·mTot/cruise² —— 速度越高，风阻系数越小。
+    //   写死一个 dragK 的话，只有标称速度那一个点是平衡点：
+    //   Lv0（cruise 小）会因阻力过大而根本推不动，Lv250 也永远差一口气。
+    //   OMEGA_DRAG_K 是"满级标称速度"下的基准值，按 (V_标称/cruise)² 折算。
+    const nominalV = nominal;
+    store.phys.airDragK = cruise > 1
+      ? OMEGA_DRAG_K * (nominalV / cruise) * (nominalV / cruise)
+      : OMEGA_DRAG_K;
+    store.phys.omegaCruise = cruise;
   } else if (mode === "warp") {
     // 跃迁形态：直接给整车注入持续推力冲量（见 stepPhysics 的 boost 段）。
     // accel / vCap 决定"逼近极速有多快"，逐车不同 —— 便宜的蜂鸟要踩更久才上得去。
