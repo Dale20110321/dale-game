@@ -357,6 +357,47 @@ function rotateAroundMid(b, ang) {
   b.lastAng = wrapAngle(b.lastAng + ang);
 }
 
+/**
+ * 形态提速的**统一收尾**：放宽翘头限幅 + 用实车参数重算表盘。
+ *
+ * ★ 为什么形态需要放宽翘头限幅（这是"跑不到满速"的根因）：
+ *   极速 = min(扭矩/轮半径, τ限幅/轮半径, 抓地力) 与 风阻 的交点。
+ *   形态过去只动 rpmK（转速域）与 dragK（风阻），而**真正卡住绝大多数车的是
+ *   τ限幅与抓地力** —— 银箭 grip 0.55，抓地力只有 805，风阻再怎么降也上不去。
+ *   实测形态达成率：银箭 18%、玄铁 21%、破阵 20%（表盘全是虚的）。
+ *
+ * ★ 放宽多少：极速 ∝ √(τ限幅)（avail ∝ τ、loss ∝ v²），所以想让极速 ×N
+ *   就得让 τ限幅 ×N²。逐车 fx 可用 `wheelieN` 覆盖；缺省由 speedN 推出。
+ *
+ * ★ 表盘必须用**实车那套参数**重算（mu / airDragK / wheelieMul / rpmK），
+ *   否则改完物理表盘还是旧的虚高值 —— 之前就是这里与 topSpeedOf 各算各的。
+ */
+function retuneTopSpeed(v, fx) {
+  const base = wheelieMulOf(v, getUp());
+  // ★ 放宽幅度刻意**保守**（早期取 speedN² 直接把形态开成"必翻车"）：
+  //   翘头限幅一放宽，驱动扭矩全额传到接地点，掀翻力矩随之线性上涨 ——
+  //   实测磁暴形态 3600 帧里摔 3117 帧、光子摔 3286 帧，满油门几乎全程躺着，
+  //   玩家永远摸不到表盘上限（达成率 30%）。
+  //
+  //   形态提速的**主力是降风阻**：avail 被 τ 限幅卡住时 v = √(τ/(R·dragK))，
+  //   dragK 降到 0.1 就有 ×3.2 的极速，且**完全不增加驱动力**、不带来翻车。
+  //   τ 只做温和放宽，用来在拖过 τ 限幅的那一段不吃亏。逐车可用 wheelieN 覆盖。
+  const n = fx.wheelieN != null ? fx.wheelieN : 1.8;
+  store.phys.wheelieMul = base * n;
+  // 没写 dragK 的形态给一份通用的低风阻，否则它只有 1.8 倍 τ 放宽可卖，
+  // 表盘会被压得和裸车差不多，形态的存在感就没了。
+  if (!fx.dragK) store.phys.airDragK = AIR_DRAG_K * (fx.dragK0 != null ? fx.dragK0 : 0.35);
+  // ★ 表盘 = 用**实车那套参数**解出来的真实可达极速（含 applyDrag 的全部阻力项）。
+  //   相机前推 / 倒挡基准 / 危险段限速读同一个值，所以 HUD 指针走不满时
+  //   就是真的跑不到，而不是表盘虚高。
+  store.phys.topSpeed = topSpeedOf(v, getUp(), {
+    mu: store.phys.mu,
+    airDragK: store.phys.airDragK,
+    wheelieMul: store.phys.wheelieMul,
+    rpmK: store.phys.rpmK,
+  });
+}
+
 /** 按当前车辆 + 升级等级重算驾驶参数（公式统一放在 config/constants.js 的 derive* 里） */
 export function applyUpgrades() {
   const v = VEHICLES[store.currentVehicle];
@@ -393,15 +434,14 @@ export function applyUpgrades() {
   //   所以某个形态只想要"其中一样"时不必把七项都抄一遍。
   const fx = ultraFx();
   const mode = activeMode(v);
-  const MAXED = { engine: MAX_LV, tire: MAX_LV };
   if (mode === "surge") {
     // 极速形态：扭矩曲线**拉长**（高速段仍接近满功率）+ 低风阻。
     // ★ 刻意不给抓地下限：把 μ 抬到 3 以上，驱动力就超过翘头临界，
     //   实测银箭满级挂形态后每 2 秒翻一次车，而同一辆车裸车 30 秒零摔车。
     //   抓地留给 stable / shield 形态（它们给的是倍率，不改绝对量级）。
     store.phys.rpmK *= fx.rpmK || 1;
-    store.phys.topSpeed = Math.max(store.phys.topSpeed, (fx.speedN || 1) * REF_SPEED);
     if (fx.dragK) store.phys.airDragK = AIR_DRAG_K * fx.dragK;
+    retuneTopSpeed(v, fx);
   } else if (mode === "railgun") {
     // 轨道炮：把扭矩曲线**拉得又高又长**（红线暴涨 → 高速段仍有满功率），
     // 配合低风阻把极速顶上去。
@@ -411,7 +451,7 @@ export function applyUpgrades() {
     //   形态不该替玩家把这个决定代劳，所以只给红线与极速。
     store.phys.rpmK *= fx.rpmK || 1;
     if (fx.dragK) store.phys.airDragK = AIR_DRAG_K * fx.dragK;
-    if (fx.speedN) store.phys.topSpeed = topSpeedOf(v, MAXED) * fx.speedN;
+    retuneTopSpeed(v, fx);
   } else if (mode === "absolut") {
     // 绝对形态：表盘满量程钉在 350 km/h，并把风阻调到该速度上恰好能与附加推力相抵
     // （默认阻力在 9722px/s 处减速约 7.8 万 px/s²，任何驱动力都顶不住，
@@ -445,14 +485,14 @@ export function applyUpgrades() {
   } else if (mode === "warp") {
     // 跃迁形态：直接给整车注入持续推力冲量（见 stepPhysics 的 boost 段）。
     // accel / vCap 决定"逼近极速有多快"，逐车不同 —— 便宜的蜂鸟要踩更久才上得去。
-    if (fx.speedN) store.phys.topSpeed = topSpeedOf(v, MAXED) * fx.speedN;
     store.phys.rpmK *= 2;
     if (fx.dragK) store.phys.airDragK = AIR_DRAG_K * fx.dragK;
+    retuneTopSpeed(v, fx);
   } else if (mode === "stable" || mode === "shield" || mode === "phase") {
     // 这三个形态的卖点是"不摔/不腾空/不掉油"，它们**不碰扭矩与红线**，
     // 换来的额外收益各不相同：贴地给抓地、护盾给抓地、相位给极速。
     if (fx.gripK) store.phys.mu *= fx.gripK;
-    if (fx.speedN) store.phys.topSpeed *= fx.speedN;
+    retuneTopSpeed(v, fx);
   }
   bike.rb = rb;
   bindMasses(rb);
