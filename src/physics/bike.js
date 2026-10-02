@@ -1,7 +1,7 @@
 // ============================================================
 //  物理：车架刚体 + 弹簧-阻尼悬挂 + 轮上动力学
 //
-//  模型（第 3 期重做）：
+//  模型（重做）：
 //    · 车架 = 后轴 / 前轴 / 骑手 三质点构成的刚体，用**逆质量加权**的距离约束保持刚性；
 //      约束在**速度层**求解（顺序冲量），迭代由收敛判据驱动（残差 < SOLVER_TOL 即停），
 //      再做一次位置投影消除漂移。
@@ -41,11 +41,11 @@ import { key } from "../core/input.js";
 
 const TAU = Math.PI * 2;
 const WHEELS = ["rear", "front"];
-const CHASSIS = ["axleR", "axleF", "head"];
+const CHASSIS = ["axleRear", "axleFront", "head"];
 
 /**
  * 数值异常兜底（NUM_CAP_V）累计触发次数。**只增不减**，跨局累计，
- * 供测试断言"整个测试过程中兜底从未触发"（Task 6.4 / checklist"异常兜底从未触发"）。
+ * 供测试断言"整个测试过程中兜底从未触发"（checklist"异常兜底从未触发"）。
  */
 let numCapHits = 0;
 /** 读取兜底累计触发次数（正常游玩与全部测试中都应为 0） */
@@ -65,11 +65,22 @@ export function bikeVx() {
   return systemVel(bike).vx;
 }
 
-/** 竞速车「极速模式」把 MAXV 抬到基准极速的多少倍 */
+/** 「极速模式」把 topSpeed 抬到基准极速的多少倍 */
 const ULTRA_SPEED_N = 10;
 /** 终极模式的扭矩转速域倍率 */
 const ULTRA_RPM_N = 8;
-/** 「光子跃迁」持续推力：加速度（/s）与单子步速度上限 */
+/**
+ * 「轨道炮」形态的扭矩峰值倍率。
+ *
+ * ★ 这个常量以前**根本没声明过** —— applyUpgrades 的 railgun 分支一直在引用一个
+ *   不存在的名字，一进这个形态就抛 ReferenceError。被 startGame 的 try/catch 吞掉后
+ *   只剩一句"⚠️ 出错了"，于是 4 辆挂 railgun 的车（磁暴 / 山魈 / 玄铁 / 破阵）
+ *   一解锁或一切换就开不了局。补上声明之前它没有任何"原值"可保留，
+ *   10 是按同量级的 ULTRA_SPEED_N 选的：扭矩与极速同倍率放大，
+ *   才撑得起该形态把表盘钉在 10× 的设定。要调手感从这里下手。
+ */
+const ULTRA_TORQUE_N = 10;
+/** 「跃迁」形态的持续推力：加速度（/s）与单子步速度上限 */
 const WARP_ACC = 6.5;
 const WARP_V_CAP = 90;
 
@@ -79,13 +90,14 @@ const WARP_V_CAP = 90;
  * ★ 模式的**效果**按 mode 分派，而不是到处写 `v.id === "xxx"`：
  *   每辆车的 ultra.mode 是一个稳定标识，物理层只认这一个字符串，
  *   以后加车只要在 vehicles.js 里挂一个 mode，不用改物理层的任何 if。
- * 模式表（vehicles.js 里的 ultra.mode）：
- *   stable 贴地   —— 轮/轴钉在地表，永不腾空、摔车无效（越野车）
- *   surge  极速   —— 红线与极速暴涨（竞速车）
- *   shield 护盾   —— 摔车免疫，但保留全部腾空与操控（磁力堡垒）
- *   phase  相位   —— 摔车免疫 + 燃料无限 + 危险段限速豁免（影行者）
- *   railgun 轨道炮 —— 推力与红线同时暴涨（电磁王座）
- *   warp   跃迁   —— 持续推力冲量 + 红线倍增（光子摩托）
+ * 模式表（vehicles.js 里的 ultra.mode，括号内为代表车）：
+ *   stable 贴地   —— 轮/轴钉在地表，永不腾空、摔车无效（岩驼）
+ *   surge  极速   —— 红线与极速暴涨（银箭）
+ *   shield 护盾   —— 摔车免疫，但保留全部腾空与操控（磐石）
+ *   phase  相位   —— 摔车免疫 + 燃料无限 + 危险段限速豁免（夜枭）
+ *   railgun 轨道炮 —— 推力与红线同时暴涨（磁暴）
+ *   warp   跃迁   —— 持续推力冲量 + 红线倍增（蜂鸟）
+ *   absolut 绝对  —— 350 km/h 稳定极速 + 全姿态摔车免疫（奇点，免解锁）
  */
 export function activeMode(veh) {
   const v = veh || VEHICLES[store.currentVehicle];
@@ -106,7 +118,7 @@ export function isUltraActive() {
   return store.ultra[VEHICLES[store.currentVehicle].id] === true;
 }
 
-/** 越野车「贴地模式」是否生效（已解锁并选用越野车） */
+/** 「贴地模式」是否生效（stable：轮轴钉地，永不腾空） */
 export function isUltraStable() {
   return activeMode() === "stable";
 }
@@ -129,10 +141,10 @@ function pinToGround() {
     // （旧写法 g.y - n.y*WHEEL_R 把轮心钉进地表之下，造成"陷地 + 无摩擦走不动"）
     const wheelY = g.y + n.y * WHEEL_R;
     W.y = wheelY; W.py = wheelY; W._vy = 0;
-    const A = wk === "rear" ? b.axleR : b.axleF;
+    const A = wk === "rear" ? b.axleRear : b.axleFront;
     A.y = wheelY; A.py = wheelY; A._vy = 0;
   }
-  const midY = (b.axleR.y + b.axleF.y) * 0.5;
+  const midY = (b.axleRear.y + b.axleFront.y) * 0.5;
   b.head.y = midY - SEAT_H;
   b.head.py = midY - SEAT_H;
   b.head._vy = 0;
@@ -143,18 +155,26 @@ export function applyUpgrades() {
   const v = VEHICLES[store.currentVehicle];
   const up = getUp();
   Object.assign(store.phys, deriveHandling(v, up));
-  // ---- 第 3 期 Task 1：质量/惯量/悬挂/摩擦也数据化 ----
+  // ---- 质量/惯量/悬挂/摩擦也数据化 ----
   // 质量与惯量真参数（求解器按逆质量加权）、悬挂（刚度/阻尼/行程）、摩擦系数 μ。
   // 此处真实引用 M_R/M_F/M_H/M_TOT/COM_UP/I_BODY，使其不再是死代码。
   const rb = deriveRigidBody(v);
   store.phys.rb = rb;
   store.phys.susp = deriveSuspension(v, up);
-  store.phys.mu = deriveFriction(store.phys.TRACTION, v, up);
+  store.phys.mu = deriveFriction(store.phys.traction, v, up);
   store.phys.wheelI = wheelInertia(rb.mW); // 轮转动惯量（实心圆盘近似）
 
-  // 倒挡的**物理**基准极速：必须在下面特殊模式把 MAXV 抬高**之前**存一份。
+  // 倒挡的**物理**基准极速：必须在下面特殊模式把 topSpeed 抬高**之前**存一份。
   // 拿"极速模式"的标称值当倒挡目标，会让终极模式"倒着比正着还快"。
-  store.phys.MAXVPhys = store.phys.MAXV;
+  store.phys.baseTopSpeed = store.phys.topSpeed;
+
+  // 风阻复位到基准值，再由下面的特殊形态覆写。
+  // ★ 必须显式复位：airDragK 挂在 store.phys 上、跨 applyUpgrades() 调用存活，
+  //   自己不会回到默认值。从「极速模式」(0.1×) 切回普通车却不清它，
+  //   普通车就会带着那份低风阻跑 —— 极速凭空高一截。
+  //   （原先这里是写 `airDragK = 0`，靠 applyDrag 的 `0 || AIR_DRAG_K` 兜回默认值，
+  //     效果对但读起来像"关掉风阻"，是句有误导性的写法。）
+  store.phys.airDragK = AIR_DRAG_K;
 
   // 特殊终极模式（放在所有派生量覆写之后：μ 由 deriveFriction 派生，
   // 若在前面放大会被覆盖，车会因打滑而极速上不去）
@@ -162,7 +182,7 @@ export function applyUpgrades() {
   if (mode === "surge") {
     // 极速模式：扭矩域拉到极高 → 扭矩曲线在高速段仍是满功率，配合极低风阻真的冲得上去。
     store.phys.rpmK *= ULTRA_RPM_N;
-    store.phys.MAXV = Math.max(store.phys.MAXV, ULTRA_SPEED_N * REF_SPEED);
+    store.phys.topSpeed = Math.max(store.phys.topSpeed, ULTRA_SPEED_N * REF_SPEED);
     store.phys.mu = Math.max(store.phys.mu, 4); // 高抓地：大扭矩不打滑
     store.phys.airDragK = AIR_DRAG_K * 0.1; // 极低风阻，极速真正冲上去
   } else if (mode === "railgun") {
@@ -171,25 +191,23 @@ export function applyUpgrades() {
     store.phys.rpmK *= ULTRA_RPM_N * 1.6;
     store.phys.mu = Math.max(store.phys.mu, 3.4);
     store.phys.airDragK = AIR_DRAG_K * 0.2;
-    store.phys.MAXV = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N;
+    store.phys.topSpeed = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N;
   } else if (mode === "absolut") {
     // 绝对形态：表盘满量程钉在 350 km/h，并把风阻调到该速度上恰好能与附加推力相抵
     // （默认阻力在 9722px/s 处减速约 7.8 万 px/s²，任何驱动力都顶不住，
     //  高速只会"冲一下就掉速"）。
-    store.phys.MAXV = ABSOLUT_V;
+    store.phys.topSpeed = ABSOLUT_V;
     // ★ rpmK 刻意**不**放大：扭矩路径已经够强（扭矩倍率 3.0），而把红线拉到
     //   ω=2376 会让满油门时的摩擦上限根本刹不住车轮 —— 实测后轮一路空转到
     //   ωR = 73,000 px/s，直接打挂"无动力滑行纯滚动 / 车轮锁死 / 滑移不爆炸"三项。
     //   350 km/h 由下面那段附加推力负责，扭矩路径保持正常尺度。
     store.phys.airDragK = ABSOLUT_DRAG_K;
   } else if (mode === "warp") {
-    // 光子跃迁：直接给整车注入持续推力冲量（见 stepPhysics 的 boost 段）
-    store.phys.MAXV = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N * 1.6;
+    // 跃迁形态：直接给整车注入持续推力冲量（见 stepPhysics 的 boost 段）
+    store.phys.topSpeed = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N * 1.6;
     store.phys.rpmK *= 2;
   }
-  if (!mode || mode === "stable" || mode === "shield" || mode === "phase") {
-    store.phys.airDragK = 0;
-  }
+  // 普通模式与稳定/护盾/相位形态走到这里就是上面复位后的基准风阻，不再改动。
   bike.rb = rb;
   bindMasses(rb);
 }
@@ -198,7 +216,7 @@ export function applyUpgrades() {
 function bindMasses(rb) {
   const b = bike;
   b.rear.m = rb.mW; b.front.m = rb.mW;
-  b.axleR.m = rb.mR; b.axleF.m = rb.mF; b.head.m = rb.mH;
+  b.axleRear.m = rb.mR; b.axleFront.m = rb.mF; b.head.m = rb.mH;
   for (const p of b.pts) p.im = p.m > 0 ? 1 / p.m : 0;
 }
 
@@ -207,15 +225,15 @@ export function resetBike(x) {
   const b = bike;
   const L = WHEELBASE;
   b.spawnX = x;
-  b.locked = true;
+  b.awaitingStart = true;
   const yR = groundY(x) - WHEEL_R;
   const yF = groundY(x + L) - WHEEL_R;
   const ang = Math.atan2(yF - yR, L);
   for (const [p, px, py] of [
     [b.rear, x, yR],
     [b.front, x + L, yF],
-    [b.axleR, x, yR],
-    [b.axleF, x + L, yF],
+    [b.axleRear, x, yR],
+    [b.axleFront, x + L, yF],
   ]) {
     p.x = px; p.y = py; p.px = px; p.py = py; p._vx = 0; p._vy = 0;
   }
@@ -233,14 +251,12 @@ export function resetBike(x) {
   b.head._vx = 0; b.head._vy = 0;
   b.grounded = 0;
   b.speed = 0;
-  b.wheelRear = 0;
-  b.wheelFront = 0;
+  b.wheelAngleRear = 0;
+  b.wheelAngleFront = 0;
   // 本帧轮角增量也必须一并归零：渲染层用它算辐条频闪淡出与踏频，
   // 残留旧值会让重生后第一帧的辐条几乎完全淡出（实测 blur 0.97 → alpha 0.107）。
-  b.wheelStep = 0;
-  b.wheelStepF = 0;
-  b.frontGr = false;
-  b.rearGr = false;
+  b.wheelStepRear = 0;
+  b.wheelStepFront = 0;
   b.squash = 0;
   b.squashVel = 0;
   b.angVel = 0;
@@ -249,12 +265,12 @@ export function resetBike(x) {
   b.penetration = 0;
   b._impactV = 0;
   // 记录骑手在轮轴线的哪一侧（刚体几何决定，任何旋转都不会改变）
-  const ux = b.axleF.x - b.axleR.x;
-  const uy = b.axleF.y - b.axleR.y;
+  const ux = b.axleFront.x - b.axleRear.x;
+  const uy = b.axleFront.y - b.axleRear.y;
   const d = Math.hypot(ux, uy) || 1e-4;
-  const cross = (ux / d) * (b.head.y - b.axleR.y) - (uy / d) * (b.head.x - b.axleR.x);
+  const cross = (ux / d) * (b.head.y - b.axleRear.y) - (uy / d) * (b.head.x - b.axleRear.x);
   b.headUp = Math.sign(cross) || -1;
-  // 第 3 期新增状态量一并归零（保证"同初始状态 + 同输入 → 完全可复现"）
+  // 新增状态量一并归零（保证"同初始状态 + 同输入 → 完全可复现"）
   b.wheelRot.rear = 0; b.wheelRot.front = 0;
   b.wheelAcc.rear = 0; b.wheelAcc.front = 0;
   b.susp.rear.t = 0; b.susp.rear.v = 0;
@@ -298,14 +314,14 @@ export function crash() {
   const run = store.run;
   if (run.crashed) return;
   run.crashed = true;
-  run.runCrashed = true;
+  run.hasCrashed = true;
   run.crashTimer = STUN_TIME;
   run.combo = 0;
   // 摔车惩罚：燃料与计时都要付出代价（计时惩罚在结算时计入，直接影响三星）
   const P = store.phys;
   P.fuel = Math.max(0, P.fuel - CRASH_FUEL_LOSS * P.fuelMax);
   run.penaltyTime += CRASH_TIME_PENALTY;
-  // 表现与反馈交给注入的物理事件回调（Task 8）：震屏 / 音效 / 粒子 / 提示
+  // 表现与反馈交给注入的物理事件回调：震屏 / 音效 / 粒子 / 提示
   physEvents().onCrash({
     x: bike.head.x,
     y: bike.head.y,
@@ -339,7 +355,7 @@ function integrate(b, sub) {
 
 /** 车架姿态：切向 t（后轴→前轴方向）与"下"方向 d（指向地面） */
 function frameOf(b) {
-  const a = Math.atan2(b.axleF.y - b.axleR.y, b.axleF.x - b.axleR.x);
+  const a = Math.atan2(b.axleFront.y - b.axleRear.y, b.axleFront.x - b.axleRear.x);
   return { a, tx: Math.cos(a), ty: Math.sin(a), dx: -Math.sin(a), dy: Math.cos(a) };
 }
 
@@ -349,7 +365,7 @@ function frameOf(b) {
  * 因此身体接触对常规手感零影响（也避免在谷底等地形上误判）。
  */
 function bodyLow(b) {
-  return b.head.y > (b.axleR.y + b.axleF.y) * 0.5;
+  return b.head.y > (b.axleRear.y + b.axleFront.y) * 0.5;
 }
 
 /** 车架质点（质量加权）质心 */
@@ -382,10 +398,10 @@ function systemVel(b) {
  */
 function applySuspension(b, susp, sub) {
   const fr = frameOf(b);
-  const FN_MAX = FN_MAX_K * store.phys.rb.mTot * store.phys.GRAV;
+  const FN_MAX = FN_MAX_K * store.phys.rb.mTot * store.phys.gravity;
   for (const wk of WHEELS) {
     const W = b[wk];
-    const A = wk === "rear" ? b.axleR : b.axleF;
+    const A = wk === "rear" ? b.axleRear : b.axleFront;
     const s = (W.x - A.x) * fr.dx + (W.y - A.y) * fr.dy;
     const c = clamp(-s, -susp.ext, susp.travel);
     const cRate = -((W._vx - A._vx) * fr.dx + (W._vy - A._vy) * fr.dy);
@@ -410,16 +426,16 @@ function applySuspension(b, susp, sub) {
 // ============================================================
 //  动力链：油门 → 轮上扭矩；刹车 → 反向扭矩 / 锁死；滚动阻力
 // ============================================================
-function applyDrive(b, P, sub, drv, brk, rev) {
+function applyDrive(b, P, sub, throttle, brk, rev) {
   // 贴地模式（越野车终极模式）：轮子被钉在地表、接触摩擦为 0，
   // 油门/刹车改走"整车速度指令"（磁悬浮滑行）——否则完全走不动。
   if (isUltraStable()) {
     const sv = systemVel(b);
     const vx = sv.vx;
     let target = 0;
-    if (rev) target = -(P.MAXVPhys || P.MAXV) * REV_SPEED;
-    else if (drv) target = P.MAXV * 0.95; // 前进冲到极速；刹车/松油门滑停
-    const maxAcc = P.MAXV * 2; // 加速（/s），0.5s 内到极速，不突兀
+    if (rev) target = -(P.baseTopSpeed || P.topSpeed) * REV_SPEED;
+    else if (throttle) target = P.topSpeed * 0.95; // 前进冲到极速；刹车/松油门滑停
+    const maxAcc = P.topSpeed * 2; // 加速（/s），0.5s 内到极速，不突兀
     const dv = clamp(target - vx, -maxAcc * sub, maxAcc * sub);
     if (dv !== 0) for (const p of b.pts) p._vx += dv;
     // 轮子视觉角速度跟随车速（轮心贴地时真实接触不转轮），倒车时反向
@@ -441,12 +457,12 @@ function applyDrive(b, P, sub, drv, brk, rev) {
    * 不来自堆扭矩）完全不受影响：τ 被压在恢复力矩之下，驱动力仍够把车推上去。
    * 只限驱动扭矩，刹车 / 倒挡伺服 / 被动阻力都不动 —— 那三者本来就不产生这个力矩。
    */
-  const wheelieTau = wheelieTauOf(P.rb.mTot, P.GRAV);
+  const wheelieTau = wheelieTauOf(P.rb.mTot, P.gravity);
   for (const wk of WHEELS) {
     let w = b.wheelRot[wk];
     let tau = 0;
     // 油门只驱动后轮；刹车前后轮都作用（真车如此）
-    if (wk === "rear" && drv) tau += clamp(torqueAt(veh, w, drv, P.torquePeak, P.rpmK || 1), -wheelieTau, wheelieTau);
+    if (wk === "rear" && throttle) tau += clamp(torqueAt(veh, w, throttle, P.torquePeak, P.rpmK || 1), -wheelieTau, wheelieTau);
     // 倒挡 = 反向驱动力矩，把后轮推向目标倒转角速度（同样只驱动后轮）。
     // 用"趋近目标轮速"的差动式扭矩而不是固定反向扭矩：倒车到极速后扭矩自然归零。
     //
@@ -456,7 +472,7 @@ function applyDrive(b, P, sub, drv, brk, rev) {
     //   上一直往后飘（实测 trail L0 稳定在 −19.8px/s，60 秒倒退 1187px）。
     //   交给刹车接管后，↓+← 能正常减速到停。
     if (wk === "rear" && rev && !brk) {
-      const base = P.MAXVPhys || P.MAXV;
+      const base = P.baseTopSpeed || P.topSpeed;
       const wantW = (-base * REV_SPEED) / WHEEL_R;
       tau += clamp(clamp(((wantW - w) * IW) / sub, -wheelieTau, wheelieTau), -wheelieTau, wheelieTau);
     }
@@ -540,7 +556,7 @@ function velTravel(W, A, fr, susp) {
  */
 function solveContacts(b, P, mu, sub, first, geo) {
   const IW = P.wheelI || wheelInertia(P.rb.mW);
-  const FN_MAX = FN_MAX_K * P.rb.mTot * P.GRAV;
+  const FN_MAX = FN_MAX_K * P.rb.mTot * P.gravity;
   if (first) b.grounded = 0;
   for (const wk of WHEELS) {
     const W = b[wk];
@@ -643,12 +659,12 @@ function solveVelocityConstraints(b, P, susp, mu, sub) {
   let iters = 0;
   for (let it = 0; it < SOLVER_ITERS; it++) {
     let r = Math.max(
-      velDistance(b.axleR, b.axleF, L),
-      velDistance(b.axleR, b.head, Lr),
-      velDistance(b.axleF, b.head, Lr)
+      velDistance(b.axleRear, b.axleFront, L),
+      velDistance(b.axleRear, b.head, Lr),
+      velDistance(b.axleFront, b.head, Lr)
     );
     for (const wk of WHEELS) {
-      const A = wk === "rear" ? b.axleR : b.axleF;
+      const A = wk === "rear" ? b.axleRear : b.axleFront;
       r = Math.max(r, velLateral(b[wk], A, fr, sub), velTravel(b[wk], A, fr, susp));
     }
     solveContacts(b, P, mu, sub, it === 0, geo);
@@ -683,11 +699,11 @@ function projDistance(a, b, L0) {
 
 /** 骑手侧向不等式约束（把骑手推回轮轴线正确一侧；不是镜像补丁） */
 function projHeadSide(b) {
-  const dx = b.axleF.x - b.axleR.x;
-  const dy = b.axleF.y - b.axleR.y;
+  const dx = b.axleFront.x - b.axleRear.x;
+  const dy = b.axleFront.y - b.axleRear.y;
   const d = Math.hypot(dx, dy) || 1e-4;
   const ux = dx / d, uy = dy / d;
-  const signed = ux * (b.head.y - b.axleR.y) - uy * (b.head.x - b.axleR.x);
+  const signed = ux * (b.head.y - b.axleRear.y) - uy * (b.head.x - b.axleRear.x);
   const want = b.headUp > 0 ? 1 : -1;
   if (signed * want >= 0) return 0;
   const need = want * SOLVER_TOL - signed;
@@ -736,13 +752,13 @@ function solvePositions(b, susp) {
   const fr = frameOf(b);
   for (let it = 0; it < SOLVER_ITERS; it++) {
     let resid = Math.max(
-      projDistance(b.axleR, b.axleF, L),
-      projDistance(b.axleR, b.head, Lr),
-      projDistance(b.axleF, b.head, Lr)
+      projDistance(b.axleRear, b.axleFront, L),
+      projDistance(b.axleRear, b.head, Lr),
+      projDistance(b.axleFront, b.head, Lr)
     );
     resid = Math.max(resid, projHeadSide(b));
     for (const wk of WHEELS) {
-      const A = wk === "rear" ? b.axleR : b.axleF;
+      const A = wk === "rear" ? b.axleRear : b.axleFront;
       resid = Math.max(resid, projSuspension(b[wk], A, fr, susp));
     }
     if (resid < SOLVER_TOL) break;
@@ -787,8 +803,8 @@ function airControl(b, sub) {
   const inv = veh.phys ? veh.phys.inertia : 1;
   if (inp) {
     // 角冲量：受转动惯量影响（惯量大者转得慢）
-    const wMax = (AIR_ROT_MAX * veh.air) / inv;
-    const a = (AIR_ROT_ACC * veh.air) / inv;
+    const wMax = (AIR_ROT_MAX * veh.airRot) / inv;
+    const a = (AIR_ROT_ACC * veh.airRot) / inv;
     b.angVel = clamp(b.angVel + inp * a * sub, -wMax, wMax);
   }
   // 松键后角速度保持（不做人为衰减）
@@ -857,7 +873,7 @@ export function stepPhysics() {
     const sub = SUB_DT;
     syncVel(b, sub);
     // 1) 重力（均匀加速度，与质量无关）
-    for (const p of b.pts) p._vy += P.GRAV * sub;
+    for (const p of b.pts) p._vy += P.gravity * sub;
     // 2) 空中姿态（角冲量，守恒）
     airControl(b, sub);
     // 3) 悬挂弹簧-阻尼
@@ -873,12 +889,12 @@ export function stepPhysics() {
       const svw = systemVel(b);
       let add;
       if (warp) {
-        add = clamp((P.MAXV * 0.98 - svw.vx) * WARP_ACC * sub, 0, WARP_V_CAP * sub);
+        add = clamp((P.topSpeed * 0.98 - svw.vx) * WARP_ACC * sub, 0, WARP_V_CAP * sub);
       } else {
         // 上限 = 可用抓地。★ 不能再套 WARP_V_CAP：那个值（90）是按"整秒"标定的
         // 光子跃迁限速，除以子步长只剩 0.25px/子步，把 350km/h 的推力掐到只剩万分之一。
-        const grip = P.mu * P.rb.mTot * P.GRAV * REAR_LOAD;
-        add = clamp((P.MAXV - svw.vx) * ABSOLUT_SERVO_ACC * sub, 0, grip * ABSOLUT_THRUST_K * sub);
+        const grip = P.mu * P.rb.mTot * P.gravity * REAR_LOAD;
+        add = clamp((P.topSpeed - svw.vx) * ABSOLUT_SERVO_ACC * sub, 0, grip * ABSOLUT_THRUST_K * sub);
       }
       for (const p of b.pts) p._vx += add;
     }
@@ -900,8 +916,6 @@ export function stepPhysics() {
     solvePositions(b, SUS);
   }
 
-  b.rearGr = b.fn.rear > 0;
-  b.frontGr = b.fn.front > 0;
   for (const wk of WHEELS) b.wheelAcc[wk] = (b.wheelRot[wk] - prevSpin[wk]) / DT;
 
   // —— 贴地模式（越野车终极模式）：整车钉在地表，永不翻车 ——
@@ -915,7 +929,7 @@ export function stepPhysics() {
     const gi = groundInfo(midX);
     physEvents().onLand({ x: midX, y: (b.rear.y + b.front.y) / 2, gy: gi.y, vimp });
   }
-  // 画面下沉由**真实悬挂行程**派生（Task 5.2：不再有独立弹簧）
+  // 画面下沉由**真实悬挂行程**派生（不再有独立弹簧）
   const cAvg = (b.susp.rear.t + b.susp.front.t) * 0.5;
   const target = -clamp(cAvg / Math.max(1, SUS.travel), 0, 1);
   b.squash += (target - b.squash) * 0.4;
@@ -930,10 +944,10 @@ export function stepPhysics() {
   //   之后做一次，用 SUB_DT 就等于每帧只走了 1/SUB = 1/6 圈，转速只有真实的 1/6。
   //   （旧代码 `* SUB_DT * 0.06` 因此实际只画出真实转速的 1%。）
   //   按真实转速画之后单帧转角会到 40°+，辐条必然频闪，交给渲染层淡出处理。
-  b.wheelStep = b.wheelRot.rear * DT;
-  b.wheelStepF = b.wheelRot.front * DT;
-  b.wheelRear = (b.wheelRear + b.wheelStep) % TAU;
-  b.wheelFront = (b.wheelFront + b.wheelStepF) % TAU;
+  b.wheelStepRear = b.wheelRot.rear * DT;
+  b.wheelStepFront = b.wheelRot.front * DT;
+  b.wheelAngleRear = (b.wheelAngleRear + b.wheelStepRear) % TAU;
+  b.wheelAngleFront = (b.wheelAngleFront + b.wheelStepFront) % TAU;
 
   // ---------------- 车速与真实车身角速度 ----------------
   b.speed = lerp(b.speed, systemVel(b).vx, 0.12);

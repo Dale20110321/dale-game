@@ -44,9 +44,9 @@ window.addEventListener("resize", resize);
 loadSave();
 loadAchList();
 loadProgress();
-// 自动保存接线：探测存储可用性 + 每 30s 兜底写盘 + 切后台写盘（Task 9.6）
+// 自动保存接线：探测存储可用性 + 每 30s 兜底写盘 + 切后台写盘
 initAutoSave();
-// 后处理接线（Task 7）：读持久化画质档位（缺省时按设备给默认档）
+// 后处理接线：读持久化画质档位（缺省时按设备给默认档）
 initPostFx();
 // 降级提示（非阻塞，只提示一次）：localStorage 被禁用 / 配额满时告知无法保存
 if (!isStorageAvailable()) showToast("⚠️ 本次无法保存进度（浏览器存储不可用）", 2400);
@@ -60,7 +60,7 @@ initSettings();
 initInput({ restart, togglePause, toggleShop });
 
 // 首屏：构建第 1 关地形作为菜单背景
-buildLevel(0);
+buildLevel(); // 菜单背景：直接用存档里的当前关卡
 applyUpgrades();
 resetBike(START_X);
 

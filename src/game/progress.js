@@ -1,9 +1,23 @@
 // 进度结算：金币与成就（所有金币来源必须走 addGold，成就才能正确触发）
+// 也放"由星级数组派生的进度读数"——ui/menu.js 与 ui/panels.js 都要用同一份。
 import { ACHS, safeGold } from "../config/constants.js";
+import { LEVELS } from "../config/levels.js";
 import { store } from "../core/store.js";
 import { save, saveAchList } from "../core/storage.js";
 import { showToast } from "../core/toast.js";
 import { playAchSound } from "../core/audio.js";
+
+/**
+ * 已通关关卡数（星级 ≥ 1）。
+ *
+ * ★ 单一事实来源：菜单 Hero 摘要与关卡地图的最终任务卡都要这个数，
+ *   两处各写一份的话，改了一处另一处就悄悄对不上。
+ */
+export function clearedCount() {
+  let n = 0;
+  for (let i = 0; i < LEVELS.length; i++) if ((store.stars[i] || 0) >= 1) n++;
+  return n;
+}
 
 export function hasAch(id) {
   return store.achGot.includes(id);

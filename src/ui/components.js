@@ -38,7 +38,7 @@ export function card(o = {}) {
   if (o.locked) cls.push("locked");
   const aria = o.locked ? ' aria-disabled="true"' : "";
   const st = o.styleVars ? ` style="${o.styleVars}"` : "";
-  // 可访问性（Task 9.1）：可交互卡片必须可被键盘聚焦与触发
+  // 可访问性：可交互卡片必须可被键盘聚焦与触发
   let a11y = "";
   if (o.interactive) {
     const name = plain([o.title, o.sub, o.meta].filter(Boolean).join(" · "));
@@ -131,9 +131,4 @@ export function themeVars(th) {
   if (sky[1]) parts.push("--theme-sky-2:" + sky[1]);
   if (pal[1]) parts.push("--theme-ground:" + pal[1]);
   return parts.join(";");
-}
-
-/** 车辆色注入 */
-export function vehicleVars(color) {
-  return color ? "--veh-accent:" + color : "";
 }

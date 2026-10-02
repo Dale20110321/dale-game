@@ -137,18 +137,18 @@
   var GRAV_BASE = 750;
   var REAR_LOAD = 0.62;
   var WHEELIE_K = 2;
-  var wheelieTauOf = (mTot, GRAV) => mTot * GRAV * WHEELBASE * 0.5 * WHEELIE_K;
+  var wheelieTauOf = (mTot, gravity) => mTot * gravity * WHEELBASE * 0.5 * WHEELIE_K;
   var TOP_SPEED_CAP = 12000;
   function topSpeedOf(veh, up) {
     const p = veh && veh.phys || {};
     const u = up || {};
     const eng = u.engine || 0;
     const tire = u.tire || 0;
-    const k = p.mass || veh && veh.wgt || 1;
+    const k = p.mass || veh && veh.weight || 1;
     const mTot = (M_TOT + 2 * M_W) * k;
     const peak = TORQUE_PEAK_BASE * (p.torque || 1) * (1 + ENGINE_TORQUE_UP * eng + TIRE_TORQUE_UP * tire);
     const rpmK = 1 + ENGINE_RPM_UP * eng;
-    const mu = FRICTION_BASE * (veh && veh.grp || 1) * (1 + FRICTION_TIRE_UP * tire);
+    const mu = FRICTION_BASE * (veh && veh.grip || 1) * (1 + FRICTION_TIRE_UP * tire);
     const grip = mu * mTot * GRAV_BASE * REAR_LOAD;
     const roll = ROLL_RES_K * mTot * GRAV_BASE;
     const tauCap = wheelieTauOf(mTot, GRAV_BASE);
@@ -170,11 +170,11 @@
     const p = veh.phys || {};
     return {
       torquePeak: TORQUE_PEAK_BASE * (p.torque || 1) * (1 + ENGINE_TORQUE_UP * (u.engine || 0) + TIRE_TORQUE_UP * (u.tire || 0)),
-      brakePeak: BRAKE_TORQUE_BASE * veh.grp * (1 + 0.016 * (u.tire || 0) + 0.01 * (u.frame || 0)),
+      brakePeak: BRAKE_TORQUE_BASE * veh.grip * (1 + 0.016 * (u.tire || 0) + 0.01 * (u.frame || 0)),
       rpmK: 1 + ENGINE_RPM_UP * (u.engine || 0),
-      MAXV: topSpeedOf(veh, up),
-      crashMargin: Math.min(14, 2 + 0.1 * (u.frame || 0) + veh.wgt * 2),
-      fuelMax: veh.tank * (1 + 0.004 * (u.frame || 0))
+      topSpeed: topSpeedOf(veh, up),
+      crashMargin: Math.min(14, 2 + 0.1 * (u.frame || 0) + veh.weight * 2),
+      fuelMax: veh.fuel * (1 + 0.004 * (u.frame || 0))
     };
   }
   var AIR_ROT_MAX = 9.5;
@@ -216,7 +216,7 @@
   var c01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
   function deriveRigidBody(veh) {
     const p = veh && veh.phys || {};
-    const k = p.mass || veh && veh.wgt || 1;
+    const k = p.mass || veh && veh.weight || 1;
     const inertia = p.inertia || 1;
     return {
       k,
@@ -243,7 +243,7 @@
   }
   function deriveFriction(traction, veh, up) {
     const t = up && up.tire || 0;
-    return FRICTION_BASE * (traction || 1) * (veh && veh.grp || 1) * (1 + FRICTION_TIRE_UP * t);
+    return FRICTION_BASE * (traction || 1) * (veh && veh.grip || 1) * (1 + FRICTION_TIRE_UP * t);
   }
   function torqueAt(veh, omega, throttle, peak, rpmK) {
     const p = veh && veh.phys || {};
@@ -497,12 +497,11 @@
       tier: "普通",
       costK: 1,
       price: 0,
-      drv: 1,
-      spd: 1,
-      grp: 1,
-      wgt: 1,
-      air: 1,
-      tank: 1,
+      speed: 1,
+      grip: 1,
+      weight: 1,
+      airRot: 1,
+      fuel: 1,
       color: "#314ccd",
       art: ART({}),
       phys: P(1, 1, 1, 1, 16, 1, 1)
@@ -515,12 +514,11 @@
       tier: "普通",
       costK: 1,
       price: 3000,
-      drv: 1.35,
-      spd: 1.4,
-      grp: 0.72,
-      wgt: 0.8,
-      air: 1.4,
-      tank: 0.75,
+      speed: 1.4,
+      grip: 0.72,
+      weight: 0.8,
+      airRot: 1.4,
+      fuel: 0.75,
       color: "#e63946",
       art: ART({
         tire: 1.7,
@@ -554,12 +552,11 @@
       tier: "稀有",
       costK: 5,
       price: 10500,
-      drv: 1.12,
-      spd: 0.7,
-      grp: 1.45,
-      wgt: 1.5,
-      air: 0.75,
-      tank: 1.45,
+      speed: 0.7,
+      grip: 1.45,
+      weight: 1.5,
+      airRot: 0.75,
+      fuel: 1.45,
       color: "#8a5a2b",
       art: ART({
         tire: 5.6,
@@ -591,12 +588,11 @@
       tier: "稀有",
       costK: 5,
       price: 7500,
-      drv: 1.55,
-      spd: 1.85,
-      grp: 1.2,
-      wgt: 0.85,
-      air: 0.87,
-      tank: 1.3,
+      speed: 1.85,
+      grip: 1.2,
+      weight: 0.85,
+      airRot: 0.87,
+      fuel: 1.3,
       color: "#00d4ff",
       art: ART({
         tire: 2.2,
@@ -629,12 +625,11 @@
       tier: "史诗",
       costK: 12,
       price: 19000,
-      drv: 1.4,
-      spd: 1.6,
-      grp: 1.55,
-      wgt: 0.7,
-      air: 1.62,
-      tank: 2.2,
+      speed: 1.6,
+      grip: 1.55,
+      weight: 0.7,
+      airRot: 1.62,
+      fuel: 2.2,
       color: "#9d4edd",
       art: ART({
         tire: 1.5,
@@ -668,12 +663,11 @@
       tier: "神话",
       costK: 40,
       price: 75500,
-      drv: 1.6,
-      spd: 1.35,
-      grp: 2.1,
-      wgt: 2.4,
-      air: 0.42,
-      tank: 2.6,
+      speed: 1.35,
+      grip: 2.1,
+      weight: 2.4,
+      airRot: 0.42,
+      fuel: 2.6,
       color: "#f4a261",
       art: ART({
         tire: 7.5,
@@ -705,12 +699,11 @@
       tier: "稀有",
       costK: 5,
       price: 6500,
-      drv: 1.9,
-      spd: 2.1,
-      grp: 1.35,
-      wgt: 0.6,
-      air: 0.95,
-      tank: 1.6,
+      speed: 2.1,
+      grip: 1.35,
+      weight: 0.6,
+      airRot: 0.95,
+      fuel: 1.6,
       color: "#ff70a6",
       art: ART({
         tire: 2.6,
@@ -744,12 +737,11 @@
       tier: "神话",
       costK: 40,
       price: 120000,
-      drv: 2.4,
-      spd: 2.6,
-      grp: 3,
-      wgt: 1.2,
-      air: 0.55,
-      tank: 3.4,
+      speed: 2.6,
+      grip: 3,
+      weight: 1.2,
+      airRot: 0.55,
+      fuel: 3.4,
       color: "#00ff9d",
       art: ART({
         tire: 6.2,
@@ -783,12 +775,11 @@
       tier: "普通",
       costK: 1,
       price: 4000,
-      drv: 1.05,
-      spd: 1.05,
-      grp: 1.05,
-      wgt: 0.95,
-      air: 1.124,
-      tank: 1.2,
+      speed: 1.05,
+      grip: 1.05,
+      weight: 0.95,
+      airRot: 1.124,
+      fuel: 1.2,
       color: "#7a9e7e",
       art: ART({ tire: 2.6, spokes: 8, spokeW: 1.3, tube: 3.2, topDrop: 4, coil: 0.7, bar: "flat", saddleW: 11, helmR: 4.3, pose: POSE(1, 1, 2, 1, 0.5, -1) }),
       phys: P(0.95, 0.89, 1.1, 1.05, 15, 1.05, 1.25),
@@ -802,12 +793,11 @@
       tier: "稀有",
       costK: 5,
       price: 12000,
-      drv: 1.2,
-      spd: 0.95,
-      grp: 1.3,
-      wgt: 1.25,
-      air: 0.862,
-      tank: 1.35,
+      speed: 0.95,
+      grip: 1.3,
+      weight: 1.25,
+      airRot: 0.862,
+      fuel: 1.35,
       color: "#b07d4f",
       art: ART({ tire: 4.6, spokes: 6, spokeW: 1.9, tube: 5, topDrop: 0, coil: 1.5, bar: "wide", saddleW: 13, helmR: 4.4, vents: 2, pose: POSE(-1, -2, -1, -2, -0.5, -2.5) }),
       phys: P(1.25, 1.16, 0.9, 0.95, 19, 1.2, 1.15),
@@ -821,12 +811,11 @@
       tier: "普通",
       costK: 1,
       price: 5000,
-      drv: 1.3,
-      spd: 1.5,
-      grp: 1,
-      wgt: 0.9,
-      air: 1.22,
-      tank: 1.4,
+      speed: 1.5,
+      grip: 1,
+      weight: 0.9,
+      airRot: 1.22,
+      fuel: 1.4,
       color: "#a8d8e8",
       art: ART({ tire: 2.2, rim: false, spokes: 10, spokeW: 1, tube: 2.8, topDrop: 5, coil: 0.5, bar: "drop", saddleW: 9, helmR: 4.8, peak: false, pose: POSE(3, 3, 4, 3, 1, 2) }),
       phys: P(0.9, 0.82, 1.25, 1.1, 14, 1.3, 1.55),
@@ -840,12 +829,11 @@
       tier: "史诗",
       costK: 12,
       price: 26000,
-      drv: 1.25,
-      spd: 1.15,
-      grp: 1.75,
-      wgt: 1.35,
-      air: 0.8,
-      tank: 1.5,
+      speed: 1.15,
+      grip: 1.75,
+      weight: 1.35,
+      airRot: 0.8,
+      fuel: 1.5,
       color: "#ff8fab",
       art: ART({ tire: 5, spokes: 5, spokeW: 2.2, tube: 5.6, topDrop: -1, coil: 1.6, bar: "wide", saddleW: 14, helmR: 4.4, vents: 3, pose: POSE(-2, -3, -2, -3, -0.8, -3) }),
       phys: P(1.35, 1.25, 0.88, 0.92, 19, 1.25, 1.4),
@@ -859,12 +847,11 @@
       tier: "稀有",
       costK: 5,
       price: 5500,
-      drv: 1.45,
-      spd: 1.6,
-      grp: 1.1,
-      wgt: 0.88,
-      air: 1.163,
-      tank: 1.25,
+      speed: 1.6,
+      grip: 1.1,
+      weight: 0.88,
+      airRot: 1.163,
+      fuel: 1.25,
       color: "#cd5c5c",
       art: ART({ tire: 2.8, rim: false, spokes: 12, spokeW: 1.1, tube: 3.4, topDrop: 6, coil: 1.2, bar: "drop", saddleW: 8, helmR: 4.9, pose: POSE(4, 4, 5, 4, 1.5, 3) }),
       phys: P(0.88, 0.86, 1.3, 1.15, 17, 1.45, 1.7),
@@ -878,12 +865,11 @@
       tier: "普通",
       costK: 1,
       price: 3500,
-      drv: 1.35,
-      spd: 1.55,
-      grp: 0.95,
-      wgt: 0.78,
-      air: 1.667,
-      tank: 1.3,
+      speed: 1.55,
+      grip: 0.95,
+      weight: 0.78,
+      airRot: 1.667,
+      fuel: 1.3,
       color: "#66f0c8",
       art: ART({ tire: 1.8, rim: false, spokes: 13, spokeW: 0.8, tube: 2.4, topDrop: 7, coil: 0.4, bar: "drop", saddleW: 7, helmR: 5, peak: false, pose: POSE(5, 6, 6, 5, 2, 4) }),
       phys: P(0.78, 0.6, 1.35, 1.15, 13, 1.35, 1.5),
@@ -897,12 +883,11 @@
       tier: "稀有",
       costK: 5,
       price: 9000,
-      drv: 1.75,
-      spd: 1.7,
-      grp: 1,
-      wgt: 1.02,
-      air: 1.099,
-      tank: 1.8,
+      speed: 1.7,
+      grip: 1,
+      weight: 1.02,
+      airRot: 1.099,
+      fuel: 1.8,
       color: "#d4a373",
       art: ART({ tire: 2.6, spokes: 10, spokeW: 1.2, tube: 3.2, topDrop: 4, coil: 0.6, bar: "drop", saddleW: 9, helmR: 4.6, pose: POSE(3, 3, 4, 3, 1, 2) }),
       phys: P(1.02, 0.91, 1.4, 1.25, 15, 1.5, 1.9),
@@ -916,12 +901,11 @@
       tier: "传说",
       costK: 25,
       price: 47500,
-      drv: 1.7,
-      spd: 1.4,
-      grp: 1.85,
-      wgt: 2,
-      air: 0.595,
-      tank: 2.1,
+      speed: 1.4,
+      grip: 1.85,
+      weight: 2,
+      airRot: 0.595,
+      fuel: 2.1,
       color: "#ff6b35",
       art: ART({ tire: 6.4, spokes: 5, spokeW: 2.6, tube: 7.2, topDrop: -2, coil: 2.1, bar: "wide", saddleW: 16, helmR: 5, vents: 4, pose: POSE(-3, -5, -2, -5, -1, -5) }),
       phys: P(2, 1.68, 0.8, 0.88, 22, 1.7, 1.45),
@@ -935,12 +919,11 @@
       tier: "传说",
       costK: 25,
       price: 55500,
-      drv: 1.55,
-      spd: 1.3,
-      grp: 2.05,
-      wgt: 2.2,
-      air: 0.526,
-      tank: 2.3,
+      speed: 1.3,
+      grip: 2.05,
+      weight: 2.2,
+      airRot: 0.526,
+      fuel: 2.3,
       color: "#8ecae6",
       art: ART({ tire: 7, spokes: 4, spokeW: 2.9, tube: 7.8, topDrop: -3, coil: 2.4, bar: "wide", saddleW: 17, helmR: 5.2, vents: 4, pose: POSE(-3, -6, -2, -6, -1, -6) }),
       phys: P(2.2, 1.9, 0.75, 0.85, 23, 1.55, 1.35),
@@ -954,12 +937,11 @@
       tier: "史诗",
       costK: 12,
       price: 22000,
-      drv: 1.6,
-      spd: 1.75,
-      grp: 1.35,
-      wgt: 1.15,
-      air: 0.909,
-      tank: 1.9,
+      speed: 1.75,
+      grip: 1.35,
+      weight: 1.15,
+      airRot: 0.909,
+      fuel: 1.9,
       color: "#4cc9f0",
       art: ART({ tire: 3.6, spokes: 9, spokeW: 1.6, tube: 4.4, topDrop: 5, coil: 1.1, bar: "drop", saddleW: 11, helmR: 4.7, vents: 2, pose: POSE(2, 2, 3, 2, 1, 1) }),
       phys: P(1.15, 1.1, 1.2, 1.1, 18, 1.6, 1.8),
@@ -973,12 +955,11 @@
       tier: "传说",
       costK: 25,
       price: 65000,
-      drv: 1.85,
-      spd: 1.6,
-      grp: 1.55,
-      wgt: 2.3,
-      air: 0.5,
-      tank: 2.2,
+      speed: 1.6,
+      grip: 1.55,
+      weight: 2.3,
+      airRot: 0.5,
+      fuel: 2.2,
       color: "#2b2d42",
       art: ART({ tire: 6.8, spokes: 6, spokeW: 2.7, tube: 7.5, topDrop: 1, coil: 2.3, bar: "wide", saddleW: 16, helmR: 5.1, vents: 3, pose: POSE(-3, -5, -2, -5, -1, -5) }),
       phys: P(2.3, 2, 0.7, 0.82, 24, 1.85, 1.55),
@@ -992,12 +973,11 @@
       tier: "传说",
       costK: 25,
       price: 41000,
-      drv: 1.9,
-      spd: 1.35,
-      grp: 2.15,
-      wgt: 2.5,
-      air: 0.441,
-      tank: 2.5,
+      speed: 1.35,
+      grip: 2.15,
+      weight: 2.5,
+      airRot: 0.441,
+      fuel: 2.5,
       color: "#6c757d",
       art: ART({ tire: 7.8, spokes: 4, spokeW: 3.2, tube: 8.6, topDrop: -4, coil: 2.8, bar: "wide", saddleW: 19, helmR: 5.6, vents: 5, pose: POSE(-4, -7, -3, -7, -1, -7) }),
       phys: P(2.5, 2.27, 0.68, 0.8, 25, 1.3, 1.25),
@@ -1011,12 +991,11 @@
       tier: "史诗",
       costK: 12,
       price: 14000,
-      drv: 1.65,
-      spd: 2.05,
-      grp: 1.15,
-      wgt: 0.97,
-      air: 1.149,
-      tank: 2.2,
+      speed: 2.05,
+      grip: 1.15,
+      weight: 0.97,
+      airRot: 1.149,
+      fuel: 2.2,
       color: "#ffb703",
       art: ART({ tire: 2, rim: false, spokes: 12, spokeW: 0.9, tube: 2.6, topDrop: 7, coil: 0.3, bar: "drop", saddleW: 8, helmR: 5.1, peak: false, pose: POSE(6, 7, 7, 6, 2.5, 4.5) }),
       phys: P(0.97, 0.87, 1.5, 1.3, 14, 1.65, 2.1),
@@ -1030,12 +1009,11 @@
       tier: "传说",
       costK: 25,
       price: 35000,
-      drv: 2,
-      spd: 1.75,
-      grp: 1.7,
-      wgt: 2.1,
-      air: 0.472,
-      tank: 2.4,
+      speed: 1.75,
+      grip: 1.7,
+      weight: 2.1,
+      airRot: 0.472,
+      fuel: 2.4,
       color: "#3a0ca3",
       art: ART({ tire: 6, spokes: 8, spokeW: 2.4, tube: 7, topDrop: 3, coil: 2, bar: "wide", saddleW: 15, helmR: 5.2, vents: 3, pose: POSE(-2, -4, -2, -4, -0.5, -4) }),
       phys: P(2.1, 2.12, 0.75, 0.86, 22, 1.4, 1.6),
@@ -1049,12 +1027,11 @@
       tier: "史诗",
       costK: 12,
       price: 16500,
-      drv: 1.55,
-      spd: 2,
-      grp: 1.4,
-      wgt: 0.82,
-      air: 1.493,
-      tank: 2,
+      speed: 2,
+      grip: 1.4,
+      weight: 0.82,
+      airRot: 1.493,
+      fuel: 2,
       color: "#adb5bd",
       art: ART({ tire: 1.7, rim: false, spokes: 14, spokeW: 0.7, tube: 2.2, topDrop: 8, coil: 0.2, bar: "drop", saddleW: 6.5, helmR: 5.2, peak: false, pose: POSE(7, 8, 8, 7, 3, 5) }),
       phys: P(0.82, 0.67, 1.55, 1.35, 12, 1.55, 2.15),
@@ -1068,12 +1045,11 @@
       tier: "神话",
       costK: 40,
       price: 103000,
-      drv: 1.95,
-      spd: 1.9,
-      grp: 1.9,
-      wgt: 1.9,
-      air: 0.559,
-      tank: 2.3,
+      speed: 1.9,
+      grip: 1.9,
+      weight: 1.9,
+      airRot: 0.559,
+      fuel: 2.3,
       color: "#212529",
       art: ART({ tire: 5.2, spokes: 9, spokeW: 2.2, tube: 6.4, topDrop: 2, coil: 1.8, bar: "wide", saddleW: 15, helmR: 5.3, peak: true, vents: 4, pose: POSE(-1, -3, -1, -3, 0, -3) }),
       phys: P(1.9, 1.79, 0.82, 0.9, 21, 1.95, 1.75),
@@ -1087,12 +1063,11 @@
       tier: "史诗",
       costK: 12,
       price: 30000,
-      drv: 2.1,
-      spd: 2.3,
-      grp: 1.6,
-      wgt: 0.92,
-      air: 1.235,
-      tank: 2.6,
+      speed: 2.3,
+      grip: 1.6,
+      weight: 0.92,
+      airRot: 1.235,
+      fuel: 2.6,
       color: "#ff006e",
       art: ART({ tire: 2, rim: false, spokes: 13, spokeW: 0.9, tube: 2.8, topDrop: 9, coil: 0.35, bar: "drop", saddleW: 7, helmR: 5.3, peak: false, vents: 2, pose: POSE(8, 9, 9, 8, 3.5, 6) }),
       phys: P(0.92, 0.81, 1.5, 1.3, 13, 2, 2.5),
@@ -1106,12 +1081,11 @@
       tier: "神话",
       costK: 40,
       price: 88000,
-      drv: 2.2,
-      spd: 1.8,
-      grp: 2.1,
-      wgt: 2.6,
-      air: 0.38,
-      tank: 2.9,
+      speed: 1.8,
+      grip: 2.1,
+      weight: 2.6,
+      airRot: 0.38,
+      fuel: 2.9,
       color: "#03045e",
       art: ART({ tire: 8.2, spokes: 4, spokeW: 3.4, tube: 9.2, topDrop: -4, coil: 3, bar: "wide", saddleW: 20, helmR: 5.8, vents: 5, pose: POSE(-4, -8, -3, -8, -1, -8) }),
       phys: P(2.6, 2.63, 0.65, 0.78, 26, 1.6, 1.5),
@@ -1127,7 +1101,6 @@
     lastMode: "level",
     rankedAdvanced: false,
     slot: 0,
-    lvIdx: 0,
     selLevel: 0,
     unlocked: 0,
     stars: [],
@@ -1161,10 +1134,10 @@
     cam: { x: 0, y: 0, zoom: 1.4, shake: 0 },
     phys: {
       theme: 0,
-      minY: 0,
-      GRAV: 750,
-      TRACTION: 1,
-      MAXV: topSpeedOf(VEHICLES[0], { engine: 0, tire: 0, frame: 0, susp: 0 }),
+      floorY: 0,
+      gravity: 750,
+      traction: 1,
+      topSpeed: topSpeedOf(VEHICLES[0], { engine: 0, tire: 0, frame: 0, susp: 0 }),
       crashMargin: 4,
       fuel: 1,
       fuelMax: 1,
@@ -1176,9 +1149,9 @@
       gen: 0,
       crashed: false,
       crashTimer: 0,
-      clearing: false,
+      settling: false,
       lastSafeX: START_X,
-      runCrashed: false,
+      hasCrashed: false,
       combo: 0,
       comboStamp: -99,
       wheelieDist: 0,
@@ -1201,24 +1174,22 @@
     rear: { x: 0, y: 0, px: 0, py: 0 },
     front: { x: 0, y: 0, px: 0, py: 0 },
     head: { x: 0, y: 0, px: 0, py: 0 },
-    axleR: { x: 0, y: 0, px: 0, py: 0 },
-    axleF: { x: 0, y: 0, px: 0, py: 0 },
+    axleRear: { x: 0, y: 0, px: 0, py: 0 },
+    axleFront: { x: 0, y: 0, px: 0, py: 0 },
     grounded: 0,
     speed: 0,
     boostT: 0,
-    wheelRear: 0,
-    wheelFront: 0,
-    locked: true,
+    wheelAngleRear: 0,
+    wheelAngleFront: 0,
+    awaitingStart: true,
     spawnX: START_X,
-    frontGr: false,
-    rearGr: false,
     squash: 0,
     squashVel: 0,
     lastAng: 0,
     angVel: 0,
     angRate: 0,
-    wheelStep: 0,
-    wheelStepF: 0,
+    wheelStepRear: 0,
+    wheelStepFront: 0,
     rotAcc: 0,
     headUp: -1,
     wheelRot: { rear: 0, front: 0 },
@@ -1231,13 +1202,13 @@
     solverResid: 0,
     penetration: 0
   };
-  bike.pts = [bike.rear, bike.front, bike.head, bike.axleR, bike.axleF];
+  bike.pts = [bike.rear, bike.front, bike.head, bike.axleRear, bike.axleFront];
   var world = {
     coins: [],
     canisters: [],
     boosts: [],
-    decoTree: [],
-    decoRock: [],
+    decoFore: [],
+    decoBack: [],
     particles: [],
     freeGenX: 0,
     prepFuel: 0,
@@ -3916,7 +3887,7 @@
   function hillY(x) {
     if (store.mode === "free")
       return freeHill(x);
-    return levelHillY(levelAt(store.lvIdx), x);
+    return levelHillY(levelAt(store.selLevel), x);
   }
   function groundY(x) {
     return hillY(x);
@@ -3996,6 +3967,7 @@
   }
   var ULTRA_SPEED_N = 10;
   var ULTRA_RPM_N = 8;
+  var ULTRA_TORQUE_N = 10;
   var WARP_ACC = 6.5;
   var WARP_V_CAP = 90;
   function activeMode(veh) {
@@ -4025,12 +3997,12 @@
       W.y = wheelY;
       W.py = wheelY;
       W._vy = 0;
-      const A = wk === "rear" ? b.axleR : b.axleF;
+      const A = wk === "rear" ? b.axleRear : b.axleFront;
       A.y = wheelY;
       A.py = wheelY;
       A._vy = 0;
     }
-    const midY = (b.axleR.y + b.axleF.y) * 0.5;
+    const midY = (b.axleRear.y + b.axleFront.y) * 0.5;
     b.head.y = midY - SEAT_H;
     b.head.py = midY - SEAT_H;
     b.head._vy = 0;
@@ -4042,13 +4014,14 @@
     const rb = deriveRigidBody(v);
     store.phys.rb = rb;
     store.phys.susp = deriveSuspension(v, up);
-    store.phys.mu = deriveFriction(store.phys.TRACTION, v, up);
+    store.phys.mu = deriveFriction(store.phys.traction, v, up);
     store.phys.wheelI = wheelInertia(rb.mW);
-    store.phys.MAXVPhys = store.phys.MAXV;
+    store.phys.baseTopSpeed = store.phys.topSpeed;
+    store.phys.airDragK = AIR_DRAG_K;
     const mode = activeMode(v);
     if (mode === "surge") {
       store.phys.rpmK *= ULTRA_RPM_N;
-      store.phys.MAXV = Math.max(store.phys.MAXV, ULTRA_SPEED_N * REF_SPEED);
+      store.phys.topSpeed = Math.max(store.phys.topSpeed, ULTRA_SPEED_N * REF_SPEED);
       store.phys.mu = Math.max(store.phys.mu, 4);
       store.phys.airDragK = AIR_DRAG_K * 0.1;
     } else if (mode === "railgun") {
@@ -4056,16 +4029,13 @@
       store.phys.rpmK *= ULTRA_RPM_N * 1.6;
       store.phys.mu = Math.max(store.phys.mu, 3.4);
       store.phys.airDragK = AIR_DRAG_K * 0.2;
-      store.phys.MAXV = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N;
+      store.phys.topSpeed = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N;
     } else if (mode === "absolut") {
-      store.phys.MAXV = ABSOLUT_V;
+      store.phys.topSpeed = ABSOLUT_V;
       store.phys.airDragK = ABSOLUT_DRAG_K;
     } else if (mode === "warp") {
-      store.phys.MAXV = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N * 1.6;
+      store.phys.topSpeed = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N * 1.6;
       store.phys.rpmK *= 2;
-    }
-    if (!mode || mode === "stable" || mode === "shield" || mode === "phase") {
-      store.phys.airDragK = 0;
     }
     bike.rb = rb;
     bindMasses(rb);
@@ -4074,8 +4044,8 @@
     const b = bike;
     b.rear.m = rb.mW;
     b.front.m = rb.mW;
-    b.axleR.m = rb.mR;
-    b.axleF.m = rb.mF;
+    b.axleRear.m = rb.mR;
+    b.axleFront.m = rb.mF;
     b.head.m = rb.mH;
     for (const p of b.pts)
       p.im = p.m > 0 ? 1 / p.m : 0;
@@ -4084,15 +4054,15 @@
     const b = bike;
     const L = WHEELBASE;
     b.spawnX = x;
-    b.locked = true;
+    b.awaitingStart = true;
     const yR = groundY(x) - WHEEL_R;
     const yF = groundY(x + L) - WHEEL_R;
     const ang = Math.atan2(yF - yR, L);
     for (const [p, px, py] of [
       [b.rear, x, yR],
       [b.front, x + L, yF],
-      [b.axleR, x, yR],
-      [b.axleF, x + L, yF]
+      [b.axleRear, x, yR],
+      [b.axleFront, x + L, yF]
     ]) {
       p.x = px;
       p.y = py;
@@ -4111,12 +4081,10 @@
     b.head._vy = 0;
     b.grounded = 0;
     b.speed = 0;
-    b.wheelRear = 0;
-    b.wheelFront = 0;
-    b.wheelStep = 0;
-    b.wheelStepF = 0;
-    b.frontGr = false;
-    b.rearGr = false;
+    b.wheelAngleRear = 0;
+    b.wheelAngleFront = 0;
+    b.wheelStepRear = 0;
+    b.wheelStepFront = 0;
     b.squash = 0;
     b.squashVel = 0;
     b.angVel = 0;
@@ -4124,10 +4092,10 @@
     b.lastAng = ang;
     b.penetration = 0;
     b._impactV = 0;
-    const ux = b.axleF.x - b.axleR.x;
-    const uy = b.axleF.y - b.axleR.y;
+    const ux = b.axleFront.x - b.axleRear.x;
+    const uy = b.axleFront.y - b.axleRear.y;
     const d = Math.hypot(ux, uy) || 0.0001;
-    const cross = ux / d * (b.head.y - b.axleR.y) - uy / d * (b.head.x - b.axleR.x);
+    const cross = ux / d * (b.head.y - b.axleRear.y) - uy / d * (b.head.x - b.axleRear.x);
     b.headUp = Math.sign(cross) || -1;
     b.wheelRot.rear = 0;
     b.wheelRot.front = 0;
@@ -4155,7 +4123,7 @@
     if (run.crashed)
       return;
     run.crashed = true;
-    run.runCrashed = true;
+    run.hasCrashed = true;
     run.crashTimer = STUN_TIME;
     run.combo = 0;
     const P = store.phys;
@@ -4187,11 +4155,11 @@
     }
   }
   function frameOf(b) {
-    const a = Math.atan2(b.axleF.y - b.axleR.y, b.axleF.x - b.axleR.x);
+    const a = Math.atan2(b.axleFront.y - b.axleRear.y, b.axleFront.x - b.axleRear.x);
     return { a, tx: Math.cos(a), ty: Math.sin(a), dx: -Math.sin(a), dy: Math.cos(a) };
   }
   function bodyLow(b) {
-    return b.head.y > (b.axleR.y + b.axleF.y) * 0.5;
+    return b.head.y > (b.axleRear.y + b.axleFront.y) * 0.5;
   }
   function systemVel(b) {
     let vx = 0, vy = 0, mt = 0;
@@ -4204,10 +4172,10 @@
   }
   function applySuspension(b, susp, sub) {
     const fr = frameOf(b);
-    const FN_MAX = FN_MAX_K * store.phys.rb.mTot * store.phys.GRAV;
+    const FN_MAX = FN_MAX_K * store.phys.rb.mTot * store.phys.gravity;
     for (const wk of WHEELS) {
       const W = b[wk];
-      const A = wk === "rear" ? b.axleR : b.axleF;
+      const A = wk === "rear" ? b.axleRear : b.axleFront;
       const s = (W.x - A.x) * fr.dx + (W.y - A.y) * fr.dy;
       const c = clamp(-s, -susp.ext, susp.travel);
       const cRate = -((W._vx - A._vx) * fr.dx + (W._vy - A._vy) * fr.dy);
@@ -4230,16 +4198,16 @@
       b.susp[wk].v = cRate;
     }
   }
-  function applyDrive(b, P, sub, drv, brk, rev) {
+  function applyDrive(b, P, sub, throttle, brk, rev) {
     if (isUltraStable()) {
       const sv = systemVel(b);
       const vx = sv.vx;
       let target = 0;
       if (rev)
-        target = -(P.MAXVPhys || P.MAXV) * REV_SPEED;
-      else if (drv)
-        target = P.MAXV * 0.95;
-      const maxAcc = P.MAXV * 2;
+        target = -(P.baseTopSpeed || P.topSpeed) * REV_SPEED;
+      else if (throttle)
+        target = P.topSpeed * 0.95;
+      const maxAcc = P.topSpeed * 2;
       const dv = clamp(target - vx, -maxAcc * sub, maxAcc * sub);
       if (dv !== 0)
         for (const p of b.pts)
@@ -4251,14 +4219,14 @@
     }
     const veh = VEHICLES[store.currentVehicle];
     const IW = P.wheelI || wheelInertia(P.rb.mW);
-    const wheelieTau = wheelieTauOf(P.rb.mTot, P.GRAV);
+    const wheelieTau = wheelieTauOf(P.rb.mTot, P.gravity);
     for (const wk of WHEELS) {
       let w = b.wheelRot[wk];
       let tau = 0;
-      if (wk === "rear" && drv)
-        tau += clamp(torqueAt(veh, w, drv, P.torquePeak, P.rpmK || 1), -wheelieTau, wheelieTau);
+      if (wk === "rear" && throttle)
+        tau += clamp(torqueAt(veh, w, throttle, P.torquePeak, P.rpmK || 1), -wheelieTau, wheelieTau);
       if (wk === "rear" && rev && !brk) {
-        const base = P.MAXVPhys || P.MAXV;
+        const base = P.baseTopSpeed || P.topSpeed;
         const wantW = -base * REV_SPEED / WHEEL_R;
         tau += clamp(clamp((wantW - w) * IW / sub, -wheelieTau, wheelieTau), -wheelieTau, wheelieTau);
       }
@@ -4328,7 +4296,7 @@
   }
   function solveContacts(b, P, mu, sub, first, geo) {
     const IW = P.wheelI || wheelInertia(P.rb.mW);
-    const FN_MAX = FN_MAX_K * P.rb.mTot * P.GRAV;
+    const FN_MAX = FN_MAX_K * P.rb.mTot * P.gravity;
     if (first)
       b.grounded = 0;
     for (const wk of WHEELS) {
@@ -4425,9 +4393,9 @@
     let resid = 0;
     let iters = 0;
     for (let it = 0;it < SOLVER_ITERS; it++) {
-      let r = Math.max(velDistance(b.axleR, b.axleF, L), velDistance(b.axleR, b.head, Lr), velDistance(b.axleF, b.head, Lr));
+      let r = Math.max(velDistance(b.axleRear, b.axleFront, L), velDistance(b.axleRear, b.head, Lr), velDistance(b.axleFront, b.head, Lr));
       for (const wk of WHEELS) {
-        const A = wk === "rear" ? b.axleR : b.axleF;
+        const A = wk === "rear" ? b.axleRear : b.axleFront;
         r = Math.max(r, velLateral(b[wk], A, fr, sub), velTravel(b[wk], A, fr, susp));
       }
       solveContacts(b, P, mu, sub, it === 0, geo);
@@ -4464,11 +4432,11 @@
     return Math.abs(e);
   }
   function projHeadSide(b) {
-    const dx = b.axleF.x - b.axleR.x;
-    const dy = b.axleF.y - b.axleR.y;
+    const dx = b.axleFront.x - b.axleRear.x;
+    const dy = b.axleFront.y - b.axleRear.y;
     const d = Math.hypot(dx, dy) || 0.0001;
     const ux = dx / d, uy = dy / d;
-    const signed = ux * (b.head.y - b.axleR.y) - uy * (b.head.x - b.axleR.x);
+    const signed = ux * (b.head.y - b.axleRear.y) - uy * (b.head.x - b.axleRear.x);
     const want = b.headUp > 0 ? 1 : -1;
     if (signed * want >= 0)
       return 0;
@@ -4524,10 +4492,10 @@
     const Lr = Math.hypot(L * 0.5, SEAT_H);
     const fr = frameOf(b);
     for (let it = 0;it < SOLVER_ITERS; it++) {
-      let resid = Math.max(projDistance(b.axleR, b.axleF, L), projDistance(b.axleR, b.head, Lr), projDistance(b.axleF, b.head, Lr));
+      let resid = Math.max(projDistance(b.axleRear, b.axleFront, L), projDistance(b.axleRear, b.head, Lr), projDistance(b.axleFront, b.head, Lr));
       resid = Math.max(resid, projHeadSide(b));
       for (const wk of WHEELS) {
-        const A = wk === "rear" ? b.axleR : b.axleF;
+        const A = wk === "rear" ? b.axleRear : b.axleFront;
         resid = Math.max(resid, projSuspension(b[wk], A, fr, susp));
       }
       if (resid < SOLVER_TOL)
@@ -4574,8 +4542,8 @@
     const veh = VEHICLES[store.currentVehicle];
     const inv = veh.phys ? veh.phys.inertia : 1;
     if (inp) {
-      const wMax = AIR_ROT_MAX * veh.air / inv;
-      const a = AIR_ROT_ACC * veh.air / inv;
+      const wMax = AIR_ROT_MAX * veh.airRot / inv;
+      const a = AIR_ROT_ACC * veh.airRot / inv;
       b.angVel = clamp(b.angVel + inp * a * sub, -wMax, wMax);
     }
     if (!b.angVel)
@@ -4632,7 +4600,7 @@
       const sub = SUB_DT;
       syncVel(b, sub);
       for (const p of b.pts)
-        p._vy += P.GRAV * sub;
+        p._vy += P.gravity * sub;
       airControl(b, sub);
       applySuspension(b, SUS, sub);
       applyDrive(b, P, sub, drvK, brkK, rev);
@@ -4641,10 +4609,10 @@
         const svw = systemVel(b);
         let add;
         if (warp) {
-          add = clamp((P.MAXV * 0.98 - svw.vx) * WARP_ACC * sub, 0, WARP_V_CAP * sub);
+          add = clamp((P.topSpeed * 0.98 - svw.vx) * WARP_ACC * sub, 0, WARP_V_CAP * sub);
         } else {
-          const grip = P.mu * P.rb.mTot * P.GRAV * REAR_LOAD;
-          add = clamp((P.MAXV - svw.vx) * ABSOLUT_SERVO_ACC * sub, 0, grip * ABSOLUT_THRUST_K * sub);
+          const grip = P.mu * P.rb.mTot * P.gravity * REAR_LOAD;
+          add = clamp((P.topSpeed - svw.vx) * ABSOLUT_SERVO_ACC * sub, 0, grip * ABSOLUT_THRUST_K * sub);
         }
         for (const p of b.pts)
           p._vx += add;
@@ -4663,8 +4631,6 @@
       integrate(b, sub);
       solvePositions(b, SUS);
     }
-    b.rearGr = b.fn.rear > 0;
-    b.frontGr = b.fn.front > 0;
     for (const wk of WHEELS)
       b.wheelAcc[wk] = (b.wheelRot[wk] - prevSpin[wk]) / DT;
     if (isUltraStable() && !run.crashed)
@@ -4681,10 +4647,10 @@
     b.squash += (target - b.squash) * 0.4;
     if (Math.abs(b.squash) < 0.004)
       b.squash = 0;
-    b.wheelStep = b.wheelRot.rear * DT;
-    b.wheelStepF = b.wheelRot.front * DT;
-    b.wheelRear = (b.wheelRear + b.wheelStep) % TAU;
-    b.wheelFront = (b.wheelFront + b.wheelStepF) % TAU;
+    b.wheelStepRear = b.wheelRot.rear * DT;
+    b.wheelStepFront = b.wheelRot.front * DT;
+    b.wheelAngleRear = (b.wheelAngleRear + b.wheelStepRear) % TAU;
+    b.wheelAngleFront = (b.wheelAngleFront + b.wheelStepFront) % TAU;
     b.speed = lerp(b.speed, systemVel(b).vx, 0.12);
     const ang1 = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
     b.angRate = wrapAngle(ang1 - ang0) / DT;
@@ -4699,9 +4665,9 @@
   // src/physics/fuel.js
   function drainFuel(dt) {
     const v = VEHICLES[store.currentVehicle];
-    const L = store.mode === "level" ? levelAt(store.lvIdx) : null;
+    const L = store.mode === "level" ? levelAt(store.selLevel) : null;
     const fk = L ? L.fuelK : 1;
-    const use = (0.005 * v.wgt + (key.right && !store.run.crashed ? 0.021 * v.wgt : 0)) * fk;
+    const use = (0.005 * v.weight + (key.right && !store.run.crashed ? 0.021 * v.weight : 0)) * fk;
     store.phys.fuel = Math.max(0, store.phys.fuel - use * dt);
   }
   function refuel(frac) {
@@ -4781,7 +4747,7 @@
     const mx = (bike.rear.x + bike.front.x) / 2;
     const my = (bike.rear.y + bike.front.y) / 2;
     const zoom = cam.zoom;
-    const spdN = clamp(Math.abs(bike.speed) / Math.max(1, store.phys.MAXV), 0, 1);
+    const spdN = clamp(Math.abs(bike.speed) / Math.max(1, store.phys.topSpeed), 0, 1);
     const lead = Math.sign(bike.speed) * spdN * view.W * 0.055 / zoom;
     const maxX = store.mode === "free" ? Infinity : Math.max(0, store.finishX - view.W * 0.45 / zoom);
     const targetX = clamp(mx + lead - view.W * 0.38 / zoom, 0, maxX);
@@ -4805,6 +4771,13 @@
   }
 
   // src/game/progress.js
+  function clearedCount() {
+    let n = 0;
+    for (let i = 0;i < LEVELS.length; i++)
+      if ((store.stars[i] || 0) >= 1)
+        n++;
+    return n;
+  }
   function hasAch(id) {
     return store.achGot.includes(id);
   }
@@ -4934,8 +4907,8 @@
   ]);
   function buildDeco(L, rng) {
     const T0 = THEMES[segmentThemeAt(L, 0)] || THEMES[0];
-    const trees = [];
-    const rocks = [];
+    const fore = [];
+    const back = [];
     for (let x = 220;x < L.len - 120; x += 55 + rng() * 150) {
       const gi = groundInfo(x);
       if (gi.y === Infinity)
@@ -4948,11 +4921,11 @@
       const di = pickDecoIndex(T.deco, rng());
       const item = { x, y: gi.y, kind: T.deco[di], s, ph };
       if (TALL_DECO.has(item.kind))
-        trees.push(item);
+        fore.push(item);
       else
-        rocks.push(item);
+        back.push(item);
     }
-    return { trees, rocks };
+    return { fore, back };
   }
   function buildHazards(L, rng) {
     const out = [];
@@ -5008,17 +4981,17 @@
     }
     return out;
   }
-  function buildLevel(idx) {
-    store.lvIdx = idx;
+  function buildLevel() {
+    const idx = store.selLevel;
     const L = levelAt(idx);
     const rng = mulberry32(1000 + idx * 97);
     store.finishX = L.len;
     const th0 = segmentThemeAt(L, 0);
     store.phys.theme = th0;
-    store.phys.minY = measureBottomY(L);
+    store.phys.floorY = measureBottomY(L);
     const T = THEMES[th0] || THEMES[0];
-    store.phys.GRAV = T.g;
-    store.phys.TRACTION = T.traction;
+    store.phys.gravity = T.g;
+    store.phys.traction = T.traction;
     const coins = [];
     for (let i = 0;i < L.coinN; i++) {
       const cx = L.len * 0.15 + i * (L.len * 0.75) / (L.coinN - 1);
@@ -5026,11 +4999,11 @@
     }
     const vh = VEHICLES[store.currentVehicle];
     const up = getUp();
-    const fMax = vh.tank * (1 + 0.004 * up.frame);
-    const kIdle = 0.005 * vh.wgt / fMax * L.fuelK;
-    const kFull = 0.021 * vh.wgt / fMax * L.fuelK;
+    const fMax = vh.fuel * (1 + 0.004 * up.frame);
+    const kIdle = 0.005 * vh.weight / fMax * L.fuelK;
+    const kFull = 0.021 * vh.weight / fMax * L.fuelK;
     const kAvg = kIdle + 0.62 * (kFull - kIdle);
-    const vAvg = 0.78 * REF_SPEED * vh.spd;
+    const vAvg = 0.78 * REF_SPEED * vh.speed;
     const range = vAvg / kAvg;
     const need = L.len / range;
     const M = 1.3 - 0.25 * L.ramp;
@@ -5088,8 +5061,8 @@
     world.coins = coins;
     world.canisters = canisters;
     world.boosts = boosts;
-    world.decoTree = deco.trees;
-    world.decoRock = deco.rocks;
+    world.decoFore = deco.fore;
+    world.decoBack = deco.back;
     world.hazards = hazards;
     world.gates = buildGates(L);
     world.jumps = buildJumps(L);
@@ -5100,26 +5073,25 @@
       return false;
     const T = THEMES[th] || THEMES[0];
     store.phys.theme = th;
-    store.phys.GRAV = T.g;
-    store.phys.TRACTION = T.traction;
+    store.phys.gravity = T.g;
+    store.phys.traction = T.traction;
     return true;
   }
   function freeInit(theme) {
     store.mode = "free";
-    store.lvIdx = 0;
     store.finishX = Infinity;
     setFreeSeed(Math.random() * 4294967295 >>> 0);
     const picked = Number.isInteger(theme) ? freeThemeOf(theme) : rollFreeTheme();
     const th = picked;
     store.phys.theme = th;
-    store.phys.minY = 0;
-    store.phys.GRAV = (THEMES[th] || THEMES[0]).g;
-    store.phys.TRACTION = (THEMES[th] || THEMES[0]).traction;
+    store.phys.floorY = 0;
+    store.phys.gravity = (THEMES[th] || THEMES[0]).g;
+    store.phys.traction = (THEMES[th] || THEMES[0]).traction;
     world.coins = [];
     world.canisters = [];
     world.boosts = [];
-    world.decoTree = [];
-    world.decoRock = [];
+    world.decoFore = [];
+    world.decoBack = [];
     world.hazards = [];
     world.gates = [];
     world.jumps = [];
@@ -5164,17 +5136,17 @@
         const T = THEMES[store.phys.theme] || THEMES[0];
         const deco = T.deco && T.deco.length ? T.deco : THEMES[0].deco;
         if (rng() < 0.6) {
-          world.decoTree.push({ x: x + 60, y: groundY(x + 60), kind: deco[0], s: 0.7 + rng() * 0.7, ph: rng() * 6.28 });
+          world.decoFore.push({ x: x + 60, y: groundY(x + 60), kind: deco[0], s: 0.7 + rng() * 0.7, ph: rng() * 6.28 });
         } else if (rng() < 0.3) {
-          world.decoRock.push({ x: x + 90, y: groundY(x + 90), kind: deco[1] || deco[0], s: 0.7 + rng() * 0.7, ph: rng() * 6.28 });
+          world.decoBack.push({ x: x + 90, y: groundY(x + 90), kind: deco[1] || deco[0], s: 0.7 + rng() * 0.7, ph: rng() * 6.28 });
         }
       }
       world.freeGenX += Math.round(170 + diffS * 260 + rng() * 280);
     }
     world.coins = world.coins.filter((c) => c.x > store.cam.x - 400 && !c.taken);
     world.canisters = world.canisters.filter((c) => c.x > store.cam.x - 400 && !c.taken);
-    world.decoTree = world.decoTree.filter((c) => c.x > store.cam.x - 500);
-    world.decoRock = world.decoRock.filter((c) => c.x > store.cam.x - 500);
+    world.decoFore = world.decoFore.filter((c) => c.x > store.cam.x - 500);
+    world.decoBack = world.decoBack.filter((c) => c.x > store.cam.x - 500);
   }
   function emitRideDust() {
     const b = bike;
@@ -5353,7 +5325,7 @@
     const list = store.racers;
     if (!list || !list.length)
       return;
-    const L = levelAt(store.lvIdx);
+    const L = levelAt(store.selLevel);
     const playerX = (bike.rear.x + bike.front.x) / 2;
     for (const ai of list) {
       if (ai.finish)
@@ -5415,9 +5387,9 @@
     run.gen++;
     run.crashed = false;
     run.crashTimer = 0;
-    run.clearing = false;
+    run.settling = false;
     run.lastSafeX = START_X;
-    run.runCrashed = false;
+    run.hasCrashed = false;
     run.combo = 0;
     run.comboStamp = -99;
     run.wheelieDist = 0;
@@ -5497,7 +5469,7 @@
       if (store.mode === "free")
         freeInit(opt && opt.theme);
       else
-        buildLevel(store.selLevel);
+        buildLevel();
       applyUpgrades();
       beginRun();
     } catch (err) {
@@ -5511,7 +5483,7 @@
   function nextLevel() {
     if (store.mode === "level" && store.selLevel < LEVELS.length - 1) {
       store.selLevel++;
-      buildLevel(store.selLevel);
+      buildLevel();
       applyUpgrades();
       resetBike(START_X);
       resetRunState();
@@ -5583,7 +5555,7 @@
   function finishLevel() {
     const run = store.run;
     const L = levelAt(store.selLevel);
-    run.clearing = true;
+    run.settling = true;
     const result = {
       title: "\uD83C\uDFC1 本局结束",
       stars: undefined,
@@ -5638,7 +5610,7 @@
       result.goldGain = L.goldBase;
       result.time = elapsed;
       result.nextLabel = store.selLevel < LEVELS.length - 1 ? "下一关 →" : "\uD83C\uDFE0 返回菜单";
-      if (!run.runCrashed)
+      if (!run.hasCrashed)
         checkAch("noc");
       if (run.totalCoins > 0 && run.coinGot >= run.totalCoins)
         checkAch("coinall");
@@ -5665,7 +5637,7 @@
   }
   function gateFail() {
     const run = store.run;
-    run.clearing = true;
+    run.settling = true;
     run.failed = true;
     showToast("⏱ 限时门超时！本关判负（不计星、不解锁）", 1800);
     setTimeout(runGuard(() => {
@@ -5674,7 +5646,7 @@
     }), 1800);
   }
   function belowWorld(midX, midY) {
-    const base = store.mode === "free" ? groundY(midX) + 800 : store.phys.minY + 800;
+    const base = store.mode === "free" ? groundY(midX) + 800 : store.phys.floorY + 800;
     return midY > base;
   }
   function update(dt) {
@@ -5689,9 +5661,9 @@
     const run = store.run;
     const b = bike;
     const P = store.phys;
-    if (b.locked) {
+    if (b.awaitingStart) {
       if (key.right || key.left) {
-        b.locked = false;
+        b.awaitingStart = false;
       } else {
         pinBike();
         return;
@@ -5700,7 +5672,7 @@
     store.time += dt;
     stepPhysics();
     if (store.mode === "level") {
-      syncSegmentTheme(levelAt(store.lvIdx), (b.rear.x + b.front.x) / 2);
+      syncSegmentTheme(levelAt(store.selLevel), (b.rear.x + b.front.x) / 2);
     }
     updateParticles();
     emitRideDust();
@@ -5731,7 +5703,7 @@
       handleFuelEmpty();
     if (toKmh(Math.abs(b.speed)) >= 30)
       checkAch("fast");
-    if (store.mode === "level" && !run.clearing) {
+    if (store.mode === "level" && !run.settling) {
       if (!run.crashed && world.hazards.length) {
         const spd = Math.abs(bikeVx());
         for (const h of world.hazards) {
@@ -5757,8 +5729,8 @@
     }
     if (store.mode === "race" || store.mode === "ranked") {
       raceUpdate(dt);
-      if (store.raceAI && store.raceAI.finish && !run.clearing) {
-        run.clearing = true;
+      if (store.raceAI && store.raceAI.finish && !run.settling) {
+        run.settling = true;
         if (store.mode === "ranked") {
           settleRanked(false);
         } else {
@@ -5769,7 +5741,7 @@
     }
     if (store.mode === "free") {
       freeFill();
-    } else if (!run.clearing && mid > store.finishX) {
+    } else if (!run.settling && mid > store.finishX) {
       finishLevel();
     }
   }
@@ -6638,7 +6610,7 @@
   function drawDeco(cx, cy) {
     const q = getQuality();
     const shade = q === "medium" || q === "high";
-    for (const t of world.decoTree) {
+    for (const t of world.decoFore) {
       const sx = t.x - cx;
       if (sx < -60 || sx > view.W + 60)
         continue;
@@ -6656,7 +6628,7 @@
       drawDecoItem(sx, t.y - cy, t.kind, t.s, t.ph);
     }
     ctx.globalAlpha = 0.62;
-    for (const r of world.decoRock) {
+    for (const r of world.decoBack) {
       const sx = r.x - cx;
       if (sx < -60 || sx > view.W + 60)
         continue;
@@ -7370,7 +7342,7 @@
   var CRANK_FLOOR = 2.2;
   var crank = 0;
   function crankPhase(b, dt) {
-    const wheelRps = Math.abs(b.wheelStep) / DT;
+    const wheelRps = Math.abs(b.wheelStepRear) / DT;
     crank += Math.max(wheelRps, CRANK_FLOOR) * CRANK_RATIO * dt;
     if (crank > 1e4)
       crank -= 1e4;
@@ -7439,7 +7411,7 @@
     const tire = A.tire || 3;
     const spokes = A.spokes || 6;
     const inner = WHEEL_R - tire * 0.5 - 1.2;
-    for (const [off, spin, step] of [[-hw, P.wheelRear, P.wheelStep], [hw, P.wheelFront, P.wheelStepF]]) {
+    for (const [off, spin, step] of [[-hw, P.wheelAngleRear, P.wheelStepRear], [hw, P.wheelAngleFront, P.wheelStepFront]]) {
       ctx.strokeStyle = token("obj-bike-tire");
       ctx.lineWidth = tire;
       ctx.beginPath();
@@ -7876,7 +7848,7 @@
     const cy = r.y + r.h / 2;
     const rad = r.w / 2 - 4;
     const kmh = toKmh(Math.abs(bike.speed));
-    const maxK = toKmh(store.phys.MAXV) || 1;
+    const maxK = toKmh(store.phys.topSpeed) || 1;
     const frac = clamp(kmh / maxK, 0, 1);
     ctx.beginPath();
     ctx.roundRect(r.x, r.y, r.w, r.h, r.w / 2);
@@ -8142,13 +8114,6 @@
       if (store.state === "play" || store.state === "pause" || store.state === "ended")
         showMenu();
     });
-  }
-  function clearedCount() {
-    let n = 0;
-    for (let i = 0;i < LEVELS.length; i++)
-      if ((store.stars[i] || 0) >= 1)
-        n++;
-    return n;
   }
   function renderHeroSummary() {
     if (!heroSummary)
@@ -8487,7 +8452,7 @@
     return Math.max(0, Math.min(N_BRANCHES - 1, last));
   }
   function finaleTile() {
-    const done = clearedCount2();
+    const done = clearedCount();
     const total = LEVELS.length;
     const unlocked = done >= total;
     const cleared = store.progress.finaleDone === true;
@@ -8665,13 +8630,6 @@
     }
     return LEVELS_PER_BRANCH - 1;
   }
-  function clearedCount2() {
-    let n = 0;
-    for (let i = 0;i < LEVELS.length; i++)
-      if ((store.stars[i] || 0) >= 1)
-        n++;
-    return n;
-  }
   function fmtClock(sec) {
     const s = Math.max(0, Math.round(Number(sec) || 0));
     const m = Math.floor(s / 60);
@@ -8809,6 +8767,11 @@
       attrs: ok ? `data-act="ranked" data-adv="${advanced ? 1 : 0}"` : ""
     });
   }
+  function paceRange(advanced) {
+    const lo = rankedAIScale(0, advanced).toFixed(2);
+    const hi = rankedAIScale(RATING_TOP, advanced).toFixed(2);
+    return `${lo}× → ${hi}×`;
+  }
   function renderRankedPanel() {
     const P = store.progress;
     const rating = P.rating || 0;
@@ -8821,15 +8784,11 @@
     const cur = rankIndexOf(rating);
     const curR = RANKS[cur] || RANKS[0];
     const starOf = (r, i) => {
-      if (i === 0 || rating < r.min)
+      if (rating < r.min)
         return 0;
       if (i < cur)
         return 3;
-      if (rating >= r.min * 2)
-        return 3;
-      if (rating >= r.min * 1.5)
-        return 2;
-      return 1;
+      return rankStars(rating);
     };
     const lo = curR.min;
     const hi = next ? next.min : curR.min * 2;
@@ -8847,8 +8806,8 @@
     ${next ? `<div class="rankSub">下一段「${next.name}」还差 <b>${next.min - rating}</b> 分 · 升段奖励 \uD83E\uDE99 ${next.reward.toLocaleString()}</div>` : `<div class="rankSub">段位表已刷满 · 累计升段奖励 \uD83E\uDE99 ${RANKS.reduce((a, r) => a + r.reward, 0).toLocaleString()}</div>`}
   </div>
   ${invited ? "" : `<div class="panelNote">\uD83D\uDD12 尚未收到排位赛邀请：通关「最终任务」后解锁</div>`}
-  ${rankedTier(false, "普通排位赛", "AI 配速随段位分提升（三星节奏的 0.70× → 1.25×）", invited, invited ? `胜 +${gainN} / 负 -${RATING_LOSS}` : "未解锁")}
-  ${rankedTier(true, "高级排位赛", "AI 配速显著更高，可超过三星节奏（0.95× → 1.41×）", invited && adv, !invited ? "未解锁" : adv ? `胜 +${gainA} / 负 -${RATING_LOSS_ADVANCED}` : `段位分 ≥ ${RATING_ADVANCED}（${RANKS.find((r) => r.min === RATING_ADVANCED).name}）解锁（当前 ${rating}）`)}
+  ${rankedTier(false, "普通排位赛", `AI 配速随段位分提升（三星节奏的 ${paceRange(false)}）`, invited, invited ? `胜 +${gainN} / 负 -${RATING_LOSS}` : "未解锁")}
+  ${rankedTier(true, "高级排位赛", `AI 配速显著更高，可超过三星节奏（${paceRange(true)}）`, invited && adv, !invited ? "未解锁" : adv ? `胜 +${gainA} / 负 -${RATING_LOSS_ADVANCED}` : `段位分 ≥ ${RATING_ADVANCED}（${RANKS.find((r) => r.min === RATING_ADVANCED).name}）解锁（当前 ${rating}）`)}
   <details class="rankLadder"><summary>段位阶梯（${RANKS.length} 段 × 3 星）</summary>
     <ol class="rankList">${RANKS.map((r, i) => {
       const got = starOf(r, i);
@@ -8897,10 +8856,11 @@
   <button class="btn backBtn" data-act="back">返回</button>`);
   }
   var MAXED = { engine: MAX_LV, tire: MAX_LV, frame: MAX_LV, susp: MAX_LV };
+  var BY_PRICE = VEHICLES.map((v, i) => ({ v, i })).sort((a, b) => a.v.price - b.v.price || a.i - b.i);
   function renderGaragePanel() {
     panelKind = "garage";
     showPanel(`<div class="modeTitle">\uD83C\uDFCD️ 车库</div>
-  ${VEHICLES.map((v, i) => {
+  ${BY_PRICE.map(({ v, i }) => {
       const own = store.ownedVehicles.includes(i);
       const sel = i === store.currentVehicle;
       return card({
@@ -8908,7 +8868,7 @@
         icon: v.icon,
         title: v.name,
         sub: v.desc,
-        meta: `速度${Math.round(v.spd * 100)}% · 驱动${Math.round(v.drv * 100)}% · 抓地${Math.round(v.grp * 100)}% · 旋转${Math.round(v.air * 100)}% · 油箱${Math.round(v.tank * 100)}% · 满级极速 <b>${Math.round(toKmh(topSpeedOf(v, MAXED)))} km/h</b>`,
+        meta: `速度${Math.round(v.speed * 100)}% · 驱动${Math.round(v.phys.torque * 100)}% · 抓地${Math.round(v.grip * 100)}% · 旋转${Math.round(v.airRot * 100)}% · 油箱${Math.round(v.fuel * 100)}% · 满级极速 <b>${Math.round(toKmh(topSpeedOf(v, MAXED)))} km/h</b>`,
         right: sel ? "✅ 使用中" : own ? "已拥有" : "\uD83E\uDE99 " + v.price.toLocaleString(),
         interactive: true,
         selected: sel,
@@ -9293,7 +9253,7 @@
     const h = deriveHandling(veh, up);
     const s = deriveSuspension(veh, up);
     return {
-      极速: Math.round(toKmh(h.MAXV)),
+      极速: Math.round(toKmh(h.topSpeed)),
       扭矩: Math.round(h.torquePeak / 1000),
       抓地: Math.round(deriveFriction(1, veh, up) * 100) / 100,
       抗摔: Math.round(crashTiltDeg(h.crashMargin)),
@@ -9609,7 +9569,7 @@
   initDonate();
   initSettings();
   initInput({ restart, togglePause, toggleShop });
-  buildLevel(0);
+  buildLevel();
   applyUpgrades();
   resetBike(START_X);
   var stepper = new Stepper((dt) => {

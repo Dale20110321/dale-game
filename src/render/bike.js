@@ -50,22 +50,22 @@ function drawCoils(hw, hr, mdy, sq2, k) {
 //  踩踏相位
 // ============================================================
 //
-// ★ 为什么不能继续用 `bike.wheelRear * 系数` 派生踏相：
-//   1) wheelRear 是**回绕**相位（每 TAU 跳一次），乘系数会在回绕点产生可见的跳变；
+// ★ 为什么不能继续用 `bike.wheelAngleRear * 系数` 派生踏相：
+//   1) wheelAngleRear 是**回绕**相位（每 TAU 跳一次），乘系数会在回绕点产生可见的跳变；
 //      旧实现因为轮子只按真实转速的 1% 画、绕一圈要几千帧，跳变小到看不出来。
 //   2) 车轮现在按真实轮速积分，高速每帧走 50~60°，直接当踏频就是 **9 转/秒**，
 //      两条腿像风车一样甩。
-//   改用 wheelStep（每帧的无回绕增量）累加：踏频与车速挂钩，但比例固定在
+//   改用 wheelStepRear（每帧的无回绕增量）累加：踏频与车速挂钩，但比例固定在
 //   真实公路骑行区间（极速约 85 rpm），且与帧率无关。
 const CRANK_RATIO = 0.155; // 踏频 / 轮速
 const CRANK_FLOOR = 2.2;   // rad/s（折算成轮速）：停住时腿也别完全僵死
 let crank = 0;
 
 function crankPhase(b, dt) {
-  // wheelStep 是**一个定步**的转角，而 drawBike 每渲染帧跑一次，两者不是一回事。
+  // wheelStepRear 是**一个定步**的转角，而 drawBike 每渲染帧跑一次，两者不是一回事。
   // 换算成 rad/s 再乘本帧真实 dt，144Hz / 30Hz 上踏频才一致
   // （写死 ×60 的话 144Hz 会快 2.4 倍）。
-  const wheelRps = Math.abs(b.wheelStep) / DT;
+  const wheelRps = Math.abs(b.wheelStepRear) / DT;
   crank += Math.max(wheelRps, CRANK_FLOOR) * CRANK_RATIO * dt;
   if (crank > 1e4) crank -= 1e4; // 长时间运行后的数值收敛，避免精度流失
   return crank;
@@ -151,7 +151,7 @@ export function drawBike(dt = 1 / 60) {
   const tire = A.tire || 3;
   const spokes = A.spokes || 6;
   const inner = WHEEL_R - tire * 0.5 - 1.2; // 胎内侧 = 内圈与辐条的落点
-  for (const [off, spin, step] of [[-hw, P.wheelRear, P.wheelStep], [hw, P.wheelFront, P.wheelStepF]]) {
+  for (const [off, spin, step] of [[-hw, P.wheelAngleRear, P.wheelStepRear], [hw, P.wheelAngleFront, P.wheelStepFront]]) {
     ctx.strokeStyle = token("obj-bike-tire");
     ctx.lineWidth = tire;
     ctx.beginPath();

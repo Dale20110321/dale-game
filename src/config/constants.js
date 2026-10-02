@@ -25,24 +25,20 @@ export const PX_PER_M = 100;
 export const toM = (px) => px / PX_PER_M;
 /** px/s → km/h */
 export const toKmh = (pxs) => (pxs / PX_PER_M) * 3.6;
-/** km/h → px/s（成就阈值等反向换算） */
-export const kmhToPxs = (kmh) => (kmh / 3.6) * PX_PER_M;
-
 // ---------------- 手感缩放（用户反馈"走得太快"后整体降速） ----------------
 /** 极速降为原来的 2/3 */
 export const SPD_K = 2 / 3;
 /**
- * 平路参考极速公式的基准（半标度）与原始上限。
- * ★ 只用于 REF_SPEED（危险段限速 / AI 巡航基准 / 成就阈值），**不再**用于 MAXV。
- *   MAXV 现在是"真实可达极速"，由 topSpeedOf 解算得到（见下）——两者用途不同，别混用。
+ * 平路参考极速公式的基准（半标度）。
+ * ★ 只用于 REF_SPEED（危险段限速 / AI 巡航基准 / 成就阈值），**不再**用于 topSpeed。
+ *   topSpeed 现在是"真实可达极速"，由 topSpeedOf 解算得到（见下）——两者用途不同，别混用。
  */
-export const MAXV_RAW_CAP = 350;
 export const MAXV_BASE = 130;
 
 /**
  * 平路基准极速（0 升级、spd=1）真实 px/s —— 油耗模型反推、AI 基准都用它。
  * 这是"半标度 → 真实 px/s"的一个合法出口，其它地方禁止再写裸 *SUB。
- * ★ 第 3 期后它只是**标定参考**：真实极速由"扭矩曲线 × 传动 − 空气阻力"平衡自然产生，
+ * ★ 后它只是**标定参考**：真实极速由"扭矩曲线 × 传动 − 空气阻力"平衡自然产生，
  *   不再有任何直接改写速度的钳制。
  */
 export const REF_SPEED = MAXV_BASE * SUB * SPD_K;
@@ -62,7 +58,7 @@ export const ENGINE_TORQUE_UP = 0.010;
 export const ENGINE_RPM_UP = 0.018;
 /** 轮胎：每级顺带提升扭矩（抓地才是硬上限，扭矩堆太多只会空转翻车） */
 export const TIRE_TORQUE_UP = 0.006;
-/** 轮胎：每级提升摩擦系数 μ（+0.6%/级 —— 乘进 grp，地板与冰面按同一比例缩放） */
+/** 轮胎：每级提升摩擦系数 μ（+0.6%/级 —— 乘进 grip，地板与冰面按同一比例缩放） */
 export const FRICTION_TIRE_UP = 0.006;
 
 /**
@@ -111,7 +107,7 @@ export const REAR_LOAD = 0.62;
  */
 export const WHEELIE_K = 2.0;
 /** 由车辆质量与重力算出驱动扭矩的翘头上限（与 physics/bike.js 引用同一常量） */
-export const wheelieTauOf = (mTot, GRAV) => mTot * GRAV * WHEELBASE * 0.5 * WHEELIE_K;
+export const wheelieTauOf = (mTot, gravity) => mTot * gravity * WHEELBASE * 0.5 * WHEELIE_K;
 /** 真实可达极速的二分搜索上界（px/s），只作数值安全兜底 */
 export const TOP_SPEED_CAP = 12000;
 
@@ -123,7 +119,7 @@ export const TOP_SPEED_CAP = 12000;
  * avail 随 v 单调不增（扭矩曲线衰减 + 抓地上限），loss 随 v 单调增 ⇒ 交点唯一，
  * 二分即可，无需迭代收敛。返回的是"真能跑到的速度"，不是手填的标称值。
  *
- * ★ 为什么必须解算而不是写公式：MAXV 是 HUD 表盘满量程、相机前推量、倒挡目标速的
+ * ★ 为什么必须解算而不是写公式：topSpeed 是 HUD 表盘满量程、相机前推量、倒挡目标速的
  *   共同基准。过去它由 `MAXV_BASE + 2.5·engine + 1.5·tire` 算出，满级涨 2.7 倍，
  *   而**真实极速只涨 32%** —— 于是升级后表盘指针反而越走越低（Lv25 就顶格），
  *   相机也不再前推，玩家自然觉得"升级没感觉"。现在表盘满量程 = 真能跑到的速度，
@@ -134,12 +130,12 @@ export function topSpeedOf(veh, up) {
   const u = up || {};
   const eng = u.engine || 0;
   const tire = u.tire || 0;
-  const k = p.mass || (veh && veh.wgt) || 1;
+  const k = p.mass || (veh && veh.weight) || 1;
   const mTot = (M_TOT + 2 * M_W) * k;
   const peak = TORQUE_PEAK_BASE * (p.torque || 1) *
     (1 + ENGINE_TORQUE_UP * eng + TIRE_TORQUE_UP * tire);
   const rpmK = 1 + ENGINE_RPM_UP * eng;
-  const mu = FRICTION_BASE * ((veh && veh.grp) || 1) * (1 + FRICTION_TIRE_UP * tire);
+  const mu = FRICTION_BASE * ((veh && veh.grip) || 1) * (1 + FRICTION_TIRE_UP * tire);
   const grip = mu * mTot * GRAV_BASE * REAR_LOAD;
   const roll = ROLL_RES_K * mTot * GRAV_BASE;
   // ★ 限幅必须计入：驱动扭矩一旦越过 wheelieTau，多出来的部分只会把车掀翻而不是加速。
@@ -169,25 +165,25 @@ export function deriveHandling(veh, up) {
     torquePeak: TORQUE_PEAK_BASE * (p.torque || 1) *
       (1 + ENGINE_TORQUE_UP * (u.engine || 0) + TIRE_TORQUE_UP * (u.tire || 0)),
     /** 刹车扭矩峰值 */
-    brakePeak: BRAKE_TORQUE_BASE * veh.grp * (1 + 0.016 * (u.tire || 0) + 0.010 * (u.frame || 0)),
+    brakePeak: BRAKE_TORQUE_BASE * veh.grip * (1 + 0.016 * (u.tire || 0) + 0.010 * (u.frame || 0)),
     /**
      * 扭矩曲线的转速域倍率：引擎等级抬高红线（Lv100 ≈ ×2.8）。
      * 这才是"引擎升级真的变快"的来源 —— 峰值扭矩在平坦路面早就撞上抓地上限了。
      */
     rpmK: 1 + ENGINE_RPM_UP * (u.engine || 0),
     /** 参考极速（HUD 表盘满量程 / 相机前推 / 倒挡目标速）：**平路真实可达极速** */
-    MAXV: topSpeedOf(veh, up),
+    topSpeed: topSpeedOf(veh, up),
     // 倒立摔车判定的容差基准（越大越抗摔）：由车架升级 + 车重推导。
-    // 0 级（up.frame=0, veh.wgt=1）≈ 4，满级（up.frame=100）≈ 14。
-    crashMargin: Math.min(14, 2 + 0.1 * (u.frame || 0) + veh.wgt * 2),
-    fuelMax: veh.tank * (1 + 0.004 * (u.frame || 0)),
+    // 0 级（up.frame=0, veh.weight=1）≈ 4，满级（up.frame=100）≈ 14。
+    crashMargin: Math.min(14, 2 + 0.1 * (u.frame || 0) + veh.weight * 2),
+    fuelMax: veh.fuel * (1 + 0.004 * (u.frame || 0)),
   };
 }
 
 // ---------------- 空中姿态控制（骑手摆身） ----------------
 // 定标依据：滞空 0.9s 全程按键，累计转角 ≥ 2π（完成一圈空翻）
 //   θ(T) = ½·A·T²（角冲量持续施加，角速度上限 W），T=0.9, A=40 → 16 rad ≥ 2π
-// 松键后角速度**保持**（Task 7：角动量守恒，不做人为衰减），落地由地面吸收。
+// 松键后角速度**保持**（角动量守恒，不做人为衰减），落地由地面吸收。
 export const AIR_ROT_MAX = 9.5;
 export const AIR_ROT_ACC = 40;
 // ---------------- 刚体质量与几何 ----------------
@@ -203,7 +199,7 @@ export const I_BODY =
 /** 单轮（相对）质量：车轮是独立刚体，由悬挂弹簧连到车架 */
 export const M_W = 0.22;
 
-// ---------------- 刚体 / 悬挂 / 摩擦 / 扭矩（第 3 期 Task 1.1 / 1.3） ----------------
+// ---------------- 刚体 / 悬挂 / 摩擦 / 扭矩 ----------------
 // 全部物理常量集中在这一个文件；标度换算也只允许在这里发生。
 
 /** 约束求解：残差收敛阈值（px）与迭代上限（收敛判据驱动，不是写死 6 次） */
@@ -221,7 +217,7 @@ export const HEAD_R = 18;
 /**
  * 数值异常兜底速度上限（px/s）。**只用于数值异常**（NaN 前兆 / 极端穿透），
  * 正常游玩中不该触发 —— 它是最后一道数值防线，不是性能保护。
- * 它替代了旧模型里 VSPD_CAP / DOWNHILL_K / MAXV 那种"每帧改写速度"的硬夹断。
+ * 它替代了旧模型里 VSPD_CAP / DOWNHILL_K / topSpeed 那种"每帧改写速度"的硬夹断。
  *
  * ★ 为什么是 20000 而不是当初的 6000：究极终局车满级跑 350 km/h 时，
  *   一个物理帧（DT=1/60）要走 9722/60 = **162px**，相当于 4.3 个轴距 ——
@@ -255,7 +251,7 @@ export const SUSP_K_UP = 0.02;
 export const SUSP_C_UP = 0.03;
 export const SUSP_TRAVEL_UP = 0.08;
 
-/** 摩擦：基准摩擦系数（× 场景 traction × 车辆 grp × 轮胎升级） */
+/** 摩擦：基准摩擦系数（× 场景 traction × 车辆 grip × 轮胎升级） */
 export const FRICTION_BASE = 1.15;
 
 /** 刹车扭矩基准（远大于驱动扭矩：刹车本来就比加速猛） */
@@ -293,7 +289,7 @@ const c01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
  */
 export function deriveRigidBody(veh) {
   const p = (veh && veh.phys) || {};
-  const k = p.mass || (veh && veh.wgt) || 1;
+  const k = p.mass || (veh && veh.weight) || 1;
   const inertia = p.inertia || 1;
   return {
     k,
@@ -324,7 +320,7 @@ export function deriveSuspension(veh, up) {
 /** 由场景抓地 + 车辆 + 轮胎升级推导摩擦系数 μ */
 export function deriveFriction(traction, veh, up) {
   const t = (up && up.tire) || 0;
-  return FRICTION_BASE * (traction || 1) * ((veh && veh.grp) || 1) * (1 + FRICTION_TIRE_UP * t);
+  return FRICTION_BASE * (traction || 1) * ((veh && veh.grip) || 1) * (1 + FRICTION_TIRE_UP * t);
 }
 
 /**
@@ -359,7 +355,7 @@ export const STUN_TIME = 1.1;
 // ---------------- 倒挡 ----------------
 /** 挂入倒挡的速度门槛（px/s）：↓ 在此之上先当刹车用，停稳后才挂挡（避免高速硬挂） */
 export const REV_ENTER_V = 24;
-/** 倒车极速（占 MAXV 的比例）：自行车倒着推不快，够用即可 */
+/** 倒车极速（占 topSpeed 的比例）：自行车倒着推不快，够用即可 */
 export const REV_SPEED = 0.3;
 /** 出生点 x */
 export const START_X = 40;
@@ -407,7 +403,6 @@ export const upCost = (lv) => Math.round(10 + 1.2 * lv);
  * ★ 为什么是"乘在基准曲线上"而不是另写一条曲线：基准曲线一旦改动，
  *   全部档位的价格会同步跟着动，不会出现"某档还按老价卖"的漂移。
  *   目前只有究极终局车 costK=40（四项满级 1,129,600，是普通档的 40 倍）；
- *   后续 5 档分级会把 costK 扩展成完整的档位倍率表（spec Task 2.1/2.2）。
  */
 export const upCostOf = (veh, lv) => Math.round(upCost(lv) * ((veh && veh.costK) || 1));
 
@@ -477,7 +472,7 @@ export const SAVE_KEYS = {
   best: "bike_best",
   ach: "bike_ach",
   ver: "bike_v",
-  // Task 9/10 新增：进度阶梯 / 段位分 / 累计统计（上面 10 个键名一律不动）
+  // 新增：进度阶梯 / 段位分 / 累计统计（上面 10 个键名一律不动）
   prog: "bike_prog",
   rating: "bike_rating",
   stat: "bike_stat",

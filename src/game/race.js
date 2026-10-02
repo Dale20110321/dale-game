@@ -1,8 +1,8 @@
 // 比赛模式：AI 对手 / 排位赛 AI 强度
 //
 // 标定原则（据实机反馈修正）：AI 巡航速度必须与本关「三星要求均速 den3」挂钩，
-// 而不是与玩家极速 MAXV 挂钩。原因：MAXV 由车辆/升级决定，不随关卡变难而提高，
-// 旧实现 MAXV×(0.80~1.28)×(1+42%×ramp) 会让后期 AI 巡航速度达到三星节奏的 2~3 倍
+// 而不是与玩家极速 topSpeed 挂钩。原因：topSpeed 由车辆/升级决定，不随关卡变难而提高，
+// 旧实现 topSpeed×(0.80~1.28)×(1+42%×ramp) 会让后期 AI 巡航速度达到三星节奏的 2~3 倍
 // （实测玩家/AI 用时比从 1.00 恶化到 2.23），比赛必胜 → 对手"太快"。
 //
 //  · 普通比赛（race）：基准 0.68×den3（明显慢于三星节奏），并带「追赶」修正——
@@ -17,10 +17,6 @@ import { store, bike } from "../core/store.js";
 import { groundInfo } from "../physics/terrain.js";
 import { emitParticles } from "../render/particles.js";
 import { token } from "../config/ui-tokens.js";
-
-// 段位名与排位赛数值同为"配置层数据"，统一放 config/constants.js；
-// 这里转出以便排位赛相关测试只从一个模块取用。
-export { rankName } from "../config/constants.js";
 
 /** 普通比赛的基准配速（相对本关三星要求均速 den3） */
 export const RACE_PACE = 0.68;
@@ -81,8 +77,7 @@ export function catchupFactor(leadPx) {
 
 // 赛制配置与名次计算是**纯数据 / 纯函数**，放在 config/constants.js ——
 // render/hud.js 要显示"第 N / 6 名"，而 render/** 不许 import game/**（分层是单向的）。
-// 这里转出，game 层与测试都仍从 race.js 取。
-export { RACE_FORMATS, RACE_FORMAT_IDS, RACE_PLACE_GOLD, PLAYER_TEAM, RIVAL_TEAM, racePlaceOf, buildRacers } from "../config/constants.js";
+// 因此这里不再转出一份：各层一律直接从 config/constants.js 取，避免"同一个常量有两个出处"。
 
 /** 当前赛制（缺省 duel） */
 export function raceFormat() {
@@ -120,7 +115,7 @@ export function raceInit(format) {
 export function raceUpdate(dt) {
   const list = store.racers;
   if (!list || !list.length) return;
-  const L = levelAt(store.lvIdx);
+  const L = levelAt(store.selLevel);
   const playerX = (bike.rear.x + bike.front.x) / 2;
 
   for (const ai of list) {

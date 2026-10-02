@@ -3,7 +3,8 @@
 //  · 全部面板交互走 #modePanel 上的事件委托（面板 HTML 重绘不会丢监听）
 //  · 本模块只 import 其它层，绝不反向被 import
 import {
-  ACHS, toM, toKmh, rankName, MAX_LV, topSpeedOf, RATING_ADVANCED, RATING_PEAK,
+  ACHS, toM, toKmh, rankName, MAX_LV, topSpeedOf,
+  RATING_ADVANCED, RATING_PEAK, RATING_TOP,
   RANKS, rankStars, rankIndexOf, rankNextOf, rankDelta, RATING_LOSS, RATING_LOSS_ADVANCED,
   RACE_FORMATS, RACE_FORMAT_IDS, RACE_PLACE_GOLD,
 } from "../config/constants.js";
@@ -21,7 +22,8 @@ import {
 } from "../core/storage.js";
 import { showToast } from "../core/toast.js";
 import { initAudio, playCoinSound } from "../core/audio.js";
-import { hasAch } from "../game/progress.js";
+import { hasAch, clearedCount } from "../game/progress.js";
+import { rankedAIScale } from "../game/race.js";
 import { getQuality, setQuality, QUALITY, QUALITY_LABEL } from "../render/postfx.js";
 import { getRenderScale, setRenderScalePersisted, RENDER_SCALES, RENDER_SCALE_LABEL } from "../render/postfx.js";
 import { showPanel, hidePanel, showMenu, refreshMenuButtons } from "./menu.js";
@@ -66,7 +68,7 @@ export function initPanels(a) {
   if (panel) {
     panel.addEventListener("click", onPanelClick);
     panel.addEventListener("change", onPanelChange);
-    // 可访问性（Task 9.1）：带 role=button 的卡片支持 Enter / 空格触发
+    // 可访问性：带 role=button 的卡片支持 Enter / 空格触发
     panel.addEventListener("keydown", onPanelKeydown);
   }
   // 主页面（关卡地图）与弹出面板共用同一套 data-act 委托
@@ -350,12 +352,6 @@ function firstLockedK(bi) {
   return LEVELS_PER_BRANCH - 1;
 }
 
-/** 已通关关卡数（星级 ≥ 1） */
-function clearedCount() {
-  let n = 0;
-  for (let i = 0; i < LEVELS.length; i++) if ((store.stars[i] || 0) >= 1) n++;
-  return n;
-}
 
 // ---------------- 格式化 ----------------
 
@@ -518,31 +514,6 @@ function playCell(gi) {
 
 // ---------------- 13.2 最终任务 / 排位赛 ----------------
 
-/** 最终任务：72 关全通才解锁，未解锁时给出 x/72 进度提示 */
-export function renderFinalePanel() {
-  const done = clearedCount();
-  const total = LEVELS.length;
-  const unlocked = done >= total;
-  const cleared = store.progress.finaleDone === true;
-  const body = card({
-    cls: "vehCard",
-    icon: unlocked ? "🎯" : "🔒",
-    title: FINALE.name,
-    sub: `${Math.round(toM(FINALE.len))}m · 依次穿越 6 个场景 · 坡度 ${Math.round(FINALE.maxSlope)}° · 机制密度最高`,
-    meta: !unlocked
-      ? "通关全部 " + total + " 关后解锁（当前 " + done + "/" + total + "）"
-      : cleared ? "✅ 已通关，可重复挑战（点击开始）" : "已解锁 · 点击开始",
-    interactive: unlocked,
-    locked: !unlocked,
-    attrs: unlocked ? 'data-act="finaleStart"' : "",
-  });
-  showPanel(`<div class="modeTitle">🎯 最终任务</div>
-  ${body}
-  ${unlocked
-    ? `<div class="panelNote">通关最终任务 → 收到比赛邀请 → 解锁排位赛</div>`
-    : `<div class="panelNote">还需通关 ${total - done} 关（当前 ${done}/${total}）</div>`}
-  <button class="btn backBtn" data-act="back">返回</button>`);
-}
 
 function rankedTier(advanced, label, desc, ok, note) {
   return card({
@@ -555,6 +526,18 @@ function rankedTier(advanced, label, desc, ok, note) {
     locked: !ok,
     attrs: ok ? `data-act="ranked" data-adv="${advanced ? 1 : 0}"` : "",
   });
+}
+
+/**
+ * 排位赛 AI 配速区间文案：直接由 rankedAIScale() 算两端，不再手写数字。
+ *
+ * ★ 原来这里写死"0.70× → 1.25×"/"0.95× → 1.41×"，与该函数实际算出的
+ *   0.70→0.97 / 0.95→1.36 对不上 —— 面板在向玩家承诺一个 AI 达不到的速度上限。
+ */
+function paceRange(advanced) {
+  const lo = rankedAIScale(0, advanced).toFixed(2);
+  const hi = rankedAIScale(RATING_TOP, advanced).toFixed(2);
+  return `${lo}× → ${hi}×`;
 }
 
 /**
@@ -576,13 +559,17 @@ export function renderRankedPanel() {
   // 本段内的进度（1★ 门槛 → 下一段门槛，用来画条）
   const cur = rankIndexOf(rating);
   const curR = RANKS[cur] || RANKS[0];
-  // 阶梯表里每一段的显示星数：已离开的段视为满星（3），当前段按实际星数
+  // 阶梯表里每一段的显示星数：未达成不亮星、已离开的段满星、当前段按实际星数。
+  // ★ 当前段直接调 rankStars(rating) —— 这就是发星的那份口径，
+  //   所以阶梯上当前段那几颗星与上方标题里的星数必然一致。
+  //   旧实现在这里另写了一份"倍数口径"（门槛 ×1.5 / ×2），而 constants 早已改成
+  //   "段内跨度口径"（1★ 进段 / 2★ 段内过半 / 3★ 段内 85%）。两份口径算出的星数
+  //   在多处对不上（白银 620 分、钻石 1500 分、虚空 9500 分都分叉），
+  //   面板显示的星数与实际到手的不是一回事。现已只留一个事实来源。
   const starOf = (r, i) => {
-    if (i === 0 || rating < r.min) return 0;
+    if (rating < r.min) return 0;
     if (i < cur) return 3;
-    if (rating >= r.min * 2) return 3;
-    if (rating >= r.min * 1.5) return 2;
-    return 1;
+    return rankStars(rating);
   };
   const lo = curR.min;
   const hi = next ? next.min : curR.min * 2;
@@ -602,9 +589,9 @@ export function renderRankedPanel() {
       : `<div class="rankSub">段位表已刷满 · 累计升段奖励 🪙 ${RANKS.reduce((a, r) => a + r.reward, 0).toLocaleString()}</div>`}
   </div>
   ${invited ? "" : `<div class="panelNote">🔒 尚未收到排位赛邀请：通关「最终任务」后解锁</div>`}
-  ${rankedTier(false, "普通排位赛", "AI 配速随段位分提升（三星节奏的 0.70× → 1.25×）",
+  ${rankedTier(false, "普通排位赛", `AI 配速随段位分提升（三星节奏的 ${paceRange(false)}）`,
     invited, invited ? `胜 +${gainN} / 负 -${RATING_LOSS}` : "未解锁")}
-  ${rankedTier(true, "高级排位赛", "AI 配速显著更高，可超过三星节奏（0.95× → 1.41×）",
+  ${rankedTier(true, "高级排位赛", `AI 配速显著更高，可超过三星节奏（${paceRange(true)}）`,
     invited && adv,
     !invited ? "未解锁"
       : adv ? `胜 +${gainA} / 负 -${RATING_LOSS_ADVANCED}`
@@ -669,10 +656,20 @@ export function renderFreePanel() {
 /** 满级四项的升级表（车库卡片用它算"这台车满级能跑多快"） */
 const MAXED = { engine: MAX_LV, tire: MAX_LV, frame: MAX_LV, susp: MAX_LV };
 
+/**
+ * 车库展示顺序 = 车价升序。
+ *
+ * ★ 只在**渲染层**排序，VEHICLES 数组本身不动、渲染仍用原下标 i：
+ *   存档键 bike_veh / bike_owned 存的是数组下标，重排数据会让老存档刷新后
+ *   指向另一台车。价格相同的按原下标排，保证顺序稳定（否则每次渲染都可能跳动）。
+ */
+const BY_PRICE = VEHICLES.map((v, i) => ({ v, i }))
+  .sort((a, b) => a.v.price - b.v.price || a.i - b.i);
+
 export function renderGaragePanel() {
   panelKind = "garage";
   showPanel(`<div class="modeTitle">🏍️ 车库</div>
-  ${VEHICLES.map((v, i) => {
+  ${BY_PRICE.map(({ v, i }) => {
     const own = store.ownedVehicles.includes(i);
     const sel = i === store.currentVehicle;
     return card({
@@ -680,9 +677,11 @@ export function renderGaragePanel() {
       icon: v.icon,
       title: v.name,
       sub: v.desc,
-      // 末位是**满级真实可达极速**（表盘满量程同源）：三辆入门车与四辆变态车的差价
-      // 到底换来了多少速度，一眼可比，不必买回去试。
-      meta: `速度${Math.round(v.spd * 100)}% · 驱动${Math.round(v.drv * 100)}% · 抓地${Math.round(v.grp * 100)}% · 旋转${Math.round(v.air * 100)}% · 油箱${Math.round(v.tank * 100)}% · 满级极速 <b>${Math.round(toKmh(topSpeedOf(v, MAXED)))} km/h</b>`,
+      // 末位是**满级真实可达极速**（与 HUD 表盘满量程同源）：两台车的差价到底换来了
+      // 多少速度，一眼可比，不必买回去试。
+      // ★ 「驱动」读的是 phys.torque —— 物理真正用的就是它。曾经这里读另一个
+      //   字段，26 辆里有 8 辆与实际扭矩倍率对不上（终局车显示 240%、实际 300%）。
+      meta: `速度${Math.round(v.speed * 100)}% · 驱动${Math.round(v.phys.torque * 100)}% · 抓地${Math.round(v.grip * 100)}% · 旋转${Math.round(v.airRot * 100)}% · 油箱${Math.round(v.fuel * 100)}% · 满级极速 <b>${Math.round(toKmh(topSpeedOf(v, MAXED)))} km/h</b>`,
       right: sel ? "✅ 使用中" : own ? "已拥有" : "🪙 " + v.price.toLocaleString(),
       interactive: true,
       selected: sel,

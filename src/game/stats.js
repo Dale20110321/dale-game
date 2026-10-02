@@ -1,7 +1,6 @@
 // 单局统计与特技结算
-import { WHEEL_R, CAN_FUEL } from "../config/constants.js";
+import { WHEEL_R, CAN_FUEL, toM } from "../config/constants.js";
 import { store, bike, world } from "../core/store.js";
-import { toM } from "../config/constants.js";
 import { groundInfo } from "../physics/terrain.js";
 import { emitParticles } from "../render/particles.js";
 import { showCombo, showToast } from "../core/toast.js";
@@ -91,14 +90,4 @@ export function pickCanister(c) {
   emitParticles(c.x, c.y, 10, { color: token("warn"), spd: 1.4, life: 26, size: 3, grav: 0.02 });
   showToast(`⛽ +${Math.round(CAN_FUEL * 100)}%`, 650);
   playFuelSound();
-}
-
-/** 翘头里程显示（米） */
-export function wheelieMeters() {
-  return toM(store.run.maxWheelieDist);
-}
-
-/** 燃料百分比（0~1） */
-export function fuelPercent() {
-  return fuelRatio();
 }

@@ -9,7 +9,7 @@ export const freeHill = freeHillPure;
 /** 当前地形高度 */
 export function hillY(x) {
   if (store.mode === "free") return freeHillPure(x);
-  return levelHillY(levelAt(store.lvIdx), x);
+  return levelHillY(levelAt(store.selLevel), x);
 }
 
 export function groundY(x) {
@@ -31,7 +31,7 @@ export function groundInfo(x) {
   return { y: y0, m: (yR - yL) / (2 * e) };
 }
 
-// ---------------- 解析地形接口（第 3 期 Task 3.1） ----------------
+// ---------------- 解析地形接口 ----------------
 // 物理与渲染共用同一套采样。坐标约定：世界 y **向下为正**，因此：
 //   · 坡度 m = dy/dx：m>0 为下坡（屏幕上看地面往下走），m<0 为上坡
 //   · 曲率 d²y/dx² > 0 为「上凸坡顶」（腾空的几何条件），< 0 为凹谷
@@ -57,15 +57,6 @@ export function groundNormal(x) {
   return { x: m / d, y: -1 / d };
 }
 
-/** 地面曲率 d²y/dx²（>0 上凸坡顶 / <0 凹谷） */
-export function groundCurvature(x) {
-  const e = 6;
-  const y0 = groundY(x);
-  const yL = groundY(x - e);
-  const yR = groundY(x + e);
-  if (!isFinite(y0) || !isFinite(yL) || !isFinite(yR)) return 0;
-  return (yR - 2 * y0 + yL) / (e * e);
-}
 
 /** 在 [140, len-140] 内找一处最平缓的落点（油罐/重生点用） */
 export function canSpot(len, xx) {

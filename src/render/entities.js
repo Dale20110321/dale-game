@@ -11,7 +11,7 @@ import { getQuality } from "./postfx.js";
 export function drawDeco(cx, cy) {
   const q = getQuality();
   const shade = q === "medium" || q === "high";
-  for (const t of world.decoTree) {
+  for (const t of world.decoFore) {
     const sx = t.x - cx;
     if (sx < -60 || sx > view.W + 60) continue;
     if (shade) {
@@ -33,7 +33,7 @@ export function drawDeco(cx, cy) {
   // 三者叠加让纯装饰看上去就是"嵌在路面里的实心障碍"，玩家据此认定撞上必摔
   // （实际零碰撞，车直接穿过）。这里只改视觉层级，**不加任何碰撞体**。
   ctx.globalAlpha = 0.62;
-  for (const r of world.decoRock) {
+  for (const r of world.decoBack) {
     const sx = r.x - cx;
     if (sx < -60 || sx > view.W + 60) continue;
     drawDecoItem(sx, r.y - cy, r.kind, r.s * 0.8, r.ph);

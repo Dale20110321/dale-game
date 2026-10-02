@@ -308,7 +308,7 @@ function drawSpeedGauge(r) {
   const cy = r.y + r.h / 2;
   const rad = r.w / 2 - 4;
   const kmh = toKmh(Math.abs(bike.speed));
-  const maxK = toKmh(store.phys.MAXV) || 1;
+  const maxK = toKmh(store.phys.topSpeed) || 1;
   const frac = clamp(kmh / maxK, 0, 1);
 
   // 玻璃底盘

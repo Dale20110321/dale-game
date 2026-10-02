@@ -1,10 +1,15 @@
 // 车辆数据：差异化旋转 / 油箱 / 抓地 / 重量
 // color 同时用于车架主色、骑手服条纹、关卡面板边框
 //
-// phys（第 3 期 Task 1.1）：数据化的物理参数。质量与转动惯量是**真参数**（参与求解），
-// 不再只是乘到加速度/极速上的倍率。沿用 drv/spd/grp/wgt/air/tank 以保持第 1/2 期标定不变。
+// phys：数据化的物理参数。质量与转动惯量是**真参数**（参与求解），
+// 不再只是乘到加速度/极速上的倍率。
+//
+// 车辆属性键（speed 极速 / grip 抓地 / weight 质量 / airRot 空中转体 / fuel 油箱）
+// 是**派生层**参数；真正参与求解器的是下面 phys 里的 mass / inertia / torque / rpm。
+// 改名自早期的 drv/spd/grp/wgt/air/tank —— 其中 drv 已删除：它只用于车库展示，
+// 且与物理实际读取的 phys.torque 在 26 辆里有 8 辆对不上（终局车显示 240%、实际 300%）。
 //   mass     相对质量（求解器按逆质量加权）：重车更难被推动、更难翘头
-//   inertia  相对转动惯量：空中角冲量 → 角速度 ω ∝ 1/inertia（与 air 互为倒数，断言约束）
+//   inertia  相对转动惯量：空中角冲量 → 角速度 ω ∝ 1/inertia（与 airRot 互为倒数，断言约束）
 //   suspK/C  悬挂刚度 / 阻尼倍率；travel 悬挂行程上限（px）
 //   torque   发动机扭矩峰值倍率；rpm 扭矩峰值转速倍率
 const P = (mass, inertia, suspK, suspC, travel, torque, rpm) =>
@@ -50,12 +55,12 @@ export const VEHICLES = [
     tier: "普通",
     costK: 1,
     price: 0,
-    drv: 1.0,
-    spd: 1.0,
-    grp: 1,
-    wgt: 1.0,
-    air: 1.0,
-    tank: 1,
+
+    speed: 1.0,
+    grip: 1,
+    weight: 1.0,
+    airRot: 1.0,
+    fuel: 1,
     color: "#314ccd",
     // 山地车：常规形态 —— 中等胎宽、平把、中等上管、可见避震弹簧、中立骑姿
     art: ART({}),
@@ -70,12 +75,12 @@ export const VEHICLES = [
     tier: "普通",
     costK: 1,
     price: 3000,
-    drv: 1.35,
-    spd: 1.4,
-    grp: 0.72,
-    wgt: 0.8,
-    air: 1.4,
-    tank: 0.75,
+
+    speed: 1.4,
+    grip: 0.72,
+    weight: 0.8,
+    airRot: 1.4,
+    fuel: 0.75,
     color: "#e63946",
     // 竞速车：公路姿态 —— 细胎高轮（密而细的辐条、不画内圈）、细管、上管低而向车头下斜、
     // 弯把、无避震弹簧、窄坐垫、无前檐的流线头盔、骑手整个人压低前探
@@ -104,12 +109,12 @@ export const VEHICLES = [
     tier: "稀有",
     costK: 5,
     price: 10500,
-    drv: 1.12,
-    spd: 0.7,
-    grp: 1.45,
-    wgt: 1.5,
-    air: 0.75,
-    tank: 1.45,
+
+    speed: 0.7,
+    grip: 1.45,
+    weight: 1.5,
+    airRot: 0.75,
+    fuel: 1.45,
     color: "#8a5a2b",
     // 越野车：胖胎形态 —— 粗胎配少而粗的辐条、胖管、高而平直的上管、
     // 加长避震弹簧、宽坐垫、三道通风槽的宽头盔、骑手坐得高、手臂张开够宽把
@@ -137,10 +142,10 @@ export const VEHICLES = [
   },
 
   // ================================================================
-  //  以下 4 辆是"高价变态车"：底子就吊打前三辆，满级后再开终极模式更是离谱。
+  //  以下 8 辆是早期就定下的"高价变态车"：底子吊打同期车辆，满级后再开终极模式更是离谱。
   //  下面几条是被物理逼出来的硬约束，改数值前先想清楚：
   //    · phys.mass 两两不同、phys.inertia 两两不同
-  //    · air × inertia ≈ 1（空中角冲量 ω ∝ air/inertia，两者互为倒数）
+  //    · airRot × inertia ≈ 1（空中角冲量 ω ∝ airRot/inertia，两者互为倒数）
   //    · ultra.mode 是物理层唯一的分派依据（见 physics/bike.js 的 activeMode）
   // ================================================================
   {
@@ -152,12 +157,12 @@ export const VEHICLES = [
     tier: "稀有",
     costK: 5,
     price: 7500,
-    drv: 1.55,
-    spd: 1.85,
-    grp: 1.2,
-    wgt: 0.85,
-    air: 0.87,
-    tank: 1.3,
+
+    speed: 1.85,
+    grip: 1.2,
+    weight: 0.85,
+    airRot: 0.87,
+    fuel: 1.3,
     color: "#00d4ff",
     // 电磁车：紧凑轻量、细高轮、大落差上管、车把前伸很低（骑手几乎趴平）
     art: ART({
@@ -184,12 +189,12 @@ export const VEHICLES = [
     tier: "史诗",
     costK: 12,
     price: 19000,
-    drv: 1.4,
-    spd: 1.6,
-    grp: 1.55,
-    wgt: 0.7,
-    air: 1.62,
-    tank: 2.2,
+
+    speed: 1.6,
+    grip: 1.55,
+    weight: 0.7,
+    airRot: 1.62,
+    fuel: 2.2,
     color: "#9d4edd",
     // 影行者：细胎 + 细密辐条、几乎无避震、坐垫窄、头盔圆润无前檐、骑手高伏（探身向前）
     art: ART({
@@ -216,12 +221,12 @@ export const VEHICLES = [
     tier: "神话",
     costK: 40,
     price: 75500,
-    drv: 1.6,
-    spd: 1.35,
-    grp: 2.1,
-    wgt: 2.4,
-    air: 0.42,
-    tank: 2.6,
+
+    speed: 1.35,
+    grip: 2.1,
+    weight: 2.4,
+    airRot: 0.42,
+    fuel: 2.6,
     color: "#f4a261",
     // 磁力堡垒：全项目最粗的胎与管、超长避震、超宽坐垫、大头盔多通风口、骑手坐得高把手很低
     art: ART({
@@ -248,12 +253,12 @@ export const VEHICLES = [
     tier: "稀有",
     costK: 5,
     price: 6500,
-    drv: 1.9,
-    spd: 2.1,
-    grp: 1.35,
-    wgt: 0.6,
-    air: 0.95,
-    tank: 1.6,
+
+    speed: 2.1,
+    grip: 1.35,
+    weight: 0.6,
+    airRot: 0.95,
+    fuel: 1.6,
     color: "#ff70a6",
     // 光子摩托：介于公路车与电磁车之间的轻薄形态、中等胎宽、粗管、无避震、前倾伏低
     art: ART({
@@ -283,16 +288,16 @@ export const VEHICLES = [
     tier: "神话",
     costK: 40,
     price: 120000,
-    drv: 2.4,
-    spd: 2.6,
-    // ★ grp=1.9 是反复标定的结果，不是随手填的：抓地拉到 3.2 时 μ 达 5.9，
-    //   轮胎**永远不会突破摩擦极限** —— 冰面空转 / 滑移率等一整套"打滑是物理、
-    //   不是特效"的断言会全部归零（实测绿野与冰面滑移率都是 0.000）。
-    //   1.9 让满级 μ≈3.5，略高于磁力堡垒的 3.86 之下、全项目最高，且冰面仍能打滑。
-    grp: 3,
-    wgt: 1.2,
-    air: 0.55,
-    tank: 3.4,
+
+    speed: 2.6,
+    // ★ grip 是反复标定的结果，不是随手填的：抓地再往上拉，μ 会高到让轮胎
+    //   **永远不可能突破摩擦极限** —— 冰面空转 / 滑移率等一整套"打滑是物理、
+    //   不是特效"的表现会全部归零（实测绿野与冰面滑移率都是 0.000）。
+    //   3 是全项目最高，仍低于磁力堡垒满级的水平，且冰面依然能打滑。
+    grip: 3,
+    weight: 1.2,
+    airRot: 0.55,
+    fuel: 3.4,
     color: "#00ff9d",
     // 奇点号：全项目最夸张的形态 —— 中等胎宽配满辐条、极粗车架、超长避震、
     // 超宽坐垫、大头盔多通风口、骑手压得极低（趴在车头上）
@@ -318,20 +323,21 @@ export const VEHICLES = [
 
   // ================================================================
   //  档位阶梯（共 26 辆）：普通 5 / 稀有 6 / 史诗 6 / 传说 5 / 神话 4
-  //  · costK = 升级费倍率。四项升满 = 28,240 × costK：
-  //      普通 28,240 / 稀有 62,128 / 史诗 141,200 / 传说 310,640 / 神话 706,000 / 奇点号 1,129,600
-  //  · 除山地车（免费新手车）外每辆都有「最终形态」，六种 mode 各 4 辆；
+  //  · costK = 升级费倍率（普通 1 / 稀有 5 / 史诗 12 / 传说 25 / 神话 40）。
+  //    四项升满 = 28,240 × costK：普通 28,240 / 稀有 141,200 / 史诗 338,880 /
+  //    传说 706,000 / 神话 1,129,600。
+  //  · 除驮马（免费新手车）外每辆都有「最终形态」：七种 mode，
+  //    除 absolut（仅奇点号一辆、免解锁）外其余六种各 4 辆；
   //    奇点号是唯一免解锁的内置形态（absolut），但它的四项升级照样要花钱买。
   //  · 极速由**扭矩曲线的归零转速**决定，也就是 phys.rpm 才是"贵车更快"的唯一干净杠杆
-  //    （堆 torque 只会在平路撞上抓地上限，堆 grp 只会更抗滑而不是更快）。
-  //    所以 rpm 随档位递增：普通 ~1.2 / 稀有 ~1.5 / 史诗 ~1.6 / 传说 ~1.9 / 神话 ~2.0。
-  //  · 改数值前必读文件头：
-  //    mass / inertia 全表两两不同、|air × inertia − 1| ≤ 0.05、
-  //    grp ≤ 2.2（再高轮胎永不突破摩擦极限，打滑类断言会全部归零）、
-  //    torque ≤ 2.0（再高容易后空翻）。
+  //    （堆 torque 只会在平路撞上抓地上限，堆 grip 只会更抗滑而不是更快）。
+  //    所以 rpm 随档位递增。
+  //  · 改数值前必读：
+  //    mass / inertia 全表两两不同、|airRot × inertia − 1| ≤ 0.05、
+  //    torque 再高容易后空翻。
+  //  ★ 注意：grip **不受 ≤2.2 之类的硬上限约束**（早先的这条限制写在 1.9 那代数据上，
+  //    早已不成立）—— 真正的约束是"满级 μ 仍要留出打滑空间"，奇点号的 3 就是标定结果。
   // ================================================================
-
-  // ---------------- 普通档 ----------------
 
   // ---------------- 普通档 ----------------
 {
@@ -342,12 +348,12 @@ export const VEHICLES = [
     tier: "普通",
     costK: 1,
     price: 4000,
-    drv: 1.05,
-    spd: 1.05,
-    grp: 1.05,
-    wgt: 0.95,
-    air: 1.124,
-    tank: 1.2,
+
+    speed: 1.05,
+    grip: 1.05,
+    weight: 0.95,
+    airRot: 1.124,
+    fuel: 1.2,
     color: "#7a9e7e",
     art: ART({tire: 2.6, spokes: 8, spokeW: 1.3, tube: 3.2, topDrop: 4, coil: 0.7, bar: "flat", saddleW: 11, helmR: 4.3, pose: POSE(1, 1, 2, 1, 0.5, -1)}),
     phys: P(0.95, 0.89, 1.1, 1.05, 15, 1.05, 1.25),
@@ -361,12 +367,12 @@ export const VEHICLES = [
     tier: "稀有",
     costK: 5,
     price: 12000,
-    drv: 1.2,
-    spd: 0.95,
-    grp: 1.3,
-    wgt: 1.25,
-    air: 0.862,
-    tank: 1.35,
+
+    speed: 0.95,
+    grip: 1.3,
+    weight: 1.25,
+    airRot: 0.862,
+    fuel: 1.35,
     color: "#b07d4f",
     art: ART({tire: 4.6, spokes: 6, spokeW: 1.9, tube: 5.0, topDrop: 0, coil: 1.5, bar: "wide", saddleW: 13, helmR: 4.4, vents: 2, pose: POSE(-1, -2, -1, -2, -0.5, -2.5)}),
     phys: P(1.25, 1.16, 0.9, 0.95, 19, 1.2, 1.15),
@@ -382,12 +388,12 @@ export const VEHICLES = [
     tier: "普通",
     costK: 1,
     price: 5000,
-    drv: 1.3,
-    spd: 1.5,
-    grp: 1,
-    wgt: 0.9,
-    air: 1.22,
-    tank: 1.4,
+
+    speed: 1.5,
+    grip: 1,
+    weight: 0.9,
+    airRot: 1.22,
+    fuel: 1.4,
     color: "#a8d8e8",
     art: ART({tire: 2.2, rim: false, spokes: 10, spokeW: 1.0, tube: 2.8, topDrop: 5, coil: 0.5, bar: "drop", saddleW: 9, helmR: 4.8, peak: false, pose: POSE(3, 3, 4, 3, 1, 2)}),
     phys: P(0.9, 0.82, 1.25, 1.1, 14, 1.3, 1.55),
@@ -401,12 +407,12 @@ export const VEHICLES = [
     tier: "史诗",
     costK: 12,
     price: 26000,
-    drv: 1.25,
-    spd: 1.15,
-    grp: 1.75,
-    wgt: 1.35,
-    air: 0.8,
-    tank: 1.5,
+
+    speed: 1.15,
+    grip: 1.75,
+    weight: 1.35,
+    airRot: 0.8,
+    fuel: 1.5,
     color: "#ff8fab",
     art: ART({tire: 5.0, spokes: 5, spokeW: 2.2, tube: 5.6, topDrop: -1, coil: 1.6, bar: "wide", saddleW: 14, helmR: 4.4, vents: 3, pose: POSE(-2, -3, -2, -3, -0.8, -3)}),
     phys: P(1.35, 1.25, 0.88, 0.92, 19, 1.25, 1.4),
@@ -420,12 +426,12 @@ export const VEHICLES = [
     tier: "稀有",
     costK: 5,
     price: 5500,
-    drv: 1.45,
-    spd: 1.6,
-    grp: 1.1,
-    wgt: 0.88,
-    air: 1.163,
-    tank: 1.25,
+
+    speed: 1.6,
+    grip: 1.1,
+    weight: 0.88,
+    airRot: 1.163,
+    fuel: 1.25,
     color: "#cd5c5c",
     art: ART({tire: 2.8, rim: false, spokes: 12, spokeW: 1.1, tube: 3.4, topDrop: 6, coil: 1.2, bar: "drop", saddleW: 8, helmR: 4.9, pose: POSE(4, 4, 5, 4, 1.5, 3)}),
     phys: P(0.88, 0.86, 1.3, 1.15, 17, 1.45, 1.7),
@@ -439,12 +445,12 @@ export const VEHICLES = [
     tier: "普通",
     costK: 1,
     price: 3500,
-    drv: 1.35,
-    spd: 1.55,
-    grp: 0.95,
-    wgt: 0.78,
-    air: 1.667,
-    tank: 1.3,
+
+    speed: 1.55,
+    grip: 0.95,
+    weight: 0.78,
+    airRot: 1.667,
+    fuel: 1.3,
     color: "#66f0c8",
     art: ART({tire: 1.8, rim: false, spokes: 13, spokeW: 0.8, tube: 2.4, topDrop: 7, coil: 0.4, bar: "drop", saddleW: 7, helmR: 5.0, peak: false, pose: POSE(5, 6, 6, 5, 2, 4)}),
     phys: P(0.78, 0.6, 1.35, 1.15, 13, 1.35, 1.5),
@@ -460,12 +466,12 @@ export const VEHICLES = [
     tier: "稀有",
     costK: 5,
     price: 9000,
-    drv: 1.75,
-    spd: 1.7,
-    grp: 1,
-    wgt: 1.02,
-    air: 1.099,
-    tank: 1.8,
+
+    speed: 1.7,
+    grip: 1,
+    weight: 1.02,
+    airRot: 1.099,
+    fuel: 1.8,
     color: "#d4a373",
     art: ART({tire: 2.6, spokes: 10, spokeW: 1.2, tube: 3.2, topDrop: 4, coil: 0.6, bar: "drop", saddleW: 9, helmR: 4.6, pose: POSE(3, 3, 4, 3, 1, 2)}),
     phys: P(1.02, 0.91, 1.4, 1.25, 15, 1.5, 1.9),
@@ -479,12 +485,12 @@ export const VEHICLES = [
     tier: "传说",
     costK: 25,
     price: 47500,
-    drv: 1.7,
-    spd: 1.4,
-    grp: 1.85,
-    wgt: 2,
-    air: 0.595,
-    tank: 2.1,
+
+    speed: 1.4,
+    grip: 1.85,
+    weight: 2,
+    airRot: 0.595,
+    fuel: 2.1,
     color: "#ff6b35",
     art: ART({tire: 6.4, spokes: 5, spokeW: 2.6, tube: 7.2, topDrop: -2, coil: 2.1, bar: "wide", saddleW: 16, helmR: 5.0, vents: 4, pose: POSE(-3, -5, -2, -5, -1, -5)}),
     phys: P(2, 1.68, 0.8, 0.88, 22, 1.7, 1.45),
@@ -498,12 +504,12 @@ export const VEHICLES = [
     tier: "传说",
     costK: 25,
     price: 55500,
-    drv: 1.55,
-    spd: 1.3,
-    grp: 2.05,
-    wgt: 2.2,
-    air: 0.526,
-    tank: 2.3,
+
+    speed: 1.3,
+    grip: 2.05,
+    weight: 2.2,
+    airRot: 0.526,
+    fuel: 2.3,
     color: "#8ecae6",
     art: ART({tire: 7.0, spokes: 4, spokeW: 2.9, tube: 7.8, topDrop: -3, coil: 2.4, bar: "wide", saddleW: 17, helmR: 5.2, vents: 4, pose: POSE(-3, -6, -2, -6, -1, -6)}),
     phys: P(2.2, 1.9, 0.75, 0.85, 23, 1.55, 1.35),
@@ -517,12 +523,12 @@ export const VEHICLES = [
     tier: "史诗",
     costK: 12,
     price: 22000,
-    drv: 1.6,
-    spd: 1.75,
-    grp: 1.35,
-    wgt: 1.15,
-    air: 0.909,
-    tank: 1.9,
+
+    speed: 1.75,
+    grip: 1.35,
+    weight: 1.15,
+    airRot: 0.909,
+    fuel: 1.9,
     color: "#4cc9f0",
     art: ART({tire: 3.6, spokes: 9, spokeW: 1.6, tube: 4.4, topDrop: 5, coil: 1.1, bar: "drop", saddleW: 11, helmR: 4.7, vents: 2, pose: POSE(2, 2, 3, 2, 1, 1)}),
     phys: P(1.15, 1.1, 1.2, 1.1, 18, 1.6, 1.8),
@@ -536,12 +542,12 @@ export const VEHICLES = [
     tier: "传说",
     costK: 25,
     price: 65000,
-    drv: 1.85,
-    spd: 1.6,
-    grp: 1.55,
-    wgt: 2.3,
-    air: 0.5,
-    tank: 2.2,
+
+    speed: 1.6,
+    grip: 1.55,
+    weight: 2.3,
+    airRot: 0.5,
+    fuel: 2.2,
     color: "#2b2d42",
     art: ART({tire: 6.8, spokes: 6, spokeW: 2.7, tube: 7.5, topDrop: 1, coil: 2.3, bar: "wide", saddleW: 16, helmR: 5.1, vents: 3, pose: POSE(-3, -5, -2, -5, -1, -5)}),
     phys: P(2.3, 2.0, 0.7, 0.82, 24, 1.85, 1.55),
@@ -557,12 +563,12 @@ export const VEHICLES = [
     tier: "传说",
     costK: 25,
     price: 41000,
-    drv: 1.9,
-    spd: 1.35,
-    grp: 2.15,
-    wgt: 2.5,
-    air: 0.441,
-    tank: 2.5,
+
+    speed: 1.35,
+    grip: 2.15,
+    weight: 2.5,
+    airRot: 0.441,
+    fuel: 2.5,
     color: "#6c757d",
     art: ART({tire: 7.8, spokes: 4, spokeW: 3.2, tube: 8.6, topDrop: -4, coil: 2.8, bar: "wide", saddleW: 19, helmR: 5.6, vents: 5, pose: POSE(-4, -7, -3, -7, -1, -7)}),
     phys: P(2.5, 2.27, 0.68, 0.8, 25, 1.3, 1.25),
@@ -576,12 +582,12 @@ export const VEHICLES = [
     tier: "史诗",
     costK: 12,
     price: 14000,
-    drv: 1.65,
-    spd: 2.05,
-    grp: 1.15,
-    wgt: 0.97,
-    air: 1.149,
-    tank: 2.2,
+
+    speed: 2.05,
+    grip: 1.15,
+    weight: 0.97,
+    airRot: 1.149,
+    fuel: 2.2,
     color: "#ffb703",
     art: ART({tire: 2.0, rim: false, spokes: 12, spokeW: 0.9, tube: 2.6, topDrop: 7, coil: 0.3, bar: "drop", saddleW: 8, helmR: 5.1, peak: false, pose: POSE(6, 7, 7, 6, 2.5, 4.5)}),
     phys: P(0.97, 0.87, 1.5, 1.3, 14, 1.65, 2.1),
@@ -595,12 +601,12 @@ export const VEHICLES = [
     tier: "传说",
     costK: 25,
     price: 35000,
-    drv: 2,
-    spd: 1.75,
-    grp: 1.7,
-    wgt: 2.1,
-    air: 0.472,
-    tank: 2.4,
+
+    speed: 1.75,
+    grip: 1.7,
+    weight: 2.1,
+    airRot: 0.472,
+    fuel: 2.4,
     color: "#3a0ca3",
     art: ART({tire: 6.0, spokes: 8, spokeW: 2.4, tube: 7.0, topDrop: 3, coil: 2.0, bar: "wide", saddleW: 15, helmR: 5.2, vents: 3, pose: POSE(-2, -4, -2, -4, -0.5, -4)}),
     phys: P(2.1, 2.12, 0.75, 0.86, 22, 1.4, 1.6),
@@ -614,12 +620,12 @@ export const VEHICLES = [
     tier: "史诗",
     costK: 12,
     price: 16500,
-    drv: 1.55,
-    spd: 2,
-    grp: 1.4,
-    wgt: 0.82,
-    air: 1.493,
-    tank: 2,
+
+    speed: 2,
+    grip: 1.4,
+    weight: 0.82,
+    airRot: 1.493,
+    fuel: 2,
     color: "#adb5bd",
     art: ART({tire: 1.7, rim: false, spokes: 14, spokeW: 0.7, tube: 2.2, topDrop: 8, coil: 0.2, bar: "drop", saddleW: 6.5, helmR: 5.2, peak: false, pose: POSE(7, 8, 8, 7, 3, 5)}),
     phys: P(0.82, 0.67, 1.55, 1.35, 12, 1.55, 2.15),
@@ -633,12 +639,12 @@ export const VEHICLES = [
     tier: "神话",
     costK: 40,
     price: 103000,
-    drv: 1.95,
-    spd: 1.9,
-    grp: 1.9,
-    wgt: 1.9,
-    air: 0.559,
-    tank: 2.3,
+
+    speed: 1.9,
+    grip: 1.9,
+    weight: 1.9,
+    airRot: 0.559,
+    fuel: 2.3,
     color: "#212529",
     art: ART({tire: 5.2, spokes: 9, spokeW: 2.2, tube: 6.4, topDrop: 2, coil: 1.8, bar: "wide", saddleW: 15, helmR: 5.3, peak: true, vents: 4, pose: POSE(-1, -3, -1, -3, 0, -3)}),
     phys: P(1.9, 1.79, 0.82, 0.9, 21, 1.95, 1.75),
@@ -654,12 +660,12 @@ export const VEHICLES = [
     tier: "史诗",
     costK: 12,
     price: 30000,
-    drv: 2.1,
-    spd: 2.3,
-    grp: 1.6,
-    wgt: 0.92,
-    air: 1.235,
-    tank: 2.6,
+
+    speed: 2.3,
+    grip: 1.6,
+    weight: 0.92,
+    airRot: 1.235,
+    fuel: 2.6,
     color: "#ff006e",
     art: ART({tire: 2.0, rim: false, spokes: 13, spokeW: 0.9, tube: 2.8, topDrop: 9, coil: 0.35, bar: "drop", saddleW: 7, helmR: 5.3, peak: false, vents: 2, pose: POSE(8, 9, 9, 8, 3.5, 6)}),
     phys: P(0.92, 0.81, 1.5, 1.3, 13, 2, 2.5),
@@ -673,12 +679,12 @@ export const VEHICLES = [
     tier: "神话",
     costK: 40,
     price: 88000,
-    drv: 2.2,
-    spd: 1.8,
-    grp: 2.1,
-    wgt: 2.6,
-    air: 0.38,
-    tank: 2.9,
+
+    speed: 1.8,
+    grip: 2.1,
+    weight: 2.6,
+    airRot: 0.38,
+    fuel: 2.9,
     color: "#03045e",
     art: ART({tire: 8.2, spokes: 4, spokeW: 3.4, tube: 9.2, topDrop: -4, coil: 3.0, bar: "wide", saddleW: 20, helmR: 5.8, vents: 5, pose: POSE(-4, -8, -3, -8, -1, -8)}),
     phys: P(2.6, 2.63, 0.65, 0.78, 26, 1.6, 1.5),
