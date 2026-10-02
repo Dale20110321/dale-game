@@ -746,6 +746,16 @@ function buyVehicleNow(i) {
   playCoinSound();
 }
 
+/**
+ * 形态的量化效果行（由 vehicles.js 从 fx 反推，见那里的 fxText）。
+ *
+ * ★ 它是"同 mode 不同车到底差在哪"的唯一可见答案：desc 是 prose，四辆车共用一句；
+ *   这一行是数字，玩家横向比形态时看的正是它。
+ */
+function fxLine(v) {
+  return v.ultra && v.ultra.fxText ? ` <b class="ultraFx">${v.ultra.fxText}</b>` : "";
+}
+
 /** 车辆全部升级（引擎/轮胎/车架/减震）是否已满级 —— 解锁特殊模式的前提 */
 function allMaxed(id) {
   const u = store.upgrades[id];
@@ -758,11 +768,11 @@ function ultraBlock(v, i) {
     return `<div class="ultraRow got">${v.ultra.icon} 特殊模式「${v.ultra.name}」已开启 · ${v.ultra.desc}</div>`;
   }
   if (!allMaxed(v.id)) {
-    return `<div class="ultraRow lock">🔒 ${v.ultra.icon} ${v.ultra.name}：${v.ultra.desc}（全部升级满级 Lv${MAX_LV} 后解锁）</div>`;
+    return `<div class="ultraRow lock">🔒 ${v.ultra.icon} ${v.ultra.name}：${v.ultra.desc}${fxLine(v)}（全部升级满级 Lv${MAX_LV} 后解锁）</div>`;
   }
   return `<div class="ultraRow buy">
     <button class="btn sm" data-act="buyUltra" data-veh="${i}">${v.ultra.icon} 解锁「${v.ultra.name}」 · ${v.ultra.cost.toLocaleString()} 🪙</button>
-    <div class="ultraDesc">${v.ultra.desc}</div>
+    <div class="ultraDesc">${v.ultra.desc}${fxLine(v)}</div>
   </div>`;
 }
 

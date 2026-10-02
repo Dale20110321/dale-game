@@ -50,6 +50,11 @@ const UP_TOUCHES = {
   susp: ["悬挂"],
 };
 
+/** 形态的量化效果行（与车库同一份，来自 vehicles.js 由 fx 反推） */
+function fxLine(v) {
+  return v.ultra && v.ultra.fxText ? " · " + v.ultra.fxText : "";
+}
+
 export function openShop() {
   store.shopOpen = true;
   renderShop();
@@ -81,17 +86,17 @@ export function renderShop() {
       // builtin 形态（究极终局车）：免解锁、已永久生效，不走"解锁/满级才能开"那套文案
       if (v.ultra.builtin === true) {
         ultraEl.className = "upUltra got";
-        ultraEl.textContent = v.ultra.icon + " 「" + v.ultra.name + "」已内置生效 · " + v.ultra.desc;
+        ultraEl.textContent = v.ultra.icon + " 「" + v.ultra.name + "」已内置生效 · " + v.ultra.desc + fxLine(v);
       } else {
         const got = store.ultra[v.id] === true;
         const full4 = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= MAX_LV);
         ultraEl.className = "upUltra" + (got ? " got" : full4 ? " canBuy" : "");
         if (got) {
-          ultraEl.textContent = v.ultra.icon + " 特殊模式「" + v.ultra.name + "」已开启 · " + v.ultra.desc;
+          ultraEl.textContent = v.ultra.icon + " 特殊模式「" + v.ultra.name + "」已开启 · " + v.ultra.desc + fxLine(v);
         } else if (full4) {
-          ultraEl.textContent = "⭐ 已全部升满！到车库花 " + v.ultra.cost.toLocaleString() + " 🪙 解锁「" + v.ultra.name + "」";
+          ultraEl.textContent = "⭐ 已全部升满！到车库花 " + v.ultra.cost.toLocaleString() + " 🪙 解锁「" + v.ultra.name + "」" + fxLine(v);
         } else {
-          ultraEl.textContent = "🔒 全部升级升到 Lv" + MAX_LV + " 后可解锁特殊模式「" + v.ultra.name + "」：" + v.ultra.desc;
+          ultraEl.textContent = "🔒 全部升级升到 Lv" + MAX_LV + " 后可解锁特殊模式「" + v.ultra.name + "」：" + v.ultra.desc + fxLine(v);
         }
       }
     } else {

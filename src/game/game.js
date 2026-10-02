@@ -16,7 +16,7 @@ import { playCrashSound } from "../core/audio.js";
 import { token } from "../config/ui-tokens.js";
 import { save, addStat, settleProgress, isAdvancedUnlocked } from "../core/storage.js";
 import { groundInfo, groundY, safeSpot } from "../physics/terrain.js";
-import { applyUpgrades, bikeVx, crash, resetBike, stepPhysics } from "../physics/bike.js";
+import { applyUpgrades, bikeVx, crash, resetBike, stepPhysics, ignoresHazardLimit } from "../physics/bike.js";
 import { initPhysicsEvents } from "../physics/events.js";
 import { drainFuel, setFuel } from "../physics/fuel.js";
 import { updateParticles, emitParticles } from "../render/particles.js";
@@ -480,7 +480,7 @@ export function update(dt) {
 
   // ---- 机制判定：危险段超速必摔 / 限时门准时通过 ----
   if (store.mode === "level" && !run.settling) {
-    if (!run.crashed && world.hazards.length) {
+    if (!run.crashed && world.hazards.length && !ignoresHazardLimit()) {
       const spd = Math.abs(bikeVx());
       for (const h of world.hazards) {
         if (mid >= h.x0 && mid <= h.x1 && spd > h.vmax) {

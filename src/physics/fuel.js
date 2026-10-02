@@ -5,9 +5,17 @@ import { VEHICLES } from "../config/vehicles.js";
 import { levelAt } from "../config/levels.js";
 import { store } from "../core/store.js";
 import { key } from "../core/input.js";
+import { hasInfiniteFuel } from "./bike.js";
 
 /** 每个固定步消耗燃料（fuel 与 fuelMax 同单位，比值即百分比） */
 export function drainFuel(dt) {
+  // 「燃料无限」形态（相位 / 绝对形态）：直接不消耗。
+  // ★ 这条以前只写在文案里 —— drainFuel 无条件扣油，四辆相位车（¥3500~¥26000）
+  //   卖了却根本没能效，跑到一半照样没油。
+  if (hasInfiniteFuel()) {
+    store.phys.fuel = store.phys.fuelMax;
+    return;
+  }
   const v = VEHICLES[store.currentVehicle];
   const L = store.mode === "level" ? levelAt(store.selLevel) : null;
   const fk = L ? L.fuelK : 1;

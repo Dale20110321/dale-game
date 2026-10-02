@@ -14,6 +14,7 @@ import { touchActive } from "../core/input.js";
 import { clamp } from "../core/utils.js";
 import { key } from "../core/input.js";
 import { fuelRatio } from "../physics/fuel.js";
+import { ignoresHazardLimit } from "../physics/bike.js";
 import { token, tokenNum, fontOf } from "../config/ui-tokens.js";
 import { getQuality } from "./postfx.js";
 
@@ -145,6 +146,9 @@ export function activeWarning() {
   // 危险段：提前 1000px 起预警，并直接给出"超了多少 / 当前多少"，让减速成为可操作动作。
   // 提前量从 620px 提上来的原因：满速 520px/s 下 620px 只有 1.2s 反应时间，几乎来不及松油门。
   // 注意：限速公式 hazardSpeed() 一个字没动，难度不变 —— 这里只增加**可预判性**。
+  // ★ 已豁免危险段的形态（相位 / 绝对形态）整段跳过：判定了也不会摔，
+  //   还弹"超速"警告只会让玩家以为自己违规了。
+  if (ignoresHazardLimit()) return null;
   for (const h of world.hazards) {
     if (mx > h.x1) continue;
     if (h.x0 - mx > 1000) continue;
