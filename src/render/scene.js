@@ -75,6 +75,8 @@ function drawBikeShadow() {
   const spdN = clamp(Math.abs(bike.speed) / 320, 0, 1);
   const x = mx - cam.x;
   const y = g.y - cam.y + 4;
+  // 影子是**世界**坐标下的椭圆：宽度不随缩放额外放大，
+  // 否则高速拉远视野时影子会变成一条盖住半个屏幕的黑带。
   const len = 22 + spdN * 20;
   ctx.fillStyle = token("obj-shadow");
   ctx.globalAlpha = airFade;

@@ -27,6 +27,8 @@ import {
   SOLVER_TOL, SOLVER_ITERS, PEN_TOL, FN_MAX_K, NUM_CAP_V, HEAD_R,
   ROLL_RES_K, AIR_DRAG_K, wheelInertia, torqueAt, topSpeedOf, crashTiltDeg,
   ABSOLUT_V, ABSOLUT_DRAG_K, ABSOLUT_THRUST_K, ABSOLUT_SERVO_ACC,
+  OMEGA_V, OMEGA_DRAG_K, OMEGA_THRUST_K, OMEGA_SERVO_ACC,
+  FLIGHT_HOVER, FLIGHT_HOVER_K, FLIGHT_HOVER_LP, FLIGHT_PITCH_K,
   REAR_LOAD, wheelieTauOf,
   CRASH_FUEL_LOSS, CRASH_TIME_PENALTY, MAX_LV, REF_SPEED,
   deriveHandling, deriveRigidBody, deriveSuspension, deriveFriction,
@@ -103,7 +105,8 @@ const WARP_V_CAP = 90;
  *   phase  相位   —— 摔车免疫 + 燃料无限 + 危险段豁免，代价是脆（星轨 → 潮生）
  *   railgun 轨道炮 —— 扭矩与红线同时暴涨，最暴力的一档（磁暴 → 玄铁）
  *   warp   跃迁   —— 持续推力，逼近极速的速度按 accel/vCap 分档（蜂鸟 → 逐日）
- *   absolut 绝对  —— 350 km/h 稳定极速 + 全姿态摔车免疫（奇点，免解锁）
+ *   absolut 绝对  —— 350 km/h 稳定极速 + 摔车/燃料/危险段全免（奇点，免解锁）
+ *   omega  终焉   —— 1000 km/h + **常驻飞行**（从不触地）+ 摔车/燃料/危险段全免（终焉号）
  */
 export function activeMode(veh) {
   const v = veh || VEHICLES[store.currentVehicle];
@@ -128,7 +131,12 @@ const MODE_FLAGS = {
   railgun: {},
   surge:   {},
   warp:    {},
+  // ★ absolut **不加** pinGround：实测它约 14% 的时间在腾空，而这是**有意保留**的 ——
+  //   玩家反馈"几乎一直飞在天上"，但同时也确认了它仍会被障碍顶起、落地要重新提速，
+  //   也就是"能飞但飞不高、飞不久"。真正的常驻飞行是 omega 形态（见下）。
   absolut: { noCrash: true, noFuel: true, noHazard: true },
+  // ★ omega 是唯一的 `fly` 形态：常驻飞行（见 flightStep），从不接触地面。
+  omega:   { fly: true, noCrash: true, noFuel: true, noHazard: true },
 };
 
 /** 当前生效形态的效果开关（未解锁 / 无形态 → 全 false 的空对象） */
@@ -157,6 +165,20 @@ export function isUltraActive() {
 /** 「贴地模式」是否生效（stable：轮轴钉地，永不腾空） */
 export function isUltraStable() {
   return ultraFlags().pinGround === true;
+}
+
+/**
+ * 「常驻飞行」是否生效。
+ *
+ * ★ 两个来源：形态的 fly 开关（omega），或车辆自带的 `veh.hover`。
+ *   归墟裸车也要飞 —— 它 μ=11 的抓地在地面上根本没法开（一踩油门就后空翻，
+ *   实测满级只能跑 4.6 km/h）。它是飞行器，"落地模式"对它没有意义。
+ *   hover 让它始终走 flightStep，形态只决定**飞多快**（裸车慢、终焉 1000）。
+ */
+export function isFlighter() {
+  if (ultraFlags().fly === true) return true;
+  const v = VEHICLES[store.currentVehicle];
+  return !!(v && v.hover);
 }
 
 /** 是否处于"摔车免疫"形态（贴地 / 护盾 / 相位 / 绝对形态） */
@@ -193,6 +215,127 @@ function pinToGround() {
   b.head.y = midY - SEAT_H;
   b.head.py = midY - SEAT_H;
   b.head._vy = 0;
+}
+
+/**
+ * 「常驻飞行」推进：归墟号（omega 终焉形态 / 裸车 hover）。
+ *
+ * ★ 为什么完全不走 solveVelocityConstraints：
+ *   1000 km/h = 27,778 px/s，一个物理帧走 463px = **12.2 个轴距**。
+ *   接触求解器要求"两次采样之间轮子还在接触带内"，而这里每帧跨过 12 段地形，
+ *   采样必然漏掉整个坡顶与坑底 —— 这是采样率低于地形特征频率的必然结果，
+ *   调参修不好。这台车**根本不接触地面**，直接按运动学推进即可。
+ *
+ * 保留的物理：重力（由悬停伺服反向抵消）、水平推力伺服、空气阻力 ∝ v²、刹车与倒车。
+ * 不成立的：悬挂、接触摩擦、翘头力矩、空中转体、摔车判定。
+ *
+ * ★ 前馈项是能不能真跑到标称极速的关键（绝对形态当年栽在这，标称 350 实测 285）：
+ *   纯比例 `push = (V − v)·G` 在 v→V 时趋零，而 V 处风阻是有限正值，
+ *   平衡点必然落在 V 之前。前馈恒等于目标速度处的风阻，使 V 成为稳定平衡点。
+ */
+function flightStep(P, dt, throttle, brk, rev) {
+  const b = bike;
+  const sv = systemVel(b);
+  const vx = sv.vx;
+  const base = P.baseTopSpeed || P.topSpeed;
+
+  // ---- 水平：目标速度 = 前馈（维持极速所需推力） + 反馈（与目标的偏差） ----
+  // 可用推力量级沿用 μ·mTot·g·REAR_LOAD 的标度，低抓地场景推力随之下降。
+  const cap = P.mu * P.rb.mTot * P.gravity * REAR_LOAD * OMEGA_THRUST_K;
+  // 终焉形态 1000 km/h；裸车悬停则回到这辆车平路可达的极速（torqueAt 解算值）
+  const cruise = activeMode() === "omega" ? P.topSpeed : (P.baseTopSpeed || P.topSpeed);
+  let target;
+  if (rev) target = -base * REV_SPEED;
+  else if (brk) target = 0;
+  else if (throttle) target = cruise;
+  else target = 0;
+  const dragK = activeMode() === "omega" ? OMEGA_DRAG_K : P.airDragK;
+  // 前馈 = 目标速度处的风阻减速，使 target 本身成为平衡点
+  const ff = Math.min(cap, (dragK * target * target) / P.rb.mTot);
+  // ★ 必须同时减掉**当前速度**下的风阻，前馈才有意义：
+  //   net = (target − v)·G + ff − drag(v)。在 v = target 处 net = ff − drag(target) = 0，
+  //   那才是平衡点。只加不减的话车会一路冲过 target 无限加速
+  //   （漏了这一项时实测跑到 2300 km/h，是标称值的 2.3 倍）。
+  const drag = (dragK * vx * Math.abs(vx)) / P.rb.mTot;
+  const push = clamp((target - vx) * OMEGA_SERVO_ACC + ff - drag, -cap, cap);
+  // 刹车：直接减速，不受前馈影响（否则松油门的滑行会被前馈顶住）
+  const nextVx = brk
+    ? clamp(vx - P.brakePeak * 0.6 * dt, -base * REV_SPEED, base * REV_SPEED)
+    : vx + push * dt;
+
+  // ---- 竖直：悬停伺服（抵消重力，保持固定离地高度）----
+  const midX = (b.rear.x + b.front.x) * 0.5;
+  const g = groundInfo(midX);
+  const n = groundNormal(midX);
+  // 目标轮心 y：沿地表法线抬升 FLIGHT_HOVER + WHEEL_R（n.y < 0 表示屏幕上方）
+  const restY = (isFinite(g.y) ? g.y : b.rear.y) + n.y * (FLIGHT_HOVER + WHEEL_R);
+  const curY = (b.rear.y + b.front.y) * 0.5;
+  // ★ 那层低通是必需的：1000 km/h 下一帧横移 463px、断层落差可达 145px，
+  //   逐帧直追 restY 时目标每帧跳 ±145px，离地间隙在 39~494px 乱晃（实测）。
+  //   滤成一条平滑的"飞行高度线"再追，车才是掠过起伏而不是被弹来弹去。
+  b.hoverY += (restY - b.hoverY) * Math.min(1, dt * FLIGHT_HOVER_LP);
+  const vTarget = clamp((b.hoverY - curY) * FLIGHT_HOVER_K, -1600, 1600);
+  const nextVy = clamp(sv.vy + ((vTarget - sv.vy) * FLIGHT_HOVER_K - P.gravity) * dt, -2400, 2400);
+
+  // ---- 姿态：俯仰按 FLIGHT_PITCH_K 部分跟随地表倾角 ----
+  // 全跟随会在每个坡顶大幅抬头（1000 km/h 下极晃），全水平又丢掉地速参照。
+  // ★ 倾角 = atan2(n.x, −n.y)（groundNormal 给的是法线 (m,−1)/d）。
+  //   早期版本多减了一个 π/2，平地被算成 −90°，车头死命低着（实测 −59°）。
+  const surfAng = Math.atan2(n.x, -n.y);
+  const curAng = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
+  const dAng = wrapAngle(surfAng * FLIGHT_PITCH_K - curAng);
+  rotateAroundMid(b, clamp(dAng, -0.08, 0.08));
+
+  // ---- 写入速度并积分 ----
+  // ★ px/py 必须同步：Verlet 用 (x − px)/sub 反推速度，只改 x 不改 px 等于清零。
+  for (const p of b.pts) {
+    p._vx = nextVx;
+    p._vy = nextVy;
+    p.px = p.x - nextVx * DT;
+    p.py = p.y - nextVy * DT;
+    p.x += nextVx * DT;
+    p.y += nextVy * DT;
+  }
+
+  // ---- 车轮：按真实轮速积分（纯滚动，视觉用）----
+  const w = nextVx / WHEEL_R;
+  for (const wk of WHEELS) {
+    b.wheelRot[wk] += (w - b.wheelRot[wk]) * Math.min(1, dt * 40);
+  }
+  b.grounded = 0;
+}
+
+/**
+ * 绕车身质心旋转所有质点（只改相对位置，质心平动速度守恒）。
+ *
+ * ★ 与 airControl 里那段是同一件事：刚体旋转只改变"相对质心"的速度，
+ *   若把质心速度一起旋转，朝向一变前进方向也跟着变（空中既不前进也不落地）。
+ */
+function rotateAroundMid(b, ang) {
+  if (!ang) return;
+  const c = Math.cos(ang);
+  const s = Math.sin(ang);
+  let mx = 0, my = 0, mt = 0;
+  for (const p of b.pts) { mx += p.x * p.m; my += p.y * p.m; mt += p.m; }
+  if (!(mt > 0)) return;
+  mx /= mt;
+  my /= mt;
+  const sv = systemVel(b);
+  const sub = DT;
+  for (const p of b.pts) {
+    const rx = p.x - mx;
+    const ry = p.y - my;
+    p.x = mx + rx * c - ry * s;
+    p.y = my + rx * s + ry * c;
+    // 相对速度同样旋转，质心速度原样保留
+    const rvx = p._vx - sv.vx;
+    const rvy = p._vy - sv.vy;
+    p._vx = sv.vx + rvx * c - rvy * s;
+    p._vy = sv.vy + rvx * s + rvy * c;
+    p.px = p.x - p._vx * sub;
+    p.py = p.y - p._vy * sub;
+  }
+  b.lastAng = wrapAngle(b.lastAng + ang);
 }
 
 /** 按当前车辆 + 升级等级重算驾驶参数（公式统一放在 config/constants.js 的 derive* 里） */
@@ -258,6 +401,13 @@ export function applyUpgrades() {
     //   ωR = 73,000 px/s，直接打挂"无动力滑行纯滚动 / 车轮锁死 / 滑移不爆炸"三项。
     //   350 km/h 由下面那段附加推力负责，扭矩路径保持正常尺度。
     store.phys.airDragK = ABSOLUT_DRAG_K;
+  } else if (mode === "omega") {
+    // 终焉形态：1000 km/h + 常驻飞行（见 flightStep）。
+    // 风阻按同一口径标定，使 OMEGA_V 成为 flightStep 里那个稳定平衡点。
+    store.phys.topSpeed = OMEGA_V;
+    store.phys.airDragK = OMEGA_DRAG_K;
+    // rpmK 同样不放大：扭矩路径在这台车上几乎不参与加速（见 flightStep 的说明），
+    // 放大只会让车轮在 27778 px/s 下空转到 ωR ≈ 2300 rad/s，纯属浪费与数值噪声。
   } else if (mode === "warp") {
     // 跃迁形态：直接给整车注入持续推力冲量（见 stepPhysics 的 boost 段）。
     // accel / vCap 决定"逼近极速有多快"，逐车不同 —— 便宜的蜂鸟要踩更久才上得去。
@@ -341,8 +491,17 @@ export function resetBike(x) {
   b.fn.rear = 0; b.fn.front = 0;
   b.fricAcc.rear = 0; b.fricAcc.front = 0;
   // 助推计时必须一并归零：boostImpulse 只要 boostT>0 就继续改写 Verlet 前一帧位置
-  // （=注入速度）。压过加速带后 0.5s 内重开/换关，新一局会白送一段速度冲量。
+  //（=注入速度）。压过加速带后 0.5s 内重开/换关，新一局会白送一段速度冲量。
   b.boostT = 0;
+  // 悬停高度线必须**初始化到当前真实高度**，不能留在上一局的残值：
+  // 低通起点若为 0，飞行形态开局会从"悬停在 y=0"一路爬升到真实高度，
+  // 表现为开局原地垂直起飞（实测能窜到 494px 高才稳住）。
+  {
+    const nx = (x + L / 2);
+    const ng = groundInfo(nx);
+    const nn = groundNormal(nx);
+    b.hoverY = (isFinite(ng.y) ? ng.y : yR) + nn.y * (FLIGHT_HOVER + WHEEL_R);
+  }
   b.angRate = 0;
   b.rb = store.phys.rb;
   bindMasses(store.phys.rb);
@@ -924,9 +1083,29 @@ export function stepPhysics() {
   const fx = ultraFx();
   const warp = mode0 === "warp";
   const absolut = mode0 === "absolut";
+  const omega = mode0 === "omega";
+  const hover = isFlighter();
+  const ang0 = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
+
+  // ★ 飞行形态整条换掉推进方式：常驻飞行，不接触地面。
+  //   必须在所有接地逻辑之前返回，否则高速下接触求解器必然被打穿
+  //   （每帧 12 个轴距，采样率低于地形特征频率）。详见 flightStep 的说明。
+  if (hover && !run.crashed) {
+    flightStep(P, DT, drvK, brkK, rev);
+    b.speed = lerp(b.speed, systemVel(b).vx, 0.12);
+    const angF = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
+    b.angRate = wrapAngle(angF - ang0) / DT;
+    b.wheelStepRear = b.wheelRot.rear * DT;
+    b.wheelStepFront = b.wheelRot.front * DT;
+    b.wheelAngleRear = (b.wheelAngleRear + b.wheelStepRear) % TAU;
+    b.wheelAngleFront = (b.wheelAngleFront + b.wheelStepFront) % TAU;
+    b.squash = 0;
+    b.squashVel = 0;
+    return;
+  }
+
   const prevGrounded = b.grounded;
   const prevSpin = { rear: b.wheelRot.rear, front: b.wheelRot.front };
-  const ang0 = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
   b._impactV = 0;
   b.penetration = 0;
   b.solverIters = 0;
@@ -961,7 +1140,14 @@ export function stepPhysics() {
         // 上限 = 可用抓地。★ 不能再套跃迁的 vCap：那个值是按"整秒"标定的单子步限速，
         // 除以子步长后只剩零点几 px/子步，会把 350km/h 的推力掐到只剩万分之一。
         const grip = P.mu * P.rb.mTot * P.gravity * REAR_LOAD;
-        add = clamp((P.topSpeed - svw.vx) * ABSOLUT_SERVO_ACC * sub, 0, grip * ABSOLUT_THRUST_K * sub);
+        // ★★ 前馈项是这台车能不能真跑到 350 的**唯一**关键（原先实测只到 285）：
+        //   纯比例项 (V−v)·G 在 v→V 时趋零，而 V 处的风阻（3261 px/s²）却是有限正值，
+        //   平衡点必然落在 V 之前 —— 解 (V−v)·G = k·v²/mTot + roll 得 v ≈ 8000 px/s = 288 km/h，
+        //   与实测的 285 完全吻合。前馈 = 目标速度处的风阻减速，使 V 本身成为稳定平衡点；
+        //   推力上限（grip = 9672）是该风阻（3276）的 2.95 倍，因此不会先撞上限而卡住。
+        const ff = (P.airDragK * P.topSpeed * P.topSpeed) / P.rb.mTot;
+        add = clamp((P.topSpeed - svw.vx) * ABSOLUT_SERVO_ACC * sub + ff * sub,
+          0, grip * ABSOLUT_THRUST_K * sub);
       }
       for (const p of b.pts) p._vx += add;
     }

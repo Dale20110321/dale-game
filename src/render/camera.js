@@ -1,4 +1,14 @@
-// 相机：跟随 / 速度前瞻 / 震屏
+// 相机：跟随 / 速度前瞻 / 速度自适应缩放 / 震屏
+//
+// ★ 三条不变量（改之前先读完）：
+//   1. 跟随必须**速度前馈**。纯 lerp 追赶匀速目标时，稳态滞后恒为 v·τ：
+//      350 km/h 落后 1458px、1000 km/h 落后 4167px —— 这就是"地图跟不上"。
+//      加上 v·dt 前馈项后，匀速运动的稳态滞后**精确为 0**。
+//   2. 缩放随速度自适应。世界可视宽度 = view.W / zoom，不缩放的话
+//      高速时前方地形在两帧之间就跳过去了。
+//   3. 相机是**世界坐标**，渲染层 ctx.scale(zoom) 后再减 cam.x/cam.y。
+//      任何"屏幕 px 当世界 px 用"的写法都会在 zoom ≠ 1 时错位
+//      （render/terrain.js 与 entities.js 都曾踩过这个坑）。
 import { store, bike } from "../core/store.js";
 import { view } from "../core/canvas.js";
 import { clamp, lerp } from "../core/utils.js";
@@ -8,21 +18,96 @@ export function addShake(v) {
   store.cam.shake = Math.min(16, store.cam.shake + v);
 }
 
+/**
+ * 相机跟随的时间常数（秒）。按 dt 折算成指数逼近，与刷新率无关。
+ * ★ 不能写 lerp(…, 0.1)：那个 0.1 是每帧逼近比例，隐含 τ ≈ 0.15s，
+ *   稳态滞后 = 0.15s × v，350 km/h 就差 1458px。
+ */
+const CAM_TAU = 0.11;
+
+/**
+ * 速度自适应缩放：zoom ∝ (v_ref/v)^γ。
+ * ★ γ < 1 是折中 —— 理想的 zoom ∝ 1/v 会让 1000 km/h 缩到 0.05，车变成一个点。
+ *   γ=0.5 时低速几乎不变、高速显著拉远，再由 CAM_ZOOM_MIN 兜底。
+ */
+const CAM_ZOOM_REF = 700;   // px/s ≈ 25 km/h，此附近不做任何缩放
+const CAM_ZOOM_GAMMA = 0.5;
+const CAM_ZOOM_MIN = 0.32; // 车身总长约 62px，在 0.32 下仍有 20px，肉眼可辨
+const CAM_ZOOM_LERP = 0.05; // 缩放自身的逼近比例（用 dt 在下面折算）
+
+/** 本帧的车速（px/s，无符号）：用真实系统速度而不是 lerp 平滑过的 bike.speed */
+function speedOf() {
+  let vx = 0;
+  let mt = 0;
+  for (const p of bike.pts) {
+    vx += p._vx * p.m;
+    mt += p.m;
+  }
+  return mt > 0 ? Math.abs(vx / mt) : 0;
+}
+
+/**
+ * 由车速推出的目标缩放（纯函数，便于断言）。
+ * @param {number} v 车速（px/s）
+ * @param {number} base 用户设定的基准缩放
+ */
+export function camZoomOf(v, base) {
+  if (!(v > CAM_ZOOM_REF)) return base;
+  const k = Math.pow(CAM_ZOOM_REF / v, CAM_ZOOM_GAMMA);
+  return Math.max(CAM_ZOOM_MIN, base * k);
+}
+
+/**
+ * 当前视口覆盖的**世界坐标**范围。
+ * ★ 渲染层必须用它而不是 view.W：世界层绘制发生在 ctx.scale(zoom) 之内，
+ *   屏幕右缘对应 cam.x + view.W/zoom。历史上 terrain.js 与 entities.js 按后者
+ *   采样与剔除，zoom < 1 时右半屏完全没地形（而速度自适应恰好会主动缩小 zoom）。
+ */
+export function worldView(cam, W, H) {
+  const c = cam || store.cam;
+  const z = c.zoom > 0.01 ? c.zoom : 1;
+  const w = (W === undefined ? view.W : W) / z;
+  const h = (H === undefined ? view.H : H) / z;
+  return { x0: c.x, x1: c.x + w, y0: c.y, y1: c.y + h, w, h, z };
+}
+
 /** 每个固定步更新一次：与刷新率无关 */
 export function updateCamera(dt) {
   if (store.state === "pause") return;
   const cam = store.cam;
   const mx = (bike.rear.x + bike.front.x) / 2;
   const my = (bike.rear.y + bike.front.y) / 2;
-  const zoom = cam.zoom;
-  // 速度感：车速越快镜头越往前推（前瞻），并略微下移让视野更开阔
-  const spdN = clamp(Math.abs(bike.speed) / Math.max(1, store.phys.topSpeed), 0, 1);
-  const lead = (Math.sign(bike.speed) * spdN * view.W * 0.055) / zoom;
-  const maxX = store.mode === "free" ? Infinity : Math.max(0, store.finishX - (view.W * 0.45) / zoom);
-  const targetX = clamp(mx + lead - (view.W * 0.38) / zoom, 0, maxX);
-  const targetY = my - (view.H * 0.55) / zoom + spdN * view.H * 0.02;
-  cam.x = lerp(cam.x, targetX, 0.1);
-  cam.y = lerp(cam.y, targetY, 0.3);
+
+  // ---- 速度自适应缩放：先定 zoom，再用它算"世界该露多宽" ----
+  // ★ 顺序很重要：视野宽度 = view.W / zoom，zoom 变了视野跟着变，
+  //   若反过来先按旧 zoom 定位再改 zoom，车会在一帧内跳一下。
+  const v = speedOf();
+  const zTarget = camZoomOf(v, cam.zoomBase);
+  const zl = 1 - Math.pow(1 - CAM_ZOOM_LERP, dt * 60);
+  cam.zoom = lerp(cam.zoom, zTarget, zl);
+  const zoom = cam.zoom > 0.01 ? cam.zoom : 1;
+
+  // 世界可视范围（px）：屏幕宽高除以缩放。
+  const worldW = view.W / zoom;
+  const worldH = view.H / zoom;
+
+  // ---- 水平跟随：指数逼近 + 速度前馈 ----
+  // 前瞻量随速度增长：高速时要多看一点前方，才有时间对地形做出反应。
+  // 分母用 worldW 而不是 view.W —— 缩放变化时前瞻的**世界**长度保持稳定。
+  const spdN = clamp(v / Math.max(1, store.phys.topSpeed), 0, 1);
+  const lead = (Math.sign(bike.speed || 1) * spdN * worldW * 0.10) / 1;
+  const maxX = store.mode === "free" ? Infinity : Math.max(0, store.finishX - worldW * 0.45);
+  const targetX = clamp(mx + lead - worldW * 0.38, 0, maxX);
+
+  // ★ 速度前馈：指数逼近只负责吃掉"目标跳变"，匀速前进由前馈项直接补上。
+  //   不加这一项时稳态滞后恒为 v·τ（见文件头不变量 1）。
+  const a = 1 - Math.exp(-dt / CAM_TAU);
+  cam.x += (targetX - cam.x) * a + (bike.speed ? bike.speed : 0) * dt * (1 - a);
+
+  // ---- 竖直跟随：保留原有的较硬跟随（0.3/帧），但同样按 dt 折算 ----
+  const targetY = my - worldH * 0.55 + spdN * worldH * 0.02;
+  const ay = 1 - Math.pow(1 - 0.3, dt * 60);
+  cam.y = lerp(cam.y, targetY, ay);
 
   if (cam.shake > 0.06) cam.shake *= Math.pow(0.86, dt * 60);
   else cam.shake = 0;

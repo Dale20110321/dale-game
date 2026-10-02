@@ -8,10 +8,18 @@ import { groundY } from "../physics/terrain.js";
 import { clamp } from "../core/utils.js";
 import { getQuality } from "./postfx.js";
 import { getLight } from "./light.js";
+import { worldView } from "./camera.js";
 
-/** 遍历可见地表采样点，回调 (screenX, screenGY, worldX) */
+/**
+ * 遍历可见地表采样点，回调 (localX, localGY, worldX)。
+ *
+ * ★ localX 是**世界坐标系的局部 x**（ctx 已 scale(zoom)），与旧的 view.W 循环不同：
+ *   可视范围是世界宽度 w = view.W / zoom，不是屏幕宽度 view.W。
+ *   相机在高速时会主动缩到 0.42（见 camZoomOf），按旧写法右半屏会完全空着。
+ */
 function eachGround(cx, cy, step, fn) {
-  for (let x = 0; x <= view.W; x += step) {
+  const w = view.W / zoomNow();
+  for (let x = 0; x <= w; x += step) {
     const wx = x + cx;
     const gy = groundY(wx);
     if (gy === Infinity) continue;
@@ -123,9 +131,10 @@ const SURFACE_PAINTERS = {
   strata(s, cx, cy) {
     ctx.strokeStyle = s.color;
     ctx.lineWidth = 3;
+    const w = view.W / zoomNow();
     for (let dy = 12; dy <= 48; dy += 12) {
       ctx.beginPath();
-      for (let x = 0; x <= view.W; x += 10) {
+      for (let x = 0; x <= w; x += 10) {
         const gy = groundY(x + cx);
         if (gy === Infinity) continue;
         ctx.lineTo(x, gy - cy + dy + Math.sin((x + cx) * 0.02 + dy) * 2);
@@ -217,10 +226,22 @@ const SURFACE_PAINTERS = {
  *   地面采样量降到约 1/3，且**数值逐位相同**（不是插值近似，渲染结果不变）。
  */
 const GS = 8;
-const gBuf = new Float64Array(4096);
-const gOk = new Uint8Array(4096);
+/**
+ * 采样缓冲容量：按最坏情况留足（view.W=2560 / zoom=0.42 → 6096px / GS ≈ 762 段）。
+ * ★ 高速时相机缩到 0.42，采样跨度是屏幕宽的 2.4 倍；按旧的 4096 容量 + view.W 跨度，
+ *   右半屏会直接空着（地形画不出来）。留 2048 段足够覆盖到 16384px 的世界宽度。
+ */
+const GBUF_N = 2048;
+const gBuf = new Float64Array(GBUF_N);
+const gOk = new Uint8Array(GBUF_N);
 /** 逐段受光值（-1 背光 … +1 受光），模块级复用 → 逐帧零分配 */
-const lBuf = new Float64Array(4096);
+const lBuf = new Float64Array(GBUF_N);
+
+/** 当前渲染缩放（防御性：zoom 非法时按 1 处理，避免除出 Infinity） */
+function zoomNow() {
+  const z = store.cam.zoom;
+  return z > 0.01 ? z : 1;
+}
 
 /** 作废缓存：相机逐帧移动，所以每帧开头调一次即可 */
 function invalidateGround() {
@@ -228,7 +249,7 @@ function invalidateGround() {
 }
 /** 填好当前相机位置下的地面高度，返回有效采样点数 */
 function groundBuf(cx) {
-  const n = Math.min(4096, (Math.ceil(view.W / GS) + 2) | 0);
+  const n = Math.min(GBUF_N, (Math.ceil(view.W / zoomNow() / GS) + 2) | 0);
   for (let i = 0; i < n; i++) {
     if (!gOk[i]) {
       gBuf[i] = groundY(cx + i * GS);
@@ -239,20 +260,21 @@ function groundBuf(cx) {
 }
 
 export function drawTerrain(cx, cy) {
-  const W = view.W;
-  const H = view.H;
+  // ★ W/H 是**世界**尺寸：绘制发生在 ctx.scale(zoom) 之内，
+  //   可视世界范围 = view.W / zoom。沿用屏幕尺寸会让缩放 < 1 时右半屏空着。
+  const W = view.W / zoomNow();
+  const H = view.H / zoomNow();
   const T = THEMES[store.phys.theme] || THEMES[0];
   const pal = T.pal;
   invalidateGround();
   const n = groundBuf(cx);
-  void n;
 
   // 主体
   ctx.fillStyle = pal[0];
   ctx.beginPath();
   ctx.moveTo(0, cy);
   let lastG = cy;
-  for (let i = 0, x = 0; x <= W; x += GS, i++) {
+  for (let i = 0, x = 0; x <= W && i < n; x += GS, i++) {
     const gy = gBuf[i];
     if (gy === Infinity) ctx.lineTo(x, lastG);
     else {
@@ -270,7 +292,7 @@ export function drawTerrain(cx, cy) {
   ctx.strokeStyle = pal[1];
   ctx.lineWidth = 8;
   ctx.beginPath();
-  for (let i = 0, x = 0; x <= W; x += GS, i++) {
+  for (let i = 0, x = 0; x <= W && i < n; x += GS, i++) {
     const gy = gBuf[i];
     if (gy === Infinity) continue;
     ctx.lineTo(x, gy - cy - 8);
@@ -281,7 +303,7 @@ export function drawTerrain(cx, cy) {
   ctx.fillStyle = token("fx-shadow-faint");
   ctx.beginPath();
   ctx.moveTo(0, cy);
-  for (let i = 0, x = 0; x <= W; x += GS, i++) {
+  for (let i = 0, x = 0; x <= W && i < n; x += GS, i++) {
     const gy = gBuf[i];
     if (gy === Infinity) ctx.lineTo(x, lastG);
     else ctx.lineTo(x, Math.min(gy + 40, cy + H) - cy);
@@ -306,7 +328,9 @@ export function drawTerrain(cx, cy) {
     const gain = isHi ? 1.5 : 0.7;      // 坡度 → 受光强度的增益
     const depth = isHi ? 170 : 95;     // 明暗向下渐隐的距离（越短越"贴地"）
     const maxA = isHi ? 0.4 : 0.15;    // 单段最大不透明度
-    const segs = Math.ceil(W / GS) + 1;
+    // ★ segs 必须夹到采样点数以内：下面两趟都要读 gBuf[i + 1]，
+    //   而 W 已是世界宽度（高速时是屏幕宽的 2.4 倍），不夹就会越界读到陈旧数据。
+    const segs = Math.min(n - 1, Math.ceil(W / GS) + 1);
 
     // 逐段坡度 → 受光值
     for (let i = 0; i < segs; i++) {
@@ -365,7 +389,7 @@ export function drawTerrain(cx, cy) {
       ctx.fillStyle = token("fx-lit-top");
       ctx.beginPath();
       ctx.moveTo(0, H);
-      for (let i = 0, x = 0; x <= W; x += GS, i++) {
+      for (let i = 0, x = 0; x <= W && i < n; x += GS, i++) {
         const gy = gBuf[i];
         ctx.lineTo(x, gy === Infinity ? H : gy - cy);
       }

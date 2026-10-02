@@ -666,27 +666,77 @@ const MAXED = { engine: MAX_LV, tire: MAX_LV, frame: MAX_LV, susp: MAX_LV };
 const BY_PRICE = VEHICLES.map((v, i) => ({ v, i }))
   .sort((a, b) => a.v.price - b.v.price || a.i - b.i);
 
+/**
+ * 车辆卡片的**属性网格**。
+ *
+ * ★ 为什么从一行文字改成网格：原来把 6 项属性塞进一行 meta，
+ *   27 辆车连排时每张卡都是一长串"速度260% · 驱动300% · 抓地300% · 旋转55% · 油箱340% · 满级极速 66 km/h"，
+ *   在窄屏上还会被 ellipsis 截断 —— 于是"贵的车到底贵在哪"根本读不出来，
+ *   车库看上去就是一堵字墙。改成 2×3 的小格后，
+ *   **满级极速单独占一格并用主色**，横向比价时眼睛会自然落在那一列上。
+ */
+function vehStatGrid(v) {
+  const cell = (k, val, hi) =>
+    `<div class="vsCell${hi ? " hi" : ""}"><span>${k}</span><b>${val}</b></div>`;
+  return `<div class="vsGrid">
+    ${cell("极速", Math.round(toKmh(topSpeedOf(v, MAXED))) + " <i>km/h</i>", true)}
+    ${cell("抓地", Math.round(v.grip * 100) + "%")}
+    ${cell("驱动", Math.round(v.phys.torque * 100) + "%")}
+    ${cell("油箱", Math.round(v.fuel * 100) + "%")}
+    ${cell("重量", Math.round(v.weight * 100) + "%")}
+    ${cell("旋转", Math.round(v.airRot * 100) + "%")}
+  </div>`;
+}
+
+/** 档位徽标：价格阶梯之外的第二层信息（同名档位一眼可辨） */
+const TIER_CLS = {
+  普通: "tier0", 稀有: "tier1", 史诗: "tier2", 传说: "tier3", 神话: "tier4",
+};
+
+/**
+ * 车库渲染。
+ *
+ * ★ 结构改成"按档位分组"而不是一张 27 项的长列表：
+ *   价格升序排下来，普通档 8 台会占掉整整两屏，玩家要滑很久才够得到神话档。
+ *   分组后每个档位自成一块，标题里直接写"这一档多少钱、买得起哪几台"。
+ */
 export function renderGaragePanel() {
   panelKind = "garage";
-  showPanel(`<div class="modeTitle">🏍️ 车库</div>
-  ${BY_PRICE.map(({ v, i }) => {
-    const own = store.ownedVehicles.includes(i);
-    const sel = i === store.currentVehicle;
-    return card({
-      cls: "vehCard",
-      icon: v.icon,
-      title: v.name,
-      sub: v.desc,
-      // 末位是**满级真实可达极速**（与 HUD 表盘满量程同源）：两台车的差价到底换来了
-      // 多少速度，一眼可比，不必买回去试。
-      // ★ 「驱动」读的是 phys.torque —— 物理真正用的就是它。曾经这里读另一个
-      //   字段，26 辆里有 8 辆与实际扭矩倍率对不上（终局车显示 240%、实际 300%）。
-      meta: `速度${Math.round(v.speed * 100)}% · 驱动${Math.round(v.phys.torque * 100)}% · 抓地${Math.round(v.grip * 100)}% · 旋转${Math.round(v.airRot * 100)}% · 油箱${Math.round(v.fuel * 100)}% · 满级极速 <b>${Math.round(toKmh(topSpeedOf(v, MAXED)))} km/h</b>`,
-      right: sel ? "✅ 使用中" : own ? "已拥有" : "🪙 " + v.price.toLocaleString(),
-      interactive: true,
-      selected: sel,
-      attrs: `data-act="veh" data-veh="${i}"`,
-    }) + (own ? "" : buyBlock(v, i)) + (v.ultra ? ultraBlock(v, i) : "");
+  // 按档位分组，组内保持价格升序（BY_PRICE 已经是价格升序）
+  const groups = [];
+  for (const { v, i } of BY_PRICE) {
+    let g = groups.find((x) => x.tier === v.tier);
+    if (!g) { g = { tier: v.tier, items: [] }; groups.push(g); }
+    g.items.push({ v, i });
+  }
+  showPanel(`<div class="modeTitle">🏍️ 车库 · ${VEHICLES.length} 辆</div>
+  ${groups.map((g) => {
+    const prices = g.items.map((x) => x.v.price).filter((p) => p > 0);
+    const lo = prices.length ? Math.min(...prices) : 0;
+    const hi = prices.length ? Math.max(...prices) : 0;
+    const owned = g.items.filter((x) => store.ownedVehicles.includes(x.i)).length;
+    const range = lo === hi ? lo.toLocaleString() : lo.toLocaleString() + " → " + hi.toLocaleString();
+    return `<section class="vehGroup">
+      <h3 class="vehGroupHead ${TIER_CLS[g.tier] || ""}">
+        <b>${g.tier}</b>
+        <span class="vehGroupMeta">${g.items.length} 辆 · 已拥有 ${owned}/${g.items.length} · 🪙 ${range}</span>
+      </h3>
+      ${g.items.map(({ v, i }) => {
+        const own = store.ownedVehicles.includes(i);
+        const sel = i === store.currentVehicle;
+        return card({
+          cls: "vehCard" + (sel ? " isSel" : ""),
+          icon: v.icon,
+          title: v.name + `<span class="vehTier ${TIER_CLS[v.tier] || ""}">${v.tier}</span>`,
+          sub: v.desc,
+          body: vehStatGrid(v),
+          right: sel ? "✅<br>使用中" : own ? "已<br>拥有" : "🪙<br>" + v.price.toLocaleString(),
+          interactive: true,
+          selected: sel,
+          attrs: `data-act="veh" data-veh="${i}"`,
+        }) + (own ? "" : buyBlock(v, i)) + (v.ultra ? ultraBlock(v, i) : "");
+      }).join("")}
+    </section>`;
   }).join("")}
   <div class="panelNote" id="pnNote"></div>
   <button class="btn backBtn" data-act="back">返回</button>`);

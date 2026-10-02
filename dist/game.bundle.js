@@ -134,11 +134,20 @@
   var ABSOLUT_DRAG_K = 0.00013;
   var ABSOLUT_THRUST_K = 1;
   var ABSOLUT_SERVO_ACC = 1.2;
+  var OMEGA_KMH = 1000;
+  var OMEGA_V = OMEGA_KMH / 3.6 * PX_PER_M;
+  var OMEGA_DRAG_K = 0.000115;
+  var OMEGA_THRUST_K = 1;
+  var OMEGA_SERVO_ACC = 0.55;
+  var FLIGHT_HOVER = 78;
+  var FLIGHT_HOVER_K = 9;
+  var FLIGHT_HOVER_LP = 18;
+  var FLIGHT_PITCH_K = 0.55;
   var GRAV_BASE = 750;
   var REAR_LOAD = 0.62;
   var WHEELIE_K = 2;
   var wheelieTauOf = (mTot, gravity) => mTot * gravity * WHEELBASE * 0.5 * WHEELIE_K;
-  var TOP_SPEED_CAP = 12000;
+  var TOP_SPEED_CAP = 40000;
   function topSpeedOf(veh, up) {
     const p = veh && veh.phys || {};
     const u = up || {};
@@ -191,7 +200,7 @@
   var FN_MAX_K = 40;
   var PEN_TOL = 2;
   var HEAD_R = 18;
-  var NUM_CAP_V = 20000;
+  var NUM_CAP_V = 60000;
   var TORQUE_PEAK_BASE = 18000;
   var TORQUE_RPM_BASE = 18;
   var TORQUE_FADE_LO = 1.6;
@@ -793,6 +802,46 @@
       }
     },
     {
+      id: "omega",
+      name: "归墟",
+      icon: "☄️",
+      desc: "究极之上：1000 km/h · 全程飞行 · 撞不烂",
+      tier: "神话",
+      costK: 177054,
+      price: 800000000,
+      speed: 2.6,
+      grip: 6,
+      weight: 1.42,
+      airRot: 0.5128,
+      fuel: 4,
+      color: "#e0f0ff",
+      hover: true,
+      art: ART({
+        tire: 1.4,
+        rim: false,
+        spokes: 16,
+        spokeW: 0.6,
+        tube: 2,
+        topDrop: 14,
+        coil: 0,
+        bar: "drop",
+        saddleW: 5,
+        helmR: 5.6,
+        peak: false,
+        vents: 2,
+        pose: POSE(10, 11, 13, 10, 5, 9)
+      }),
+      phys: P(1.42, 1.95, 1.7, 1.5, 12, 2.4, 3.2),
+      ultra: {
+        fx: {},
+        name: "终焉形态",
+        icon: "☄️",
+        mode: "omega",
+        cost: 10000000000,
+        desc: "1000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
+      }
+    },
+    {
       id: "commuter",
       name: "蜂鸟",
       icon: "\uD83D\uDC26",
@@ -1286,7 +1335,7 @@
     },
     shopOpen: false,
     donateOpen: false,
-    cam: { x: 0, y: 0, zoom: 1.4, shake: 0 },
+    cam: { x: 0, y: 0, zoom: 1.4, zoomBase: 1.4, shake: 0 },
     phys: {
       theme: 0,
       floorY: 0,
@@ -1334,6 +1383,7 @@
     grounded: 0,
     speed: 0,
     boostT: 0,
+    hoverY: 0,
     wheelAngleRear: 0,
     wheelAngleFront: 0,
     awaitingStart: true,
@@ -1449,6 +1499,7 @@
   var comboTimer = null;
   var TOAST_LEVELS = ["info", "success", "warn", "danger"];
   var TOAST_MAX = 2;
+  var TOAST_QUEUE_MAX = 4;
   var TOAST_ICON = { info: "ℹ️", success: "✅", warn: "⚠️", danger: "⛔" };
   var live = [];
   var queue = [];
@@ -1486,33 +1537,54 @@
       requestAnimationFrame(show);
     else
       show();
-    const finish = () => {
-      const i = live.indexOf(item);
-      if (i >= 0)
-        live.splice(i, 1);
-      if (el.classList && el.classList.remove)
-        el.classList.remove("show");
-      if (typeof el.remove === "function")
-        el.remove();
-      const next = queue.shift();
-      if (next)
-        present(next);
-    };
-    if (typeof setTimeout === "function")
-      setTimeout(finish, item.ms);
+    item.timer = setTimeout(() => finish(item), item.ms);
+  }
+  function finish(item) {
+    const i = live.indexOf(item);
+    if (i >= 0)
+      live.splice(i, 1);
+    if (item.timer)
+      clearTimeout(item.timer);
+    item.timer = 0;
+    if (item.el) {
+      if (item.el.classList && item.el.classList.remove)
+        item.el.classList.remove("show");
+      if (typeof item.el.remove === "function")
+        item.el.remove();
+    }
+    const next = queue.shift();
+    if (next)
+      present(next);
+  }
+  function restartTimer(item) {
+    if (item.timer)
+      clearTimeout(item.timer);
+    item.timer = setTimeout(() => finish(item), item.ms);
   }
   function showToast(txt, ms, level) {
     const lv = TOAST_LEVELS.includes(level) ? level : inferLevel(txt);
-    const item = {
-      txt: String(txt === undefined || txt === null ? "" : txt),
-      ms: ms || 900,
-      level: lv,
-      el: null
-    };
-    if (live.length >= TOAST_MAX)
+    const text = String(txt === undefined || txt === null ? "" : txt);
+    const shown = live.find((it) => it.txt === text);
+    if (shown) {
+      if (ms)
+        shown.ms = ms;
+      restartTimer(shown);
+      return lv;
+    }
+    const qi = queue.findIndex((it) => it.txt === text);
+    if (qi >= 0) {
+      if (ms)
+        queue[qi].ms = ms;
+      return lv;
+    }
+    const item = { txt: text, ms: ms || 900, level: lv, el: null, timer: 0 };
+    if (live.length >= TOAST_MAX) {
       queue.push(item);
-    else
+      while (queue.length > TOAST_QUEUE_MAX)
+        queue.shift();
+    } else {
       present(item);
+    }
     return lv;
   }
   function showCombo(txt) {
@@ -3716,10 +3788,10 @@
       const st = store.state;
       if (e.code === "Minus" || e.code === "Equal") {
         e.preventDefault();
-        const z = clamp(store.cam.zoom + (e.code === "Equal" ? 0.15 : -0.15), 0.6, 2.5);
-        if (z !== store.cam.zoom) {
-          store.cam.zoom = z;
-          showToast("缩放 " + Math.round(store.cam.zoom * 100) + "%", 600);
+        const z = clamp(store.cam.zoomBase + (e.code === "Equal" ? 0.15 : -0.15), 0.6, 2.5);
+        if (z !== store.cam.zoomBase) {
+          store.cam.zoomBase = z;
+          showToast("缩放基准 " + Math.round(z * 100) + "%", 600);
         }
         return;
       }
@@ -4137,7 +4209,8 @@
     railgun: {},
     surge: {},
     warp: {},
-    absolut: { noCrash: true, noFuel: true, noHazard: true }
+    absolut: { noCrash: true, noFuel: true, noHazard: true },
+    omega: { fly: true, noCrash: true, noFuel: true, noHazard: true }
   };
   function ultraFlags() {
     return MODE_FLAGS[activeMode()] || {};
@@ -4151,6 +4224,12 @@
   }
   function isUltraStable() {
     return ultraFlags().pinGround === true;
+  }
+  function isFlighter() {
+    if (ultraFlags().fly === true)
+      return true;
+    const v = VEHICLES[store.currentVehicle];
+    return !!(v && v.hover);
   }
   function isCrashImmune() {
     return ultraFlags().noCrash === true;
@@ -4183,6 +4262,84 @@
     b.head.py = midY - SEAT_H;
     b.head._vy = 0;
   }
+  function flightStep(P, dt, throttle, brk, rev) {
+    const b = bike;
+    const sv = systemVel(b);
+    const vx = sv.vx;
+    const base = P.baseTopSpeed || P.topSpeed;
+    const cap = P.mu * P.rb.mTot * P.gravity * REAR_LOAD * OMEGA_THRUST_K;
+    const cruise = activeMode() === "omega" ? P.topSpeed : P.baseTopSpeed || P.topSpeed;
+    let target;
+    if (rev)
+      target = -base * REV_SPEED;
+    else if (brk)
+      target = 0;
+    else if (throttle)
+      target = cruise;
+    else
+      target = 0;
+    const dragK = activeMode() === "omega" ? OMEGA_DRAG_K : P.airDragK;
+    const ff = Math.min(cap, dragK * target * target / P.rb.mTot);
+    const drag = dragK * vx * Math.abs(vx) / P.rb.mTot;
+    const push = clamp((target - vx) * OMEGA_SERVO_ACC + ff - drag, -cap, cap);
+    const nextVx = brk ? clamp(vx - P.brakePeak * 0.6 * dt, -base * REV_SPEED, base * REV_SPEED) : vx + push * dt;
+    const midX = (b.rear.x + b.front.x) * 0.5;
+    const g = groundInfo(midX);
+    const n = groundNormal(midX);
+    const restY = (isFinite(g.y) ? g.y : b.rear.y) + n.y * (FLIGHT_HOVER + WHEEL_R);
+    const curY = (b.rear.y + b.front.y) * 0.5;
+    b.hoverY += (restY - b.hoverY) * Math.min(1, dt * FLIGHT_HOVER_LP);
+    const vTarget = clamp((b.hoverY - curY) * FLIGHT_HOVER_K, -1600, 1600);
+    const nextVy = clamp(sv.vy + ((vTarget - sv.vy) * FLIGHT_HOVER_K - P.gravity) * dt, -2400, 2400);
+    const surfAng = Math.atan2(n.x, -n.y);
+    const curAng = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
+    const dAng = wrapAngle(surfAng * FLIGHT_PITCH_K - curAng);
+    rotateAroundMid(b, clamp(dAng, -0.08, 0.08));
+    for (const p of b.pts) {
+      p._vx = nextVx;
+      p._vy = nextVy;
+      p.px = p.x - nextVx * DT;
+      p.py = p.y - nextVy * DT;
+      p.x += nextVx * DT;
+      p.y += nextVy * DT;
+    }
+    const w = nextVx / WHEEL_R;
+    for (const wk of WHEELS) {
+      b.wheelRot[wk] += (w - b.wheelRot[wk]) * Math.min(1, dt * 40);
+    }
+    b.grounded = 0;
+  }
+  function rotateAroundMid(b, ang) {
+    if (!ang)
+      return;
+    const c = Math.cos(ang);
+    const s = Math.sin(ang);
+    let mx = 0, my = 0, mt = 0;
+    for (const p of b.pts) {
+      mx += p.x * p.m;
+      my += p.y * p.m;
+      mt += p.m;
+    }
+    if (!(mt > 0))
+      return;
+    mx /= mt;
+    my /= mt;
+    const sv = systemVel(b);
+    const sub = DT;
+    for (const p of b.pts) {
+      const rx = p.x - mx;
+      const ry = p.y - my;
+      p.x = mx + rx * c - ry * s;
+      p.y = my + rx * s + ry * c;
+      const rvx = p._vx - sv.vx;
+      const rvy = p._vy - sv.vy;
+      p._vx = sv.vx + rvx * c - rvy * s;
+      p._vy = sv.vy + rvx * s + rvy * c;
+      p.px = p.x - p._vx * sub;
+      p.py = p.y - p._vy * sub;
+    }
+    b.lastAng = wrapAngle(b.lastAng + ang);
+  }
   function applyUpgrades() {
     const v = VEHICLES[store.currentVehicle];
     const up = getUp();
@@ -4211,6 +4368,9 @@
     } else if (mode === "absolut") {
       store.phys.topSpeed = ABSOLUT_V;
       store.phys.airDragK = ABSOLUT_DRAG_K;
+    } else if (mode === "omega") {
+      store.phys.topSpeed = OMEGA_V;
+      store.phys.airDragK = OMEGA_DRAG_K;
     } else if (mode === "warp") {
       if (fx.speedN)
         store.phys.topSpeed = topSpeedOf(v, MAXED) * fx.speedN;
@@ -4298,6 +4458,12 @@
     b.fricAcc.rear = 0;
     b.fricAcc.front = 0;
     b.boostT = 0;
+    {
+      const nx = x + L / 2;
+      const ng = groundInfo(nx);
+      const nn = groundNormal(nx);
+      b.hoverY = (isFinite(ng.y) ? ng.y : yR) + nn.y * (FLIGHT_HOVER + WHEEL_R);
+    }
     b.angRate = 0;
     b.rb = store.phys.rb;
     bindMasses(store.phys.rb);
@@ -4776,9 +4942,24 @@
     const fx = ultraFx();
     const warp = mode0 === "warp";
     const absolut = mode0 === "absolut";
+    const omega = mode0 === "omega";
+    const hover = isFlighter();
+    const ang0 = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
+    if (hover && !run.crashed) {
+      flightStep(P, DT, drvK, brkK, rev);
+      b.speed = lerp(b.speed, systemVel(b).vx, 0.12);
+      const angF = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
+      b.angRate = wrapAngle(angF - ang0) / DT;
+      b.wheelStepRear = b.wheelRot.rear * DT;
+      b.wheelStepFront = b.wheelRot.front * DT;
+      b.wheelAngleRear = (b.wheelAngleRear + b.wheelStepRear) % TAU;
+      b.wheelAngleFront = (b.wheelAngleFront + b.wheelStepFront) % TAU;
+      b.squash = 0;
+      b.squashVel = 0;
+      return;
+    }
     const prevGrounded = b.grounded;
     const prevSpin = { rear: b.wheelRot.rear, front: b.wheelRot.front };
-    const ang0 = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
     b._impactV = 0;
     b.penetration = 0;
     b.solverIters = 0;
@@ -4801,7 +4982,8 @@
           add = clamp((P.topSpeed * 0.98 - svw.vx) * acc * sub, 0, cap * sub);
         } else {
           const grip = P.mu * P.rb.mTot * P.gravity * REAR_LOAD;
-          add = clamp((P.topSpeed - svw.vx) * ABSOLUT_SERVO_ACC * sub, 0, grip * ABSOLUT_THRUST_K * sub);
+          const ff = P.airDragK * P.topSpeed * P.topSpeed / P.rb.mTot;
+          add = clamp((P.topSpeed - svw.vx) * ABSOLUT_SERVO_ACC * sub + ff * sub, 0, grip * ABSOLUT_THRUST_K * sub);
         }
         for (const p of b.pts)
           p._vx += add;
@@ -4933,20 +5115,48 @@
   function addShake(v) {
     store.cam.shake = Math.min(16, store.cam.shake + v);
   }
+  var CAM_TAU = 0.11;
+  var CAM_ZOOM_REF = 700;
+  var CAM_ZOOM_GAMMA = 0.5;
+  var CAM_ZOOM_MIN = 0.32;
+  var CAM_ZOOM_LERP = 0.05;
+  function speedOf() {
+    let vx = 0;
+    let mt = 0;
+    for (const p of bike.pts) {
+      vx += p._vx * p.m;
+      mt += p.m;
+    }
+    return mt > 0 ? Math.abs(vx / mt) : 0;
+  }
+  function camZoomOf(v, base) {
+    if (!(v > CAM_ZOOM_REF))
+      return base;
+    const k = Math.pow(CAM_ZOOM_REF / v, CAM_ZOOM_GAMMA);
+    return Math.max(CAM_ZOOM_MIN, base * k);
+  }
   function updateCamera(dt) {
     if (store.state === "pause")
       return;
     const cam = store.cam;
     const mx = (bike.rear.x + bike.front.x) / 2;
     const my = (bike.rear.y + bike.front.y) / 2;
-    const zoom = cam.zoom;
-    const spdN = clamp(Math.abs(bike.speed) / Math.max(1, store.phys.topSpeed), 0, 1);
-    const lead = Math.sign(bike.speed) * spdN * view.W * 0.055 / zoom;
-    const maxX = store.mode === "free" ? Infinity : Math.max(0, store.finishX - view.W * 0.45 / zoom);
-    const targetX = clamp(mx + lead - view.W * 0.38 / zoom, 0, maxX);
-    const targetY = my - view.H * 0.55 / zoom + spdN * view.H * 0.02;
-    cam.x = lerp(cam.x, targetX, 0.1);
-    cam.y = lerp(cam.y, targetY, 0.3);
+    const v = speedOf();
+    const zTarget = camZoomOf(v, cam.zoomBase);
+    const zl = 1 - Math.pow(1 - CAM_ZOOM_LERP, dt * 60);
+    cam.zoom = lerp(cam.zoom, zTarget, zl);
+    const zoom = cam.zoom > 0.01 ? cam.zoom : 1;
+    const worldW = view.W / zoom;
+    const worldH = view.H / zoom;
+    const spdN = clamp(v / Math.max(1, store.phys.topSpeed), 0, 1);
+    const lead = Math.sign(bike.speed || 1) * spdN * worldW * 0.1 / 1;
+    const maxX = store.mode === "free" ? Infinity : Math.max(0, store.finishX - worldW * 0.45);
+    const targetX = clamp(mx + lead - worldW * 0.38, 0, maxX);
+    const a = 1 - Math.exp(-dt / CAM_TAU);
+    cam.x += (targetX - cam.x) * a + (bike.speed ? bike.speed : 0) * dt * (1 - a);
+    const targetY = my - worldH * 0.55 + spdN * worldH * 0.02;
+    const ay = 1 - Math.pow(1 - 0.3, dt * 60);
+    cam.y = lerp(cam.y, targetY, ay);
     if (cam.shake > 0.06)
       cam.shake *= Math.pow(0.86, dt * 60);
     else
@@ -5305,7 +5515,8 @@
   }
   function freeFill() {
     const rng = Math.random;
-    const viewR = store.cam.x + view.W * 2;
+    const z = store.cam.zoom > 0.01 ? store.cam.zoom : 1;
+    const viewR = store.cam.x + view.W / z * 2;
     let guard = 0;
     while (world.freeGenX < viewR && guard++ < 200) {
       const d = Math.max(0, world.freeGenX - 400);
@@ -5718,32 +5929,44 @@
   }
   function handleFuelEmpty() {
     if (store.mode === "free") {
-      const mx = (bike.rear.x + bike.front.x) / 2;
-      const dist = Math.round(toM(mx));
-      let record = false;
-      if (dist > store.best) {
-        store.best = dist;
-        save();
-        record = true;
-      }
-      store.state = "ended";
-      addStat({
-        runs: 1,
-        meters: dist,
-        seconds: Math.max(0, store.time - store.run.levelStartTime)
-      });
-      showToast("⛽ 燃料耗尽 · 本次 " + dist + "m" + (record ? " \uD83C\uDFC5 新纪录！" : ""), 1600);
-      setTimeout(runGuard(() => {
-        store.state = "menu";
-        presenter.toMenu();
-        store.raceAI = null;
-        store.racers = [];
-      }), 1600);
+      endFreeRun("⛽ 燃料耗尽");
     } else {
       setFuel(store.phys.fuelMax * 0.3);
       respawn();
       showToast("⛽ 燃料耗尽！回到安全点", 900);
     }
+  }
+  function endFreeRun(reason) {
+    const mx = (bike.rear.x + bike.front.x) / 2;
+    const dist = Math.round(toM(mx));
+    let record = false;
+    if (dist > store.best) {
+      store.best = dist;
+      save();
+      record = true;
+    }
+    store.state = "ended";
+    store.run.settling = true;
+    addStat({
+      runs: 1,
+      meters: dist,
+      seconds: Math.max(0, store.time - store.run.levelStartTime)
+    });
+    showToast(reason + " · 本次 " + dist + "m" + (record ? " \uD83C\uDFC5 新纪录！" : ""), 1600);
+    setTimeout(runGuard(() => {
+      store.state = "menu";
+      presenter.toMenu();
+      store.raceAI = null;
+      store.racers = [];
+    }), 1600);
+  }
+  function quitFreeRun() {
+    if (store.mode !== "free" || store.state !== "play")
+      return false;
+    if (store.run.settling)
+      return false;
+    endFreeRun("\uD83C\uDFC1 主动结束");
+    return true;
   }
   function finishLevel() {
     const run = store.run;
@@ -6479,7 +6702,8 @@
 
   // src/render/terrain.js
   function eachGround(cx, cy, step, fn) {
-    for (let x = 0;x <= view.W; x += step) {
+    const w = view.W / zoomNow();
+    for (let x = 0;x <= w; x += step) {
       const wx = x + cx;
       const gy = groundY(wx);
       if (gy === Infinity)
@@ -6581,9 +6805,10 @@
     strata(s, cx, cy) {
       ctx.strokeStyle = s.color;
       ctx.lineWidth = 3;
+      const w = view.W / zoomNow();
       for (let dy = 12;dy <= 48; dy += 12) {
         ctx.beginPath();
-        for (let x = 0;x <= view.W; x += 10) {
+        for (let x = 0;x <= w; x += 10) {
           const gy = groundY(x + cx);
           if (gy === Infinity)
             continue;
@@ -6664,14 +6889,19 @@
     }
   };
   var GS = 8;
-  var gBuf = new Float64Array(4096);
-  var gOk = new Uint8Array(4096);
-  var lBuf = new Float64Array(4096);
+  var GBUF_N = 2048;
+  var gBuf = new Float64Array(GBUF_N);
+  var gOk = new Uint8Array(GBUF_N);
+  var lBuf = new Float64Array(GBUF_N);
+  function zoomNow() {
+    const z = store.cam.zoom;
+    return z > 0.01 ? z : 1;
+  }
   function invalidateGround() {
     gOk.fill(0);
   }
   function groundBuf(cx) {
-    const n = Math.min(4096, Math.ceil(view.W / GS) + 2 | 0);
+    const n = Math.min(GBUF_N, Math.ceil(view.W / zoomNow() / GS) + 2 | 0);
     for (let i = 0;i < n; i++) {
       if (!gOk[i]) {
         gBuf[i] = groundY(cx + i * GS);
@@ -6681,8 +6911,8 @@
     return n;
   }
   function drawTerrain(cx, cy) {
-    const W = view.W;
-    const H = view.H;
+    const W = view.W / zoomNow();
+    const H = view.H / zoomNow();
     const T = THEMES[store.phys.theme] || THEMES[0];
     const pal = T.pal;
     invalidateGround();
@@ -6691,7 +6921,7 @@
     ctx.beginPath();
     ctx.moveTo(0, cy);
     let lastG = cy;
-    for (let i = 0, x = 0;x <= W; x += GS, i++) {
+    for (let i = 0, x = 0;x <= W && i < n; x += GS, i++) {
       const gy = gBuf[i];
       if (gy === Infinity)
         ctx.lineTo(x, lastG);
@@ -6708,7 +6938,7 @@
     ctx.strokeStyle = pal[1];
     ctx.lineWidth = 8;
     ctx.beginPath();
-    for (let i = 0, x = 0;x <= W; x += GS, i++) {
+    for (let i = 0, x = 0;x <= W && i < n; x += GS, i++) {
       const gy = gBuf[i];
       if (gy === Infinity)
         continue;
@@ -6718,7 +6948,7 @@
     ctx.fillStyle = token("fx-shadow-faint");
     ctx.beginPath();
     ctx.moveTo(0, cy);
-    for (let i = 0, x = 0;x <= W; x += GS, i++) {
+    for (let i = 0, x = 0;x <= W && i < n; x += GS, i++) {
       const gy = gBuf[i];
       if (gy === Infinity)
         ctx.lineTo(x, lastG);
@@ -6738,7 +6968,7 @@
       const gain = isHi ? 1.5 : 0.7;
       const depth = isHi ? 170 : 95;
       const maxA = isHi ? 0.4 : 0.15;
-      const segs = Math.ceil(W / GS) + 1;
+      const segs = Math.min(n - 1, Math.ceil(W / GS) + 1);
       for (let i = 0;i < segs; i++) {
         const a0 = gBuf[i];
         const b0 = gBuf[i + 1];
@@ -6787,7 +7017,7 @@
         ctx.fillStyle = token("fx-lit-top");
         ctx.beginPath();
         ctx.moveTo(0, H);
-        for (let i = 0, x = 0;x <= W; x += GS, i++) {
+        for (let i = 0, x = 0;x <= W && i < n; x += GS, i++) {
           const gy = gBuf[i];
           ctx.lineTo(x, gy === Infinity ? H : gy - cy);
         }
@@ -6800,12 +7030,16 @@
   }
 
   // src/render/entities.js
+  function visW() {
+    const z = store.cam.zoom;
+    return view.W / (z > 0.01 ? z : 1);
+  }
   function drawDeco(cx, cy) {
     const q = getQuality();
     const shade = q === "medium" || q === "high";
     for (const t of world.decoFore) {
       const sx = t.x - cx;
-      if (sx < -60 || sx > view.W + 60)
+      if (sx < -60 || sx > visW() + 60)
         continue;
       if (shade) {
         ctx.fillStyle = token("obj-shadow");
@@ -6823,7 +7057,7 @@
     ctx.globalAlpha = 0.62;
     for (const r of world.decoBack) {
       const sx = r.x - cx;
-      if (sx < -60 || sx > view.W + 60)
+      if (sx < -60 || sx > visW() + 60)
         continue;
       drawDecoItem(sx, r.y - cy, r.kind, r.s * 0.8, r.ph);
     }
@@ -7210,7 +7444,7 @@
       if (c.taken)
         continue;
       const sx = c.x - cx;
-      if (sx < -20 || sx > view.W + 20)
+      if (sx < -20 || sx > visW() + 20)
         continue;
       const y = c.y - cy;
       const sxr = Math.sin(c.ph) * 6;
@@ -7232,7 +7466,7 @@
       if (c.taken)
         continue;
       const sx = c.x - cx;
-      if (sx < -30 || sx > view.W + 30)
+      if (sx < -30 || sx > visW() + 30)
         continue;
       const y = c.y - cy;
       const bob = Math.sin(c.ph) * 3;
@@ -7261,7 +7495,7 @@
       if (b.taken)
         continue;
       const sx = b.x - cx;
-      if (sx < -60 || sx > view.W + 60)
+      if (sx < -60 || sx > visW() + 60)
         continue;
       const y = b.y - cy;
       const t = store.time * 3.2 + b.ph;
@@ -7293,7 +7527,7 @@
     if (!isFinite(finishX))
       return;
     const sx = finishX - cx;
-    if (sx < -20 || sx > view.W + 20)
+    if (sx < -20 || sx > visW() + 20)
       return;
     const gy = groundY(finishX);
     if (gy === Infinity)
@@ -7322,7 +7556,7 @@
   function drawJumps(cx, cy) {
     for (const j of world.jumps) {
       const sx = j.x - cx;
-      if (sx < -90 || sx > view.W + 90)
+      if (sx < -90 || sx > visW() + 90)
         continue;
       const y = j.y - cy;
       if (!isFinite(y))
@@ -7407,7 +7641,7 @@
     for (const h of world.hazards) {
       const a = h.x0 - cx;
       const b = h.x1 - cx;
-      if (b < -80 || a > view.W + 80)
+      if (b < -80 || a > visW() + 80)
         continue;
       const top = [];
       for (let x = h.x0;x <= h.x1; x += 22) {
@@ -7447,7 +7681,7 @@
         continue;
       const px = midX - cx;
       const py = gy - cy;
-      if (px < -80 || px > view.W + 80)
+      if (px < -80 || px > visW() + 80)
         continue;
       ctx.fillStyle = token("obj-hazard-fill");
       ctx.beginPath();
@@ -7469,7 +7703,7 @@
   function drawGates(cx, cy) {
     for (const g of world.gates) {
       const sx = g.x - cx;
-      if (sx < -80 || sx > view.W + 80)
+      if (sx < -80 || sx > visW() + 80)
         continue;
       const gy = groundY(g.x);
       if (!isFinite(gy))
@@ -7854,7 +8088,8 @@
       h: gr * 2
     };
     const drive = touch ? null : { x: (W - 104) / 2, y: H - pad - 14, w: 104, h: 14 };
-    return { info, fuel, race, warn, speed, drive };
+    const quit = store.mode === "free" ? { x: W / 2 - 62, y: H - pad - 30 - (touch ? 74 : 0), w: 124, h: 30 } : null;
+    return { info, fuel, race, warn, speed, drive, quit };
   }
   function glassRect(r, radius) {
     ctx.beginPath();
@@ -7935,9 +8170,38 @@
     drawSpeedGauge(L.speed);
     if (L.drive)
       drawDriveIndicator(L.drive);
+    if (L.quit)
+      drawQuitButton(L.quit);
     if (w)
       drawWarning(L.warn, w);
     drawSpeedLines();
+  }
+  function drawQuitButton(r) {
+    const el = quitBtn();
+    if (!el)
+      return;
+    el.style.left = r.x + "px";
+    el.style.top = r.y + "px";
+    el.style.width = r.w + "px";
+    el.style.height = r.h + "px";
+    if (el.style.display !== "flex")
+      el.style.display = "flex";
+  }
+  var _quitEl = null;
+  function quitBtn() {
+    if (_quitEl)
+      return _quitEl;
+    if (typeof document === "undefined" || !document.createElement)
+      return null;
+    const el = document.createElement("button");
+    el.id = "btnQuitRun";
+    el.type = "button";
+    el.className = "hudQuit";
+    el.textContent = "⏹ 结束本局";
+    el.setAttribute("aria-label", "结束无限模式本局并结算里程");
+    document.body.appendChild(el);
+    _quitEl = el;
+    return el;
   }
   function drawInfoCard(r) {
     const x = r.x;
@@ -7973,7 +8237,7 @@
         info.push("⏱ 第" + (store.run.gateIdx + 1) + "门 " + rem.toFixed(1) + "s");
       }
       if (!info.length)
-        info.push("缩放 " + Math.round(store.cam.zoom * 100) + "% · R 重启 · +/- 缩放");
+        info.push("缩放 " + Math.round(store.cam.zoomBase * 100) + "% · R 重启 · +/- 缩放");
     }
     label(info.join("   "), x, r.y + 30, "caption", token("text-mid"));
     const mx = (bike.rear.x + bike.front.x) / 2;
@@ -8310,6 +8574,13 @@
         showMenu();
     });
   }
+  document.addEventListener("click", (e) => {
+    const el = e.target && e.target.closest ? e.target.closest(".hudQuit") : null;
+    if (!el)
+      return;
+    e.preventDefault();
+    quitFreeRun();
+  });
   function renderHeroSummary() {
     if (!heroSummary)
       return;
@@ -9052,23 +9323,63 @@
   }
   var MAXED = { engine: MAX_LV, tire: MAX_LV, frame: MAX_LV, susp: MAX_LV };
   var BY_PRICE = VEHICLES.map((v, i) => ({ v, i })).sort((a, b) => a.v.price - b.v.price || a.i - b.i);
+  function vehStatGrid(v) {
+    const cell = (k, val, hi) => `<div class="vsCell${hi ? " hi" : ""}"><span>${k}</span><b>${val}</b></div>`;
+    return `<div class="vsGrid">
+    ${cell("极速", Math.round(toKmh(topSpeedOf(v, MAXED))) + " <i>km/h</i>", true)}
+    ${cell("抓地", Math.round(v.grip * 100) + "%")}
+    ${cell("驱动", Math.round(v.phys.torque * 100) + "%")}
+    ${cell("油箱", Math.round(v.fuel * 100) + "%")}
+    ${cell("重量", Math.round(v.weight * 100) + "%")}
+    ${cell("旋转", Math.round(v.airRot * 100) + "%")}
+  </div>`;
+  }
+  var TIER_CLS = {
+    普通: "tier0",
+    稀有: "tier1",
+    史诗: "tier2",
+    传说: "tier3",
+    神话: "tier4"
+  };
   function renderGaragePanel() {
     panelKind = "garage";
-    showPanel(`<div class="modeTitle">\uD83C\uDFCD️ 车库</div>
-  ${BY_PRICE.map(({ v, i }) => {
-      const own = store.ownedVehicles.includes(i);
-      const sel = i === store.currentVehicle;
-      return card({
-        cls: "vehCard",
-        icon: v.icon,
-        title: v.name,
-        sub: v.desc,
-        meta: `速度${Math.round(v.speed * 100)}% · 驱动${Math.round(v.phys.torque * 100)}% · 抓地${Math.round(v.grip * 100)}% · 旋转${Math.round(v.airRot * 100)}% · 油箱${Math.round(v.fuel * 100)}% · 满级极速 <b>${Math.round(toKmh(topSpeedOf(v, MAXED)))} km/h</b>`,
-        right: sel ? "✅ 使用中" : own ? "已拥有" : "\uD83E\uDE99 " + v.price.toLocaleString(),
-        interactive: true,
-        selected: sel,
-        attrs: `data-act="veh" data-veh="${i}"`
-      }) + (own ? "" : buyBlock(v, i)) + (v.ultra ? ultraBlock(v, i) : "");
+    const groups = [];
+    for (const { v, i } of BY_PRICE) {
+      let g = groups.find((x) => x.tier === v.tier);
+      if (!g) {
+        g = { tier: v.tier, items: [] };
+        groups.push(g);
+      }
+      g.items.push({ v, i });
+    }
+    showPanel(`<div class="modeTitle">\uD83C\uDFCD️ 车库 · ${VEHICLES.length} 辆</div>
+  ${groups.map((g) => {
+      const prices = g.items.map((x) => x.v.price).filter((p) => p > 0);
+      const lo = prices.length ? Math.min(...prices) : 0;
+      const hi = prices.length ? Math.max(...prices) : 0;
+      const owned = g.items.filter((x) => store.ownedVehicles.includes(x.i)).length;
+      const range = lo === hi ? lo.toLocaleString() : lo.toLocaleString() + " → " + hi.toLocaleString();
+      return `<section class="vehGroup">
+      <h3 class="vehGroupHead ${TIER_CLS[g.tier] || ""}">
+        <b>${g.tier}</b>
+        <span class="vehGroupMeta">${g.items.length} 辆 · 已拥有 ${owned}/${g.items.length} · \uD83E\uDE99 ${range}</span>
+      </h3>
+      ${g.items.map(({ v, i }) => {
+        const own = store.ownedVehicles.includes(i);
+        const sel = i === store.currentVehicle;
+        return card({
+          cls: "vehCard" + (sel ? " isSel" : ""),
+          icon: v.icon,
+          title: v.name + `<span class="vehTier ${TIER_CLS[v.tier] || ""}">${v.tier}</span>`,
+          sub: v.desc,
+          body: vehStatGrid(v),
+          right: sel ? "✅<br>使用中" : own ? "已<br>拥有" : "\uD83E\uDE99<br>" + v.price.toLocaleString(),
+          interactive: true,
+          selected: sel,
+          attrs: `data-act="veh" data-veh="${i}"`
+        }) + (own ? "" : buyBlock(v, i)) + (v.ultra ? ultraBlock(v, i) : "");
+      }).join("")}
+    </section>`;
     }).join("")}
   <div class="panelNote" id="pnNote"></div>
   <button class="btn backBtn" data-act="back">返回</button>`);
@@ -9487,7 +9798,8 @@
   function renderShop() {
     const goldEl = document.getElementById("shopGold");
     if (goldEl)
-      goldEl.textContent = store.gold;
+      goldEl.textContent = store.gold.toLocaleString();
+    const vehNow = VEHICLES[store.currentVehicle];
     const st = document.getElementById("shopTitle");
     if (st)
       st.textContent = "\uD83D\uDEE0 升级 " + VEHICLES[store.currentVehicle].icon + " " + VEHICLES[store.currentVehicle].name;
@@ -9543,27 +9855,59 @@
         btn.style.opacity = 0.5;
       } else {
         const c = upCostOf(VEHICLES[store.currentVehicle], lv + 1);
-        btn.textContent = "升级 " + c + " \uD83E\uDE99";
+        btn.textContent = "升级 " + c.toLocaleString() + " \uD83E\uDE99";
         btn.disabled = store.gold < c;
         btn.style.opacity = 1;
       }
     }
+    const allBtn = document.getElementById("btnUpAll");
+    if (allBtn) {
+      const full = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= MAX_LV);
+      if (full) {
+        allBtn.textContent = "✅ 四项已满级";
+        allBtn.disabled = true;
+        allBtn.classList.add("done");
+      } else {
+        let need = 0;
+        for (const k of ["engine", "tire", "frame", "susp"]) {
+          const lv = u[k] || 0;
+          for (let i = lv + 1;i <= MAX_LV; i++)
+            need += upCostOf(vehNow, i);
+        }
+        allBtn.textContent = "⚡ 一键升满（还需 " + need.toLocaleString() + " \uD83E\uDE99）";
+        allBtn.disabled = store.gold < need;
+        allBtn.classList.remove("done");
+      }
+    }
+  }
+  function applyUpgradeStep(k) {
+    const u = getUp();
+    const lv = u[k] || 0;
+    if (lv >= MAX_LV)
+      return false;
+    const c = upCostOf(VEHICLES[store.currentVehicle], lv + 1);
+    if (store.gold < c)
+      return false;
+    store.gold -= c;
+    u[k] = lv + 1;
+    return true;
   }
   function buyUpgrade(k) {
     const u = getUp();
     const lv = u[k] || 0;
-    if (lv >= MAX_LV)
-      return;
-    const c = upCostOf(VEHICLES[store.currentVehicle], lv + 1);
     const note = document.getElementById("shopNote");
-    if (store.gold < c) {
+    if (lv >= MAX_LV) {
+      if (note)
+        note.textContent = "已经满级了";
+      return;
+    }
+    if (!applyUpgradeStep(k)) {
       if (note)
         note.textContent = "金币不足，去关卡里收集吧！";
+      showToast("\uD83E\uDE99 金币不足：" + UP_LABEL[k] + " Lv" + lv + " 升不到 Lv" + (lv + 1), 1200, "danger");
       return;
     }
     const before = previewStats(VEHICLES[store.currentVehicle], u);
-    store.gold -= c;
-    u[k] = lv + 1;
     applyUpgrades();
     save();
     renderShop();
@@ -9573,6 +9917,58 @@
     if (note)
       note.textContent = "升级成功！";
     showToast("\uD83D\uDD27 " + msg, 1600);
+    playCoinSound();
+  }
+  function buyUpgradeAll() {
+    const veh = VEHICLES[store.currentVehicle];
+    const u = getUp();
+    const before = previewStats(veh, u);
+    const beforeLv = { engine: u.engine, tire: u.tire, frame: u.frame, susp: u.susp };
+    let spent = 0;
+    let bought = 0;
+    let progress = true;
+    while (progress) {
+      progress = false;
+      for (const k of ["engine", "tire", "frame", "susp"]) {
+        const lv = u[k] || 0;
+        if (lv >= MAX_LV)
+          continue;
+        const c = upCostOf(veh, lv + 1);
+        if (store.gold < c)
+          continue;
+        store.gold -= c;
+        u[k] = lv + 1;
+        spent += c;
+        bought++;
+        progress = true;
+      }
+      if (["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= MAX_LV))
+        break;
+    }
+    const note = document.getElementById("shopNote");
+    if (!bought) {
+      if (note)
+        note.textContent = "金币不足，暂时升不了";
+      showToast("\uD83E\uDE99 金币不足，无法升级", 1200, "danger");
+      return;
+    }
+    applyUpgrades();
+    save();
+    renderShop();
+    const after = previewStats(veh, u);
+    const moved = Object.keys(after).filter((n) => after[n] !== before[n]);
+    const gotFull = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= MAX_LV);
+    const parts = ["买 " + bought + " 级 · \uD83E\uDE99-" + spent.toLocaleString()];
+    for (const k of ["engine", "tire", "frame", "susp"]) {
+      if (u[k] !== beforeLv[k])
+        parts.push(UP_LABEL[k] + " Lv" + beforeLv[k] + "→Lv" + u[k]);
+    }
+    if (moved.length) {
+      parts.push(moved.map((n) => n + " +" + Math.round((after[n] - before[n]) * 100) / 100).join(" · "));
+    }
+    if (note)
+      note.textContent = gotFull ? "四项全部满级 \uD83C\uDF89" : "已升 " + bought + " 级";
+    showToast((gotFull ? "⚡ 四项满级" : "⚡ 批量升级") + " · " + parts.join(" · "), 2600, "success");
     playCoinSound();
   }
   function initShop() {
@@ -9587,6 +9983,9 @@
     const closeBtn = document.getElementById("closeShop");
     if (closeBtn)
       closeBtn.addEventListener("click", closeShop);
+    const allBtn = document.getElementById("btnUpAll");
+    if (allBtn)
+      allBtn.addEventListener("click", buyUpgradeAll);
     for (const k of ["engine", "tire", "frame", "susp"]) {
       const btn = document.querySelector('[data-buy="' + k + '"]');
       if (btn)

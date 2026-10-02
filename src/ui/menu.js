@@ -6,7 +6,7 @@ import { syncTouchVisibility } from "../core/input.js";
 import { LEVELS } from "../config/levels.js";
 import { isStorageAvailable } from "../core/storage.js";
 import { statRow, badge, chip } from "./components.js";
-import { nextLevel } from "../game/game.js";
+import { nextLevel, quitFreeRun } from "../game/game.js";
 import { clearedCount } from "../game/progress.js";
 
 const overlay = document.getElementById("overlay");
@@ -53,6 +53,22 @@ if (homeFloat) {
     if (store.state === "play" || store.state === "pause" || store.state === "ended") showMenu();
   });
 }
+
+/**
+ * 无限模式的「⏹ 结束本局」按钮。
+ *
+ * ★ 按钮本身由 render/hud.js 的 drawQuitButton 惰性创建并按 HUD 布局定位
+ *   （那里才知道触摸键占了哪块地方），这里只负责点击 → 结算。
+ *   用**事件委托**挂在 document 上而不是直接绑在按钮上：
+ *   按钮是 HUD 每帧惰性创建的，委托才能在它还不存在时就把监听装好。
+ *   委托里按 closest('.hudQuit') 过滤，其它点击不受影响。
+ */
+document.addEventListener("click", (e) => {
+  const el = e.target && e.target.closest ? e.target.closest(".hudQuit") : null;
+  if (!el) return;
+  e.preventDefault();
+  quitFreeRun();
+});
 
 /**
  * Hero 区状态摘要：只留「通关 n/432」与「金币」两个数。
