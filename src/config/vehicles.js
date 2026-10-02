@@ -12,8 +12,16 @@
 //   inertia  相对转动惯量：空中角冲量 → 角速度 ω ∝ 1/inertia（与 airRot 互为倒数，断言约束）
 //   suspK/C  悬挂刚度 / 阻尼倍率；travel 悬挂行程上限（px）
 //   torque   发动机扭矩峰值倍率；rpm 扭矩峰值转速倍率
-const P = (mass, inertia, suspK, suspC, travel, torque, rpm) =>
-  ({ mass, inertia, suspK, suspC, travel, torque, rpm });
+/**
+ * 派生层物理参数。
+ *
+ * ★ `wheelieK` / `wheelieUp` 是**翘头限幅的逐车标定**（见 constants.js 的 wheelieMulOf）：
+ *   wheelieK = 该车固有的抗翘头能力，wheelieUp = 随车架等级从 0 线性涨到满级的增量。
+ *   二者决定了裸车极速（wheelieK 决定 Lv0，wheelieK+wheelieUp 决定满级），且是
+ *   "买这辆车能不能在宇宙场跑得动"的唯一决定项。缺省缺省 → 普通车行为逐字节不变。
+ */
+const P = (mass, inertia, suspK, suspC, travel, torque, rpm, wheelieK, wheelieUp) =>
+  ({ mass, inertia, suspK, suspC, travel, torque, rpm, wheelieK, wheelieUp });
 
 /**
  * 形态规格（纯表现层，render/bike.js 消费）。
@@ -404,24 +412,26 @@ export const VEHICLES = [
     price: 800000000,
 
     speed: 2.6,
-    grip: 3.4,
+    grip: 9.77,
     weight: 1.48,
     airRot: 0.488,
     fuel: 4,
     color: "#e0f0ff",
     // 归墟号：极致的悬浮形态 —— 细高轮、无避震、超低趴姿、宽大尾翼式的长上管，
     // 视觉上要读出"这东西不属于地面"
+        // ★ 悬浮器：常规胎、有避震、宽坐垫、平把、常规头盔 —— 基础款的"标准悬浮车"
+        // ★ 悬浮器：常规胎、有避震、宽坐垫、平把、常规头盔 —— 基础款的"标准悬浮车"
     art: ART({
-      tire: 1.4, rim: false, spokes: 16, spokeW: 0.6, tube: 2.0,
-      topDrop: 14, coil: 0, bar: "drop", saddleW: 5,
-      helmR: 5.6, peak: false, vents: 2,
-      pose: POSE(10, 11, 13, 10, 5, 9),
+      tire: 2.6, rim: true, spokes: 12, spokeW: 1.2, tube: 3.4,
+      topDrop: 4, coil: 0.9, bar: "flat", saddleW: 9,
+      helmR: 4.8, peak: true, vents: 2,
+      pose: POSE(2.5, 1.5, 3.5, 1, 0, -0.5),
     }),
     // ★ mass=1.42 / inertia=1.95 全表唯一；|airRot×inertia−1| = 0。
     //   torque/rpm 刻意**低于**奇点号：终焉形态的加速由 flightStep 的推力伺服负责，
     //   扭矩路径在这台车上几乎不参与（见 bike.js 的 omega 分支），
     //   堆扭矩只会在 27,778 px/s 下让车轮空转到 ωR ≈ 2300 rad/s，纯属数值噪声。
-    phys: P(1.48, 2.05, 1.7, 1.5, 12, 2.4, 3.2),
+    phys: P(1.48, 2.05, 1.7, 1.5, 12, 18.09, 6.15, /* wheelieK */ 2.94, /* wheelieUp */ 14.65),
     /** 最终形态：升满后花 100 亿解锁 */
     ultra: {
       /* 终焉形态不读 fx：极速与推力在 constants.js 按 1000 km/h 标定 */ fx: {},
@@ -463,15 +473,19 @@ export const VEHICLES = [
     price: 24000000000,
 
     speed: 2.6,
-    grip: 9.0,
+    grip: 20.37,
     weight: 1.32,
     airRot: 0.685,
     fuel: 5,
     color: "#b8a4ff",
-    art: ART({tire: 1.3, rim: false, spokes: 18, spokeW: 0.5, tube: 1.8,
-      topDrop: 15, coil: 0, bar: "drop", saddleW: 5, helmR: 5.7, peak: false, vents: 2,
-      pose: POSE(11, 12, 14, 11, 6, 10)}),
-    phys: P(1.32, 1.46, 1.8, 1.5, 11, 8, 4.6),
+        // ★ 飞镖形：细胎无避震、超低上管、弯把、窄坐垫
+    art: ART({
+      tire: 1.5, rim: false, spokes: 20, spokeW: 0.7, tube: 2.6,
+      topDrop: 13, coil: 0, bar: "drop", saddleW: 5,
+      helmR: 5.4, peak: false, vents: 2,
+      pose: POSE(6.5, 4.5, 8, 4, 2.5, 3),
+    }),
+    phys: P(1.32, 1.46, 1.8, 1.5, 11, 27.02, 7.52, /* wheelieK */ 4.93, /* wheelieUp */ 31.75),
     ultra: { fx: {}, name: "星殒形态", icon: "✴️", mode: "omega", cost: 300000000000,
       desc: "5000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
@@ -489,15 +503,19 @@ export const VEHICLES = [
     price: 720000000000,
 
     speed: 2.6,
-    grip: 16.0,
+    grip: 44.25,
     weight: 1.08,
     airRot: 0.862,
     fuel: 7,
     color: "#7b6cff",
-    art: ART({tire: 1.1, rim: false, spokes: 20, spokeW: 0.4, tube: 1.6,
-      topDrop: 17, coil: 0, bar: "drop", saddleW: 4, helmR: 5.9, peak: false, vents: 3,
-      pose: POSE(12, 13, 16, 12, 7, 12)}),
-    phys: P(1.08, 1.16, 1.9, 1.5, 10, 12, 8),
+        // ★ 吞噬者：极细胎、多辐条、直把展开、超大头盔、开面罩
+    art: ART({
+      tire: 1.1, rim: false, spokes: 24, spokeW: 0.5, tube: 2.2,
+      topDrop: 17, coil: 0, bar: "wide", saddleW: 11,
+      helmR: 6.4, peak: true, vents: 5,
+      pose: POSE(-1.5, -3, -2, -2.5, -2.5, -3.5),
+    }),
+    phys: P(1.08, 1.16, 1.9, 1.5, 10, 41.05, 8.88, /* wheelieK */ 8.42, /* wheelieUp */ 71.29),
     ultra: { fx: {}, name: "坍缩形态", icon: "🕳️", mode: "omega", cost: 9000000000000,
       desc: "10000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
@@ -515,15 +533,19 @@ export const VEHICLES = [
     price: 21600000000000,
 
     speed: 2.6,
-    grip: 26.0,
+    grip: 81.17,
     weight: 0.92,
     airRot: 0.980,
     fuel: 9,
     color: "#3d2b6e",
-    art: ART({tire: 0.9, rim: false, spokes: 22, spokeW: 0.3, tube: 1.4,
-      topDrop: 19, coil: 0, bar: "drop", saddleW: 4, helmR: 6.1, peak: false, vents: 4,
-      pose: POSE(14, 15, 18, 14, 8, 14)}),
-    phys: P(0.92, 1.02, 2.0, 1.5, 9, 18, 12),
+        // ★ 投掷器：几乎无坐垫、极端前趴、大通风槽
+    art: ART({
+      tire: 0.9, rim: false, spokes: 28, spokeW: 0.35, tube: 1.8,
+      topDrop: 21, coil: 0, bar: "drop", saddleW: 2.5,
+      helmR: 6.0, peak: false, vents: 6,
+      pose: POSE(9, 7.5, 11, 7, 3.5, 5.5),
+    }),
+    phys: P(0.92, 1.02, 2, 1.5, 9, 69.33, 12, /* wheelieK */ 14.05, /* wheelieUp */ 132.15),
     ultra: { fx: {}, name: "虚掷形态", icon: "⚫", mode: "omega", cost: 270000000000000,
       desc: "25000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
@@ -541,15 +563,19 @@ export const VEHICLES = [
     price: 5184000000000000,
 
     speed: 2.6,
-    grip: 34.0,
+    grip: 67.13,
     weight: 1.88,
     airRot: 0.495,
     fuel: 11,
     color: "#1a0d2e",
-    art: ART({tire: 0.8, rim: false, spokes: 24, spokeW: 0.25, tube: 1.2,
-      topDrop: 21, coil: 0, bar: "drop", saddleW: 3, helmR: 6.3, peak: false, vents: 5,
-      pose: POSE(16, 17, 20, 16, 9, 16)}),
-    phys: P(1.88, 2.02, 2.1, 1.5, 8, 24, 18),
+        // ★ 镰刀形：粗胎、宽辐条、平把高坐、超宽坐垫
+    art: ART({
+      tire: 3.4, rim: true, spokes: 8, spokeW: 2.2, tube: 5.0,
+      topDrop: 2, coil: 1.6, bar: "flat", saddleW: 14,
+      helmR: 5.2, peak: true, vents: 3,
+      pose: POSE(0, -4, -1.5, -3.5, 0.5, -4.5),
+    }),
+    phys: P(1.88, 2.02, 2.1, 1.5, 8, 135.2, 18, /* wheelieK */ 9.27, /* wheelieUp */ 111.64),
     ultra: { fx: {}, name: "终末形态", icon: "💀", mode: "omega", cost: 64800000000000000,
       desc: "50000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
@@ -567,15 +593,19 @@ export const VEHICLES = [
     price: 155520000000000000,
 
     speed: 2.6,
-    grip: 44.0,
+    grip: 276.68,
     weight: 0.78,
     airRot: 1.163,
     fuel: 14,
     color: "#ffffff",
-    art: ART({tire: 0.7, rim: false, spokes: 26, spokeW: 0.2, tube: 1.0,
-      topDrop: 23, coil: 0, bar: "drop", saddleW: 3, helmR: 6.5, peak: false, vents: 6,
-      pose: POSE(18, 19, 22, 18, 10, 18)}),
-    phys: P(0.78, 0.86, 2.2, 1.5, 7, 32, 26),
+        // ★ 全息抽象：最细管、超多辐条、最极端前趴、无前檐
+    art: ART({
+      tire: 0.6, rim: false, spokes: 32, spokeW: 0.22, tube: 1.1,
+      topDrop: 25, coil: 0, bar: "drop", saddleW: 2,
+      helmR: 6.8, peak: false, vents: 8,
+      pose: POSE(12, 10, 15, 9.5, 5, 8),
+    }),
+    phys: P(0.78, 0.86, 2.2, 1.5, 7, 255.38, 26, /* wheelieK */ 30.42, /* wheelieUp */ 467.95),
     ultra: { fx: {}, name: "无相形态", icon: "🌌", mode: "omega", cost: 1944000000000000000,
       desc: "100000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },

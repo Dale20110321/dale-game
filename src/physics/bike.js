@@ -30,7 +30,7 @@ import {
   OMEGA_V, OMEGA_DRAG_K, OMEGA_THRUST_K, OMEGA_SERVO_ACC, OMEGA_ACC_FRAC,
   PX_PER_M, ultraCruiseOf,
   FLIGHT_HOVER, FLIGHT_HOVER_K, FLIGHT_HOVER_LP, FLIGHT_PITCH_K,
-  REAR_LOAD, wheelieTauOf,
+  REAR_LOAD, wheelieTauOf, wheelieMulOf,
   CRASH_FUEL_LOSS, CRASH_TIME_PENALTY, MAX_LV, REF_SPEED,
   deriveHandling, deriveRigidBody, deriveSuspension, deriveFriction,
 } from "../config/constants.js";
@@ -370,6 +370,8 @@ export function applyUpgrades() {
   store.phys.susp = deriveSuspension(v, up);
   store.phys.mu = deriveFriction(store.phys.traction, v, up);
   store.phys.wheelI = wheelInertia(rb.mW); // 轮转动惯量（实心圆盘近似）
+  // 翘头限幅倍率（逐车 + 随车架等级，见 wheelieMulOf）
+  store.phys.wheelieMul = wheelieMulOf(v, up);
 
   // 倒挡的**物理**基准极速：必须在下面特殊模式把 topSpeed 抬高**之前**存一份。
   // 拿"极速模式"的标称值当倒挡目标，会让终极模式"倒着比正着还快"。
@@ -710,7 +712,7 @@ function applyDrive(b, P, sub, throttle, brk, rev) {
    * 不来自堆扭矩）完全不受影响：τ 被压在恢复力矩之下，驱动力仍够把车推上去。
    * 只限驱动扭矩，刹车 / 倒挡伺服 / 被动阻力都不动 —— 那三者本来就不产生这个力矩。
    */
-  const wheelieTau = wheelieTauOf(P.rb.mTot, P.gravity);
+  const wheelieTau = wheelieTauOf(P.rb.mTot, P.gravity, P.wheelieMul);
   for (const wk of WHEELS) {
     let w = b.wheelRot[wk];
     let tau = 0;

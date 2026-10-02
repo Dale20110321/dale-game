@@ -170,7 +170,34 @@ export const REAR_LOAD = 0.62;
  */
 export const WHEELIE_K = 2.0;
 /** 由车辆质量与重力算出驱动扭矩的翘头上限（与 physics/bike.js 引用同一常量） */
-export const wheelieTauOf = (mTot, gravity) => mTot * gravity * WHEELBASE * 0.5 * WHEELIE_K;
+/**
+ * 翘头限幅的**逐车标定**：车辆固有抗翘头 `phys.wheelieK`（缺省 = 全局 WHEELIE_K）
+ * + 随车架等级线性增长的 `phys.wheelieUp`。返回相对 WHEELIE_K 的**倍率**。
+ *
+ * ★ 为什么宇宙级车必须逐车标定：
+ *   限幅 τ ≤ mTot·g·WHEELBASE/2·WHEELIE_K，而极速是它与 0.0026·v² 的交点。
+ *   这条式子里**没有任何升级项**，于是星殒/坍缩/虚掷/终末/无相的 Lv0 与 Lv500
+ *   裸车极速**完全相等**（69/70、63/63、58/58、83/83、54/54 km/h）—— 花五万倍的
+ *   价钱买 500 级，裸车极速一点不涨；而 8 亿的归墟只有 74 km/h，和 3000 的玄铁
+ *   （50 km/h）几乎一个水平。金币任务只发基础宇宙车的话，进了宇宙场就是垫底。
+ *
+ * ★ 设定上成立：宇宙级车的抓地来自**磁悬浮**而非轮胎接触，恢复力矩由悬浮系统
+ *   提供，本就远大于"重力绕后接地点"的那一点。所以它们抗翘头能力天然更强。
+ *
+ * ★ 向后兼容：普通车 `phys.wheelieK` 未定义 → 倍率恒为 1，
+ *   **27 台普通车的标定逐字节不变**。
+ */
+export function wheelieMulOf(veh, up) {
+  const p = (veh && veh.phys) || {};
+  const k0 = p.wheelieK || WHEELIE_K;
+  const up0 = p.wheelieUp || 0;
+  if (!up0) return k0 / WHEELIE_K;
+  const full = maxLvOf(veh);
+  const f = Math.max(0, Math.min(full, (up && up.frame) || 0));
+  return (k0 + (up0 * f) / full) / WHEELIE_K;
+}
+export const wheelieTauOf = (mTot, gravity, kMul) =>
+  mTot * gravity * WHEELBASE * 0.5 * WHEELIE_K * (kMul || 1);
 /**
  * 真实可达极速的二分搜索上界（px/s），只作数值安全兜底。
  *
@@ -209,7 +236,7 @@ export function topSpeedOf(veh, up) {
   const roll = ROLL_RES_K * mTot * GRAV_BASE;
   // ★ 限幅必须计入：驱动扭矩一旦越过 wheelieTau，多出来的部分只会把车掀翻而不是加速。
   //   漏掉它，表盘就按"无限扭矩"标定，而实车被限死 —— 满级高速档的指针只走 30%~65%。
-  const tauCap = wheelieTauOf(mTot, GRAV_BASE);
+  const tauCap = wheelieTauOf(mTot, GRAV_BASE, wheelieMulOf(veh, u));
   const avail = (v) => Math.min(Math.min(torqueAt(veh, v / WHEEL_R, 1, peak, rpmK), tauCap) / WHEEL_R, grip);
   const loss = (v) => AIR_DRAG_K * v * v + roll;
   let lo = 0;
