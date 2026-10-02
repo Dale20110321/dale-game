@@ -62,7 +62,7 @@ export const ENGINE_TORQUE_UP = 0.010;
 export const ENGINE_RPM_UP = 0.018;
 /** 轮胎：每级顺带提升扭矩（抓地才是硬上限，扭矩堆太多只会空转翻车） */
 export const TIRE_TORQUE_UP = 0.006;
-/** 轮胎：每级提升摩擦系数 μ（+0.6%/级，audit-physics 有精确断言锁定） */
+/** 轮胎：每级提升摩擦系数 μ（+0.6%/级 —— 乘进 grp，地板与冰面按同一比例缩放） */
 export const FRICTION_TIRE_UP = 0.006;
 
 /**
@@ -220,7 +220,7 @@ export const PEN_TOL = 2;
 export const HEAD_R = 18;
 /**
  * 数值异常兜底速度上限（px/s）。**只用于数值异常**（NaN 前兆 / 极端穿透），
- * 正常游玩与全部测试中都不应触发；tools/autotest.mjs 有断言守护"从未触发"。
+ * 正常游玩中不该触发 —— 它是最后一道数值防线，不是性能保护。
  * 它替代了旧模型里 VSPD_CAP / DOWNHILL_K / MAXV 那种"每帧改写速度"的硬夹断。
  *
  * ★ 为什么是 20000 而不是当初的 6000：究极终局车满级跑 350 km/h 时，

@@ -1,7 +1,7 @@
 // 设计令牌 · Canvas 端镜像（唯一事实来源的另一半）
 //
 // 与 styles/tokens.css 逐键等价：键名 = CSS 变量名去掉 `--`，取值 = CSS 里的书写原文。
-// tools/autotest.mjs 会解析两端并逐键比较，任何一边改动都要同步另一边。
+// 改任何一边都必须同步另一边，否则 HUD 颜色与 JS 取值会对不上。
 //
 // 渲染层（render/**）与界面层需要的色值/字体一律从这里取，禁止再写裸色值。
 
@@ -89,7 +89,7 @@ export const TOKENS = Object.freeze({
   // 注意：下面的"油桶"分组里有同名 "obj-canister"（橙色 #e85d04），
   // 对象字面量里**后者静默覆盖前者**。两端 tokens.css 与 ui-tokens.js 都解析成
   // 橙色，所以"逐键等价"断言抓不到这个重复 —— 但 obj-canister-top 被
-  // audit-a11y 的对比度矩阵按整张令牌表遍历消费，不能跟着删。
+  // 对比度是按整张令牌表逐个核过的，删任何一个都要重算。
   "obj-canister": "#8a9098",
   "obj-canister-top": "#a9aeb6",
   "obj-boost": "#4cff88",
@@ -166,9 +166,9 @@ export const TOKENS = Object.freeze({
   "glass-hover": "rgba(255,255,255,0.2)",
   track: "rgba(255,255,255,0.2)",
   scrim: "rgba(8,20,32,0.74)",
-  // 与 styles/tokens.css 的 --scrim-menu 保持逐字一致（autotest 断言双端取值完全一致）
+  // 与 styles/tokens.css 的 --scrim-menu 保持逐字一致（两端取值必须完全相同）
   "scrim-menu": "rgba(8,20,32,0.60)",
-  // 与 styles/tokens.css 的 --hud-scrim 保持逐字一致（autotest 断言双端取值完全一致）
+  // 与 styles/tokens.css 的 --hud-scrim 保持逐字一致（两端取值必须完全相同）
   "hud-scrim": "rgba(6,14,24,0.55)",
   "scrim-strong": "rgba(8,20,32,0.88)",
   "scrim-solid": "rgba(8,20,32,0.97)",

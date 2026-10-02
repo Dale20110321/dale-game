@@ -80,7 +80,7 @@ export function catchupFactor(leadPx) {
 }
 
 // 赛制配置与名次计算是**纯数据 / 纯函数**，放在 config/constants.js ——
-// render/hud.js 要显示"第 N / 6 名"，而 render/** 不允许 import game/**（见 audit-render）。
+// render/hud.js 要显示"第 N / 6 名"，而 render/** 不许 import game/**（分层是单向的）。
 // 这里转出，game 层与测试都仍从 race.js 取。
 export { RACE_FORMATS, RACE_FORMAT_IDS, RACE_PLACE_GOLD, PLAYER_TEAM, RIVAL_TEAM, racePlaceOf, buildRacers } from "../config/constants.js";
 

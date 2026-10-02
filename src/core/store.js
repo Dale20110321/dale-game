@@ -211,7 +211,7 @@ export const world = {
  * 为什么需要它：menu.js 的 showMenu() 必须重画主页面，而 panels.js 已经 import 了
  * menu.js（showPanel / showMenu / refreshMenuButtons）；让 menu.js 反向 import panels.js
  * 会构成循环依赖。store 是二者共同的下层，放这里既能保持单向接线。
- * 也刻意没用 CustomEvent —— 无头测试（tools/autotest.mjs）的 DOM 桩里没有该构造器。
+ * 也刻意没用 CustomEvent —— 自己派发 + 单一 listener 就够，少一个构造器依赖。
  */
 export const uiHooks = {
   /** 重画主页面视图（菜单态）。未注册时 menu.js 静默跳过。 */
