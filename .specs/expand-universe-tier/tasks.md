@@ -63,34 +63,37 @@
   - [ ] Task 5.4: 验证高速不触发 `pitRewind`（R4.5）
     - [ ] Task 5.4.1: 待 Task 7 完成（无相车尚未存在），届时补测
 
-- [ ] Task 6: 车辆个性重塑（27 台）
-  - [ ] Task 6.1: 重塑重型簇的差异化
-    - [ ] Task 6.1.1: 磐石 → 纯抓地堡垒（grip↑ torque↓ rpm↓）
-    - [ ] Task 6.1.2: 泰坦 → 质量锚点（mass↑↑ grip↓）
-    - [ ] Task 6.1.3: 冰魄 → 低抓地大悬挂（grip↓ suspK↓ travel↑）
-    - [ ] Task 6.1.4: 玄铁 → 高扭矩低红线（torque↑↑ rpm↓）
-    - [ ] Task 6.1.5: 破阵 → airRot 最低（空中无法自救）
-    - [ ] Task 6.1.6: 终末 → 质量之王（mass↑↑↑ rpm↓）
-    - [ ] Task 6.1.7: 天蚀 → 移出重型簇（mass↓ rpm↑ grip↓，成为"重但快"）
-  - [ ] Task 6.2: 重塑轻量簇的差异化
-    - [ ] Task 6.2.1: 银箭 → 高转零低扭（torque↓ rpm↑）
-    - [ ] Task 6.2.2: 白毛风 → 冰面专家（grip↓ rpm↑）
-    - [ ] Task 6.2.3: 赤鹫 → 空中车（airRot↑↑ inertia↓）
-    - [ ] Task 6.2.4: 噬沙 → 续航车（fuel↑↑ rpm↓）
-    - [ ] Task 6.2.5: 星轨 → 旋转王（airRot↑↑↑ rpm↓）
-    - [ ] Task 6.2.6: 磁暴 → 瞬时大扭（torque↑↑ rpm↓）
-    - [ ] Task 6.2.7: 光子 → 脆皮速度（mass↓ grip↓ rpm↑）
-  - [ ] Task 6.3: 拆分逐日与猎户
-    - [ ] Task 6.3.1: 逐日 → 长程冲刺（torque↑ rpm↓）
-    - [ ] Task 6.3.2: 猎户 → 高转极速（rpm↑↑ torque↓ mass↓）
-  - [ ] Task 6.4: 为驮马补最终形态（R5.2）
-    - [ ] Task 6.4.1: 选定一个语义合适的 mode（建议 `phase`，低价位）
-    - [ ] Task 6.4.2: 补齐 `art` / `ultra` 定义并验证可解锁
-  - [ ] Task 6.5: 校验全表约束
-    - [ ] Task 6.5.1: `mass` 两两不同、`inertia` 两两不同
-    - [ ] Task 6.5.2: `|airRot × inertia − 1| ≤ 0.05`
-    - [ ] Task 6.5.3: 归一化两两欧氏距离最小值 ≥ 0.15（R5.1）
-    - [ ] Task 6.5.4: 单一 mode 车辆数 ≤ 4（R5.3）
+- [x] Task 6: 车辆个性重塑（27 台）
+  - [x] Task 6.1: 重塑重型簇的差异化
+    - [x] Task 6.1.1: 磐石 → 纯抓地堡垒（grip 2.60 / torque 0.76）
+    - [x] Task 6.1.2: 泰坦 → 质量锚点（mass 3.35，全表最重）
+    - [x] Task 6.1.3: 冰魄 → 大悬挂漂浮（转速最低，shield 形态）
+    - [x] Task 6.1.4: 玄铁 → 高扭矩低红线（torque 2.60 / rpm 1.24，最易后空翻）
+    - [x] Task 6.1.5: 破阵 → 均衡但空中救不回（airRot 0.417）
+    - [x] Task 6.1.6: 终末 → 质量之王（mass 3.60，全场最慢）
+    - [x] Task 6.1.7: 天蚀 → 重而快（rpm 2.85，改归 surge 形态）
+  - [x] Task 6.2: 重塑轻量簇的差异化
+    - [x] Task 6.2.1: 银箭 → 高转零低扭（rpm 2.05 / torque 1.05）
+    - [x] Task 6.2.2: 白毛风 → 冰雪专家（grip 0.62 / rpm 2.40）
+    - [x] Task 6.2.3: 赤鹫 → 空中猛禽（inertia 0.66 → airRot 1.515）
+    - [x] Task 6.2.4: 噬沙 → 续航怪（fuel 2.95，全表最大油箱）
+    - [x] Task 6.2.5: 星轨 → 旋转王（airRot 1.0 → 2.941）
+    - [x] Task 6.2.6: 磁暴 → 瞬时大扭（torque 2.50 / rpm 0.95）
+    - [x] Task 6.2.7: 光子 → 最轻最快（mass 0.38 / rpm 2.90）
+  - [x] Task 6.3: 拆分逐日与猎户
+    - [x] Task 6.3.1: 逐日 → 长程冲刺（torque 2.20 / rpm 1.85）
+    - [x] Task 6.3.2: 猎户 → 最高红线（rpm 3.35，全表第一）
+  - [x] Task 6.4: 为驮马补最终形态（R5.2）
+    - [x] Task 6.4.1: 选定 `phase`（相位）语义，命名「老驮马」，解锁价 ¥6000
+    - [x] Task 6.4.2: 验证 27 辆车全部有 ultra 定义
+  - [x] Task 6.5: 校验全表约束
+    - [x] Task 6.5.1: `mass` 两两不同、`inertia` 两两不同
+    - [x] Task 6.5.2: `|airRot × inertia − 1| ≤ 0.05`（实测最大 0.0010）
+    - [x] Task 6.5.3: 两两欧氏距离最小值 ≥ 0.15（实测 0.170，改造前 0.047）
+    - [x] Task 6.5.4: mode 分布均匀（实测 5/4/4/4/4/4，极差 1）
+    - ★ 两处门槛在实现中修正并已写回 spec：归一化口径由 max 改为 min-max
+      （归墟 grip=6.0 会主导 max 归一，把其余 26 台压到 [0.09,0.5]）；
+      mode 上限由 4 改为 5（27 辆 / 6 种通用 mode，"≤4" 算术上不可能）
 
 - [ ] Task 7: 宇宙级车辆（6 台）
   - [ ] Task 7.1: per-vehicle 升级上限
