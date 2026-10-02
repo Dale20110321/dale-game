@@ -201,17 +201,27 @@ export function drawBike(dt = 1 / 60) {
     ctx.fill();
   }
 
-  // 骑手背线（沿同一 glyphY 锚点绘制）
+  // ---------------- 骑手 ----------------
+  // ★ 髋位与背线必须在**姿态偏移之前**确定，背线要拿 hipX/hipY 起笔。
+  const susY = sq2 * 3.5;
+  // ★ 髋位跟着姿态走（原来写死）：POSE 只偏移肩/头时，宇宙车那种
+  //   shX+10 / hdX+13 会让上半身前移十几像素而下半身钉在原地 —— 人被拉长、
+  //   脖子拉成斜线。0.42/0.5 的耦合让躯干长度在任何姿态下都保持合理。
+  const hipX = -12.5 + (POSE.shX || 0) * 0.42;
+  const hipY = glyphY - 6.3 + susY + (POSE.shY || 0) * 0.5;
+  const shX = 2.5 + (POSE.shX || 0);
+  const shY = glyphY - 19.8 + susY + (POSE.shY || 0);
+
+  // 骑手背线：从**髋**画到**肩**。原先两端都是写死的常量点，与躯干对不上，
+  // 姿态一偏移就成一条与身体脱节的斜杠。
   ctx.strokeStyle = token("obj-rider-skin-2");
   ctx.lineWidth = 4;
   ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.moveTo(-hw * 0.2, glyphY);
-  ctx.lineTo(hw * 0.5, glyphY - 8);
+  ctx.moveTo(hipX, hipY + 3);
+  ctx.lineTo(shX, shY);
   ctx.stroke();
 
-  // ---------------- 骑手 ----------------
-  const susY = sq2 * 3.5;
   // 骑行服：远侧肢体用"更暗的同色"而不是半透明，避免看起来像残影
   const suitCol = token("obj-platform");
   const suitDark = token("obj-bike-dark");
@@ -220,11 +230,6 @@ export function drawBike(dt = 1 / 60) {
   const bbX = -hw * 0.32;
   const bbY = -2.5 + susY;
   const cr = 5.8;
-  const hipX = -12.5;
-  const hipY = glyphY - 6.3 + susY;
-  // 骑手姿态由形态规格给出：竞速车整个人压低前探、越野车坐得高、手臂张开够宽把
-  const shX = 2.5 + (POSE.shX || 0);
-  const shY = glyphY - 19.8 + susY + (POSE.shY || 0);
   const hdX = 5.6 + (POSE.hdX || 0);
   const hdY = glyphY - 22.8 + susY + (POSE.hdY || 0);
   const pda = crankPhase(bike, dt);
