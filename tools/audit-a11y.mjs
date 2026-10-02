@@ -401,7 +401,7 @@ export default async function auditA11y(ctx) {
   const NO_USAGE = {
     "accent-2|success-soft": "accent-2 只用于 --accent-grad 的色标端点，从不作 success chip 的字色",
     "danger|glass-fill-strong": "danger 只与 obj-hazard-soft 配对（.chip.danger/.badge.danger），不落在 glass-fill-strong 上",
-    "danger|success-soft": "同��：success-soft 是 success chip 的专属底",
+    "danger|success-soft": "同理：success-soft 是 success chip 的专属底",
     "danger|gold-soft": "同理：gold-soft 是 gold chip/badge 的专属底",
   };
   let gated = 0, exempt = 0, noUsage = 0, below = 0, byNoUsage = 0;

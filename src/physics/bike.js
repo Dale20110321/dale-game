@@ -961,7 +961,7 @@ export function stepPhysics() {
   //
   //   两条同时成立才摔：
   //   · 倾角过 tiltMin —— 擦过垂直线（约 99°）还有活路，车架升级还能再放宽到 124°；
-  //   · 骑手身体确实落到地面附近 —— 空中倒立但还离地很高时��判摔，
+  //   · 骑手身体确实落到地面附近 —— 空中倒立但还离地很高时不判摔，
   //     玩家有时间用空中转体（AIR_ROT_MAX 9.5 rad/s，转 30° 只要 0.055s）救回来。
   const hgi = groundInfo(b.head.x);
   if (!run.crashed && isFinite(hgi.y)) {
