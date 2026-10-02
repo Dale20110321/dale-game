@@ -5,7 +5,7 @@ import {
   RATING_MIN, RANK_GAIN_BASE, RANK_GAIN_BASE_ADV, RATING_LOSS, RATING_LOSS_ADVANCED,
   rankName, rankStars, rankPromoReward, rankDelta, rankGold,
   RACE_FORMATS, RACE_PLACE_GOLD } from "../config/constants.js";
-import { LEVELS, levelAt, segmentThemeAt, variantRule } from "../config/levels.js";
+import { LEVELS, levelAt, segmentThemeAt, variantRule, FINALE_INDEX } from "../config/levels.js";
 import { THEMES } from "../config/themes.js";
 import { store, bike, world } from "../core/store.js";
 import { key } from "../core/input.js";
@@ -221,9 +221,12 @@ export function nextLevel() {
     store.cam.x = 0;
     fillTank();
     const NL = levelAt(store.selLevel);
+    // 终局关不显示"第 433 关"（它不属于 432 关主线），同 hud.js 的口径
+    const label = store.selLevel === FINALE_INDEX
+      ? NL.name
+      : "关卡 " + (store.selLevel + 1) + " · " + NL.name;
     showToast(
-      "关卡 " + (store.selLevel + 1) + " · " + NL.name +
-        " · " + (THEMES[segmentThemeAt(NL, 0)] || THEMES[0]).name,
+      label + " · " + (THEMES[segmentThemeAt(NL, 0)] || THEMES[0]).name,
       800
     );
     // 从结算结果卡进入下一关：必须恢复游玩状态并收起菜单遮罩，
@@ -381,6 +384,14 @@ function finishLevel() {
     store.stars[store.selLevel] = Math.max(store.stars[store.selLevel] || 0, s);
     if (store.selLevel >= store.unlocked && store.selLevel < LEVELS.length - 1) {
       store.unlocked = store.selLevel + 1;
+    }
+    // ★ 通关环大陆（最终任务）时置 finaleDone —— 这一行以前**根本不存在**，
+    //   而 storage.js 的 deriveUnlocks 只读它：`invited`（排位赛邀请）
+    //   与"最终任务卡"的完成态全都由它派生。所以通关究极任务之后，
+    //   排位赛入口永远是锁着的，玩家只能靠手改存档解锁。
+    if (store.selLevel === FINALE_INDEX) {
+      store.progress.finaleDone = true;
+      showToast("🎯 通关「环大陆」！排位赛已解锁", 2200, "success");
     }
     // 通关固定奖励随全局进度递增（280 → 1000）：写死 200 时 432 关一轮的总收入
     // 撑不起任何一辆车的升级曲线。数值由 makeLevel 反推，见 levels.js 的注释。

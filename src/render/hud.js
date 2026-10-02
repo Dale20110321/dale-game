@@ -8,7 +8,7 @@
 //  · 底部居中：按键指示；顶部居中：机制警告（危险段超速 / 限时门紧张）——有警告时左列整体下移，绝不遮挡
 import { ctx, view } from "../core/canvas.js";
 import { toKmh, toM, SPEEDLINE_V, SPEEDLINE_REF, RACE_FORMATS, racePlaceOf } from "../config/constants.js";
-import { LEVELS, VARIANT_INFO, levelAt } from "../config/levels.js";
+import { LEVELS, VARIANT_INFO, levelAt, FINALE_INDEX } from "../config/levels.js";
 import { store, bike, world } from "../core/store.js";
 import { touchActive } from "../core/input.js";
 import { clamp } from "../core/utils.js";
@@ -228,11 +228,16 @@ function drawInfoCard(r) {
   const x = r.x;
   const L = levelAt(store.selLevel) || LEVELS[0];
   const compact = view.W < 520 || view.H < 480;
+  // ★ 终局关的下标是 FINALE_INDEX = LEVELS.length = 432，直接 +1 会显示成"第 433 关"。
+  //   它不属于 432 关主线，而是主线之外的任务，按它自己的名字显示。
+  const isFinale = store.mode === "level" && store.selLevel === FINALE_INDEX;
   const title = store.mode === "free"
     ? "♾ 自由模式"
-    : store.mode === "race" || store.mode === "ranked"
-      ? "🏆 " + (store.mode === "ranked" ? "排位赛" : "比赛") + " 第" + (store.selLevel + 1) + "关"
-      : "关卡 " + (store.selLevel + 1) + (compact ? "" : " · " + L.name);
+    : isFinale
+      ? "🎯 " + L.name
+      : store.mode === "race" || store.mode === "ranked"
+        ? "🏆 " + (store.mode === "ranked" ? "排位赛" : "比赛") + " 第" + (store.selLevel + 1) + "关"
+        : "关卡 " + (store.selLevel + 1) + (compact ? "" : " · " + L.name);
 
   // 无底板：文字靠投影保证在任意天空/地表上可读。
   // 实测 4px + shadow-text(黑 0.6) 在绿野的近白天空上压不住次要行（"破纪录 9.5s"发灰），

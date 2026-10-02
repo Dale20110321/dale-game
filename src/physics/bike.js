@@ -25,7 +25,7 @@ import {
   LAND_REF, CONTACT_BAND, CONTACT_BIAS, BIAS_MAX_V, STUN_TIME,
   REV_SPEED, REV_ENTER_V,
   SOLVER_TOL, SOLVER_ITERS, PEN_TOL, FN_MAX_K, NUM_CAP_V, HEAD_R,
-  ROLL_RES_K, AIR_DRAG_K, wheelInertia, torqueAt, topSpeedOf, crashTiltDeg,
+  ROLL_RES_K, AIR_DRAG_K, LINEAR_DRAG_K, wheelInertia, torqueAt, topSpeedOf, crashTiltDeg,
   ABSOLUT_V, ABSOLUT_DRAG_K, ABSOLUT_THRUST_K, ABSOLUT_SERVO_ACC,
   OMEGA_V, OMEGA_DRAG_K, OMEGA_THRUST_K, OMEGA_SERVO_ACC,
   FLIGHT_HOVER, FLIGHT_HOVER_K, FLIGHT_HOVER_LP, FLIGHT_PITCH_K,
@@ -714,13 +714,25 @@ function applyDrive(b, P, sub, throttle, brk, rev) {
 }
 
 /** 空气阻力（∝ v²）：对整车施加与速度反向的加速度（所有质点同减，符合阻力性质） */
+/**
+ * 空气阻力：v² 项 + **v 线性项**，对整车施加与速度反向的加速度（所有质点同减）。
+ *
+ * ★ 线性项是"松油门能停下来的原因"。只有 v² 项时，减速在低速段趋零，
+ *   剩下的恒定滚动阻力（15 px/s²）让速度尾巴拖十几秒、滑行几十米。
+ *   详见 constants.js 的 LINEAR_DRAG_K 注释。
+ *   ★ 该项**故意不进** topSpeedOf 的 loss()：那里是"极速解算"的单一事实来源，
+ *   加进去会压低全部车辆的极速（实测见 checklist R7.2）。
+ *   它只在这里作用于"已经松开油门后的减速"，对极速平衡点无影响。
+ */
 function applyDrag(b, P, sub) {
   const sv = systemVel(b);
   const sp = Math.hypot(sv.vx, sv.vy);
   if (sp < 1e-6) return;
   const k = P.airDragK || AIR_DRAG_K; // 极速模式用压缩后的阻力，普通模式用默认
-  const ax = (-sv.vx / sp) * (k * sp * sp) / sv.m;
-  const ay = (-sv.vy / sp) * (k * sp * sp) / sv.m;
+  // 单位质量减速度 = k·sp²（风阻）+ LINEAR_DRAG_K·sp（线性项）
+  const decel = k * sp * sp + LINEAR_DRAG_K * sp;
+  const ax = (-sv.vx / sp) * decel / sv.m;
+  const ay = (-sv.vy / sp) * decel / sv.m;
   for (const p of b.pts) addVel(p, ax * sub, ay * sub);
 }
 
@@ -1074,7 +1086,10 @@ export function stepPhysics() {
   //
   // ↓ 的两段行为和真车一致：速度还快时它**先当刹车用**，停稳后才真正挂上倒挡。
   // 不设这道门槛的话，高速按住 ↓ 会把后轮直接倒转起来硬拽整车（= 高速挂倒挡）。
-  const revK = key.rev && !run.crashed && b.grounded > 0 ? 1 : 0;
+  // ★ grounded > 0 的门槛对**飞行形态无效**：flightStep 每帧把 b.grounded 置 0，
+  //   于是飞行时 revK 恒为 0 —— 倒挡在飞行形态下永久失效（实测：按住 ↓ 车纹丝不动）。
+  //   飞行形态由 isFlighter() 判定，飞行中"触地"没有意义，故直接放行。
+  const revK = key.rev && !run.crashed && (b.grounded > 0 || isFlighter()) ? 1 : 0;
   const revReady = revK && systemVel(b).vx < REV_ENTER_V;
   const brkK = (key.left || (revK && !revReady)) && !run.crashed ? 1 : 0;
   const rev = revReady ? 1 : 0;

@@ -12,6 +12,7 @@ import {
 import { VEHICLES } from "../config/vehicles.js";
 import { LEVELS, BRANCHES, LEVELS_PER_BRANCH } from "../config/levels.js";
 import { store } from "./store.js";
+import { toPlainDecimal, fromPlainDecimal } from "./utils.js";
 
 /**
  * 当前存档结构版本：
@@ -340,10 +341,11 @@ export function saveAchList() {
  * 升级、成就、段位变化等既有落盘点都走这里，因此一处委托即可全覆盖。
  */
 export function save() {
-  // 写盘前先夹紧 + 取整：保证落盘原文永远是十进制整数字符串，
-  // 不会因为值太大退化成 "1e+21" 那种读回来就变味的写法。
+  // 写盘前先夹紧 + 取整，再走 BigInt 十进制展开。
+  // ★ 不能用 String()：余额会超过 1e21（宇宙级资产合计 2.43e22），
+  //   String 在那个量级会输出 "1e+21" 这样的指数记数法，读回来就是另一个数。
   store.gold = safeGold(store.gold);
-  lsSet(SAVE_KEYS.gold, String(store.gold));
+  lsSet(SAVE_KEYS.gold, toPlainDecimal(store.gold));
   lsSet(SAVE_KEYS.up, JSON.stringify(store.upgrades));
   lsSet(SAVE_KEYS.unlocked, store.unlocked);
   lsSet(SAVE_KEYS.stars, JSON.stringify(store.stars));
@@ -598,7 +600,11 @@ export function loadSave() {
     store.slot = Number.isFinite(persisted) && persisted >= 0 && persisted < MAX_SLOTS ? persisted : 0;
     // 金币夹到 ≥0：与 unlocked / sel / rating 的处理对齐。
     // 否则 bike_gold="-500" 会让 store.gold = -500（-500 是 truthy，`|| 0` 拦不住）。
-    store.gold = Math.max(0, intOr(lsGet(SAVE_KEYS.gold)));
+    // 金币读回走 fromPlainDecimal（BigInt 十进制解析）。
+    // ★ 不能用 intOr/parseInt：余额量级已到 1e22，
+    //   且旧存档里可能残留 String() 写下的指数记数法（"1e+21"）——
+    //   parseInt("1e+21") === 1，那正是历史上丢档的机制。fromPlainDecimal 两者都兜住。
+    store.gold = safeGold(fromPlainDecimal(lsGet(SAVE_KEYS.gold)));
 
     const u = jsonOr(lsGet(SAVE_KEYS.up) || "{}", {});
     if (u && u.engine !== undefined) {
@@ -848,7 +854,9 @@ export function summarizeSave(data) {
     cleared,
     stars: totalStars,
     rating: Math.max(0, intOr(map[SAVE_KEYS.rating])),
-    gold: Math.max(0, intOr(map[SAVE_KEYS.gold])),
+    // 导入预览里的金币同样走 fromPlainDecimal：导入文件可能是旧版用 String()
+  // 写下的指数记数法，intOr 虽能读回但这里保持与正式读档同一条口径。
+  gold: safeGold(fromPlainDecimal(map[SAVE_KEYS.gold])),
   };
 }
 
