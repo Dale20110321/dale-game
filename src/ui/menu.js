@@ -202,6 +202,7 @@ export function hidePanel() {
 export function showMenu() {
   store.state = "menu";
   store.raceAI = null;
+  store.racers = [];
   hidePanel();
   setMenuGroupsVisible(true);
   if (pauseBar) pauseBar.style.display = "none";

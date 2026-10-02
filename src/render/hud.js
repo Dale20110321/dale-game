@@ -7,7 +7,7 @@
 //  · 其下：燃料条（无底板，数值右对齐）；右上：速度仪表（弧形量表 + 区间着色 + 数字）
 //  · 底部居中：按键指示；顶部居中：机制警告（危险段超速 / 限时门紧张）——有警告时左列整体下移，绝不遮挡
 import { ctx, view } from "../core/canvas.js";
-import { toKmh, toM, SPEEDLINE_V, SPEEDLINE_REF } from "../config/constants.js";
+import { toKmh, toM, SPEEDLINE_V, SPEEDLINE_REF, RACE_FORMATS, racePlaceOf } from "../config/constants.js";
 import { LEVELS, VARIANT_INFO, levelAt } from "../config/levels.js";
 import { store, bike, world } from "../core/store.js";
 import { touchActive } from "../core/input.js";
@@ -18,6 +18,23 @@ import { token, tokenNum, fontOf } from "../config/ui-tokens.js";
 import { getQuality } from "./postfx.js";
 
 /** 警告带宽（px）：有机制警告时左列下移，避免与警告重叠 */
+
+/**
+ * 比赛场次标签：多人竞技显示「第 N / 6 名」，团赛显示「我方第 N 队」。
+ * 1V1 / 排位赛返回空串 —— 那两种只有两个人的对决，名次没有信息量。
+ */
+function placeTag() {
+  if (store.mode !== "race") return "";
+  const f = RACE_FORMATS[store.raceFormat] || RACE_FORMATS.duel;
+  if (f.riders < 2) return "";
+  const p = racePlaceOf(store.racers || [], (bike.rear.x + bike.front.x) / 2, f);
+  if (f.team) {
+    const [tp, ip] = p;
+    return (tp === 1 ? "我方领先" : "我方落后") + " · 队内第 " + ip + " / " + f.teamSize;
+  }
+  return "第 " + p + " / " + (f.riders + 1) + " 名";
+}
+
 const WARN_H = 26;
 
 /**
@@ -189,7 +206,10 @@ function drawInfoCard(r) {
     const txt = lead >= 0
       ? "领先 " + Math.round(toM(lead)) + "m"
       : "落后 " + Math.round(toM(-lead)) + "m";
-    badgeText(txt, bx, r.y + 1, token("glass-fill-strong"), lead >= 0 ? token("success") : token("danger"));
+    bx += badgeText(txt, bx, r.y + 1, token("glass-fill-strong"), lead >= 0 ? token("success") : token("danger")) + 4;
+    // 多人赛 / 团赛：光看"领先落后"不知道场上有几个人，名字次才看得出超没超过去
+    const ps = placeTag();
+    if (ps) bx += badgeText(ps, bx, r.y + 1, token("glass-fill-strong"), token("gold")) + 4;
   }
 
   // 倒计时 / 目标行

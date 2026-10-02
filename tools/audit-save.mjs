@@ -28,9 +28,11 @@ export default async function (ctx) {
   const ZERO_MAXV = CONST.topSpeedOf(VEHICLES[0], { engine: 0, tire: 0, frame: 0, susp: 0 });
   const {
     ACHS, RANKS, MAX_LV, DT,
-    RATING_ADVANCED, RATING_PEAK, RATING_MIN,
-    RATING_WIN_GAIN, RATING_LOSS, RATING_WIN_GAIN_ADVANCED, RATING_LOSS_ADVANCED,
-    rankName, SAVE_APP, SAVE_FORMAT, SAVE_KEYS,
+    RATING_ADVANCED, RATING_PEAK, RATING_TOP, RATING_MIN,
+    RATING_LOSS, RATING_LOSS_ADVANCED, RANK_GAIN_BASE, RANK_GAIN_STEP,
+    RANK_GAIN_BASE_ADV, RANK_GAIN_STEP_ADV,
+    rankName, rankStars, rankIndexOf, rankNextOf, rankDelta, rankPromoReward,
+    SAVE_APP, SAVE_FORMAT, SAVE_KEYS,
   } = await imp("config/constants.js");
 
   const LV = LEVELS.length;
@@ -659,10 +661,13 @@ export default async function (ctx) {
 
     // 4.1 四种组合的精确加减分
     const combos = [
-      { adv: false, won: true, from: 100, delta: RATING_WIN_GAIN, tag: "普通排位 · 胜" },
+      { adv: false, won: true, from: 100, delta: rankDelta(100, false, true), tag: "普通排位 · 胜" },
       { adv: false, won: false, from: 100, delta: -RATING_LOSS, tag: "普通排位 · 负" },
-      { adv: true, won: true, from: 100, delta: RATING_WIN_GAIN_ADVANCED, tag: "高级排位 · 胜" },
+      { adv: true, won: true, from: 100, delta: rankDelta(100, true, true), tag: "高级排位 · 胜" },
       { adv: true, won: false, from: 100, delta: -RATING_LOSS_ADVANCED, tag: "高级排位 · 负" },
+      // 高段位单场收益是「基数 + 系数 × floor(rating/1000)」而不是常数 —— 这两条把它钉死
+      { adv: false, won: true, from: 3400, delta: rankDelta(3400, false, true), tag: "普通排位 · 胜（大师段）" },
+      { adv: true, won: true, from: 8600, delta: rankDelta(8600, true, true), tag: "高级排位 · 胜（虚空段）" },
     ];
     for (const c of combos) {
       const r = settle(c.adv, c.won, c.from);
@@ -671,9 +676,17 @@ export default async function (ctx) {
         !r.threw && r.out === exp && r.p.rating === exp,
         r.threw ? `抛异常：${r.threw}` : `实际 ${r.out}（期望 ${exp}）`);
     }
-    check("排位数值常量自洽：高级赛的收益与风险都严格高于普通赛",
-      RATING_WIN_GAIN_ADVANCED > RATING_WIN_GAIN && RATING_LOSS_ADVANCED > RATING_LOSS,
-      `胜 +${RATING_WIN_GAIN} / +${RATING_WIN_GAIN_ADVANCED} · 负 -${RATING_LOSS} / -${RATING_LOSS_ADVANCED}`);
+    // 逐段位比对（每 1000 分一档），而不只看 0 分那一档 —— 只验常数会漏掉「随高度递增」这个核心改动
+    const gainOk = [0, 999, 1000, 2500, 3300, 5200, 7500, 11999].every((r) =>
+      rankDelta(r, true, true) > rankDelta(r, false, true) &&
+      rankDelta(r, false, true) === RANK_GAIN_BASE + RANK_GAIN_STEP * Math.floor(r / 1000) &&
+      rankDelta(r, true, true) === RANK_GAIN_BASE_ADV + RANK_GAIN_STEP_ADV * Math.floor(r / 1000));
+    check("排位数值常量自洽：高级赛收益始终高于普通赛，且两者都随段位高度递增（每 1000 分 +8 / +12）",
+      gainOk && RATING_LOSS_ADVANCED > RATING_LOSS,
+      `0 分 +${rankDelta(0, false, true)} / +${rankDelta(0, true, true)} · 9000 分 +${rankDelta(9000, false, true)} / +${rankDelta(9000, true, true)} · 负分恒为 -${RATING_LOSS} / -${RATING_LOSS_ADVANCED}`);
+    check("rankDelta：判负恒为负且不随高度变化（高分段位一次失误不至于跌段）",
+      [0, 2000, 6000, 12000].every((r) => rankDelta(r, false, false) === -RATING_LOSS && rankDelta(r, true, false) === -RATING_LOSS_ADVANCED),
+      `-${RATING_LOSS} / -${RATING_LOSS_ADVANCED}（与 rating 无关）`);
 
     // 4.2 下限 0
     for (const [adv, from, tag] of [[false, 5, "普通"], [true, 10, "高级"], [false, RATING_LOSS, "普通恰好等于扣分"], [true, RATING_LOSS_ADVANCED, "高级恰好等于扣分"]]) {
@@ -702,8 +715,8 @@ export default async function (ctx) {
       return { r: store.progress.rating };
     });
     check("settleRanked：触底后首次获胜只加当局增量（不回血式叠加）",
-      !rFloorW.threw && rFloorW.r === RATING_WIN_GAIN_ADVANCED,
-      rFloorW.threw ? `抛异常：${rFloorW.threw}` : `0 → 胜 → ${rFloorW.r}（等于 +${RATING_WIN_GAIN_ADVANCED}）`);
+      !rFloorW.threw && rFloorW.r === rankDelta(0, true, true),
+      rFloorW.threw ? `抛异常：${rFloorW.threw}` : `0 → 胜 → ${rFloorW.r}（等于 +${rankDelta(0, true, true)}）`);
 
     // 4.3 战绩计数
     for (const c of combos) {
@@ -747,39 +760,40 @@ export default async function (ctx) {
       return { before, after: store.progress.rating, unlocked: st.isAdvancedUnlocked(store.progress.rating) };
     });
     check(`settleRanked：rating ${RATING_ADVANCED - 10} 判胜后跨过 ${RATING_ADVANCED} → 高级排位准入翻转`,
-      !rX1.threw && rX1.before === false && rX1.after === RATING_ADVANCED + RATING_WIN_GAIN - 10 && rX1.unlocked === true,
+      !rX1.threw && rX1.before === false &&
+      rX1.after === RATING_ADVANCED - 10 + rankDelta(RATING_ADVANCED - 10, false, true) && rX1.unlocked === true,
       rX1.threw ? `抛异常：${rX1.threw}` : `${RATING_ADVANCED - 10} → ${rX1.after}，准入 ${rX1.before} → ${rX1.unlocked}`);
     const rX2 = run(() => {
       fresh(); loadAll();
       store.rankedAdvanced = false;
-      store.progress.rating = RATING_PEAK - 25;
+      store.progress.rating = RATING_PEAK - rankDelta(RATING_PEAK - 1, false, true);
       const before = store.progress.peak;
       const out = gameM.settleRanked(true);
       return { before, out, after: store.progress.peak, ft: store.progress.freeThemes.length };
     });
-    check(`settleRanked：rating ${RATING_PEAK - 25} 判胜后精确落到 ${RATING_PEAK} → 登顶并永久化`,
+    check(`settleRanked：rating ${RATING_PEAK - rankDelta(RATING_PEAK - 1, false, true)} 判胜后精确落到 ${RATING_PEAK} → 登顶并永久化`,
       !rX2.threw && rX2.before === false && rX2.out === RATING_PEAK && rX2.after === true,
-      rX2.threw ? `抛异常：${rX2.threw}` : `${RATING_PEAK - 25} → ${rX2.out}，peak ${rX2.before} → ${rX2.after}（freeThemes=${rX2.ft}，无星级故为 0）`);
+      rX2.threw ? `抛异常：${rX2.threw}` : `${RATING_PEAK - rankDelta(RATING_PEAK - 1, false, true)} → ${rX2.out}，peak ${rX2.before} → ${rX2.after}（freeThemes=${rX2.ft}，无星级故为 0）`);
     const rX3 = run(() => {
       fresh(); loadAll();
       store.rankedAdvanced = false;
-      store.progress.rating = RATING_PEAK - 26;
+      store.progress.rating = RATING_PEAK - rankDelta(RATING_PEAK - 1, false, true) - 1;
       gameM.settleRanked(true);
       return { out: store.progress.rating, peak: store.progress.peak };
     });
-    check(`settleRanked：rating ${RATING_PEAK - 26} 判胜后停在 ${RATING_PEAK - 1} → 不误登顶`,
+    check(`settleRanked：rating ${RATING_PEAK - rankDelta(RATING_PEAK - 1, false, true) - 1} 判胜后停在 ${RATING_PEAK - 1} → 不误登顶`,
       !rX3.threw && rX3.out === RATING_PEAK - 1 && rX3.peak === false,
-      rX3.threw ? `抛异常：${rX3.threw}` : `${RATING_PEAK - 26} → ${rX3.out}，peak=${rX3.peak}`);
+      rX3.threw ? `抛异常：${rX3.threw}` : `${RATING_PEAK - rankDelta(RATING_PEAK - 1, false, true) - 1} → ${rX3.out}，peak=${rX3.peak}`);
     const rX4 = run(() => {
       fresh(); loadAll();
       store.rankedAdvanced = false;
-      store.progress.rating = 3000; store.progress.peak = true;
+      store.progress.rating = RATING_PEAK + 500; store.progress.peak = true;
       gameM.settleRanked(false);
       const a = store.progress.peak;
       store.progress.rating = 0;
       return { a, b: st.deriveUnlocks(store.progress, store.stars).peak };
     });
-    check("settleRanked：段位分从 3000 掉到低位，peak 依然为 true（登顶不可逆）",
+    check("settleRanked：段位分从登顶之上掉到低位，peak 依然为 true（登顶不可逆）",
       !rX4.threw && rX4.a === true && rX4.b === true,
       rX4.threw ? `抛异常：${rX4.threw}` : `peak=${rX4.a} → 再次派生仍为 ${rX4.b}`);
 
@@ -794,7 +808,7 @@ export default async function (ctx) {
         const won = i % 3 !== 0;
         const r = gameM.settleRanked(won);
         const d = r - prev;
-        if (won) { if (d !== RATING_WIN_GAIN) badDelta++; }
+        if (won) { if (d !== rankDelta(prev, false, true)) badDelta++; }
         else if (d === -RATING_LOSS) { /* 正常扣分 */ }
         else if (d === 0 && prev < RATING_LOSS) floor++; // 触底：扣分被下限截断，属设计
         else badDelta++;
@@ -808,7 +822,7 @@ export default async function (ctx) {
       rSeq.threw ? `抛异常：${rSeq.threw}` : `60 局全对（增量异常 ${rSeq.badDelta} 次，负分 ${rSeq.neg} 次，首局触底截断 ${rSeq.floor} 次）· 终值 ${rSeq.seq[rSeq.seq.length - 1]}`);
     check("settleRanked：60 局后战绩与实际胜负总数严格相等（wins 加 losses 等于 60）",
       !rSeq.threw && rSeq.p.wins + rSeq.p.losses === 60 && rSeq.p.wins === 40 && rSeq.p.losses === 20,
-      rSeq.threw ? `抛异常：${rSeq.threw}` : `${rSeq.p.wins} 胜 ${rSeq.p.losses} 负 · rating=${rSeq.p.rating}（起始 0，40×25-20×20=${40 * RATING_WIN_GAIN - 20 * RATING_LOSS}，首局触底扣 0）`);
+      rSeq.threw ? `抛异常：${rSeq.threw}` : `${rSeq.p.wins} 胜 ${rSeq.p.losses} 负 · rating=${rSeq.p.rating}（起始 0，增益随高度递增；首局触底扣 0）`);
     const rSeq2 = run(() => {
       fresh(); loadAll();
       store.rankedAdvanced = true;
@@ -818,7 +832,7 @@ export default async function (ctx) {
         const won = i % 2 === 0;
         const r = gameM.settleRanked(won);
         const d = r - prev;
-        if (won ? d !== RATING_WIN_GAIN_ADVANCED : d !== -RATING_LOSS_ADVANCED) bad++;
+        if (won ? d !== rankDelta(prev, true, true) : d !== -RATING_LOSS_ADVANCED) bad++;
         if (r < 0) neg++;
         names.add(rankName(r));
         prev = r;
@@ -846,7 +860,7 @@ export default async function (ctx) {
     // 4.7 rankName 全区间
     const nameRows = [];
     let mism = 0, nonEmpty = 0, total = 0;
-    for (let r = 0; r <= 3400; r += 7) {
+    for (let r = 0; r <= RATING_TOP + 200; r += 7) {
       let exp = RANKS[0].name;
       for (const k of RANKS) { if (r >= k.min) exp = k.name; else break; }
       const got = rankName(r);
@@ -854,7 +868,7 @@ export default async function (ctx) {
       if (got !== exp) { mism++; nameRows.push(`${r}→${got}(应 ${exp})`); }
       if (typeof got === "string" && got.length > 0) nonEmpty++;
     }
-    check(`rankName：0 到 3400 每 7 分逐点比对全区间（${total} 个采样点）无一处错档`,
+    check(`rankName：0 到 ${RATING_TOP + 200} 每 7 分逐点比对全区间（${total} 个采样点）无一处错档`,
       mism === 0 && nonEmpty === total,
       mism === 0 ? `${total} 个采样点全部命中正确段位（${RANKS.map((k) => `${k.min}+${k.name}`).join(" ")}）` : nameRows.slice(0, 4).join(" "));
     for (const k of RANKS) {
@@ -866,11 +880,11 @@ export default async function (ctx) {
     }
     check("rankName：负数、超大值、非法值都返回非空合法段位名（负数与非法值归青铜）",
       [[-1, "青铜"], [-1e9, "青铜"], [NaN, "青铜"], ["abc", "青铜"], [null, "青铜"], [undefined, "青铜"], [true, "青铜"],
-        [1e9, "传奇"], [Infinity, "传奇"]].every(([v, exp]) => rankName(v) === exp),
-      "-1 / -1e9 / NaN / abc / null / undefined / true → 青铜；1e9 与 Infinity → 传奇");
-    check("rankName：字符串数字被正确解析（1200 判铂金，399 判青铜）",
-      rankName("1200") === "铂金" && rankName("399") === "青铜",
-      `字符串 1200 → ${rankName("1200")} · 字符串 399 → ${rankName("399")}`);
+        [1e9, RANKS[RANKS.length - 1].name], [Infinity, RANKS[RANKS.length - 1].name]].every(([v, exp]) => rankName(v) === exp),
+      `-1 / -1e9 / NaN / abc / null / undefined / true → 青铜；1e9 与 Infinity → ${RANKS[RANKS.length - 1].name}`);
+    check("rankName：字符串数字被正确解析（1200 判铂金，299 判青铜）",
+      rankName("1200") === "铂金" && rankName("299") === "青铜",
+      `字符串 1200 → ${rankName("1200")} · 字符串 299 → ${rankName("299")}`);
     check("rankName：段位名非空且互不重复（段位表本身自洽）",
       new Set(RANKS.map((k) => k.name)).size === RANKS.length &&
       RANKS.every((k) => typeof k.name === "string" && k.name.length > 0),
@@ -886,26 +900,34 @@ export default async function (ctx) {
     // 4.8 rankedAIScale
     const aiRows = [];
     let aiMono = true, aiAdv = true, aiBound = true;
-    for (let r = 0; r <= 3000; r += 25) {
+    // ★ 采样一路走到段位表顶端 RATING_TOP：登顶之后还有 5 个段位，
+    //   只验到 3000 就验不到「AI 在登顶后仍继续变强」这条最关键的不变式。
+    const AI_TOP_N = 0.97;   // 普通档上界 = 0.70 + 0.20 × (1 + 0.35)
+    const AI_TOP_A = 1.36;   // 高级档上界 = 0.95 + 0.30 × (1 + 0.35)
+    for (let r = 0; r <= RATING_TOP; r += 25) {
       const n = raceM.rankedAIScale(r, false), a = raceM.rankedAIScale(r, true);
       if (r > 0) {
         const pn = raceM.rankedAIScale(r - 25, false), pa = raceM.rankedAIScale(r - 25, true);
         if (n < pn - 1e-12 || a < pa - 1e-12) aiMono = false;
       }
       if (!(a > n)) aiAdv = false;
-      if (!(n >= 0.70 - 1e-9 && n <= 0.90 + 1e-9 && a >= 0.95 - 1e-9 && a <= 1.25 + 1e-9)) aiBound = false;
+      if (!(n >= 0.70 - 1e-9 && n <= AI_TOP_N + 1e-9 && a >= 0.95 - 1e-9 && a <= AI_TOP_A + 1e-9)) aiBound = false;
       aiRows.push(r);
     }
-    check(`rankedAIScale：0 到 3000 段位分越高 AI 配速越快（${aiRows.length} 个采样点两档都单调不减）`,
+    check(`rankedAIScale：0 到 ${RATING_TOP} 段位分越高 AI 配速越快（${aiRows.length} 个采样点两档都单调不减，含登顶之后的 5 段）`,
       aiMono, `${aiRows.length} 个采样点全部单调不减`);
     check("rankedAIScale：高级档 AI 始终严格快于普通档（段位赛风险与难度匹配）",
-      aiAdv, `rating=0 时 ${raceM.rankedAIScale(0, false).toFixed(2)} vs ${raceM.rankedAIScale(0, true).toFixed(2)}；rating=2400 时 ${raceM.rankedAIScale(2400, false).toFixed(2)} vs ${raceM.rankedAIScale(2400, true).toFixed(2)}`);
-    check("rankedAIScale：普通档夹在 0.70 到 0.90、高级档夹在 0.95 到 1.25（不越界）",
-      aiBound, `普通档 ${raceM.rankedAIScale(0, false)} 到 ${raceM.rankedAIScale(3000, false).toFixed(2)} · 高级档 ${raceM.rankedAIScale(0, true)} 到 ${raceM.rankedAIScale(3000, true).toFixed(2)}`);
-    check("rankedAIScale：rating 超过登顶阈值后 AI 强度封顶（不再无限增强）",
-      raceM.rankedAIScale(RATING_PEAK, false) === raceM.rankedAIScale(RATING_PEAK * 10, false) &&
-      raceM.rankedAIScale(RATING_PEAK, true) === raceM.rankedAIScale(RATING_PEAK * 10, true),
-      `rating=${RATING_PEAK} 与 rating=${RATING_PEAK * 10} 均为 ${raceM.rankedAIScale(RATING_PEAK, false).toFixed(2)} / ${raceM.rankedAIScale(RATING_PEAK, true).toFixed(2)}`);
+      aiAdv, `rating=0 时 ${raceM.rankedAIScale(0, false).toFixed(2)} vs ${raceM.rankedAIScale(0, true).toFixed(2)}；rating=${RATING_TOP} 时 ${raceM.rankedAIScale(RATING_TOP, false).toFixed(2)} vs ${raceM.rankedAIScale(RATING_TOP, true).toFixed(2)}`);
+    check(`rankedAIScale：普通档夹在 0.70 到 ${AI_TOP_N}、高级档夹在 0.95 到 ${AI_TOP_A}（不越界）`,
+      aiBound, `普通档 ${raceM.rankedAIScale(0, false)} 到 ${raceM.rankedAIScale(RATING_TOP, false).toFixed(2)} · 高级档 ${raceM.rankedAIScale(0, true)} 到 ${raceM.rankedAIScale(RATING_TOP, true).toFixed(2)}`);
+    check("rankedAIScale：登顶（RATING_PEAK）之后仍随段位继续增强，直到 RATING_TOP 才封顶",
+      raceM.rankedAIScale(RATING_TOP, false) > raceM.rankedAIScale(RATING_PEAK, false) &&
+      raceM.rankedAIScale(RATING_TOP, true) > raceM.rankedAIScale(RATING_PEAK, true),
+      `登顶 ${raceM.rankedAIScale(RATING_PEAK, false).toFixed(2)} / ${raceM.rankedAIScale(RATING_PEAK, true).toFixed(2)} → 顶端 ${raceM.rankedAIScale(RATING_TOP, false).toFixed(2)} / ${raceM.rankedAIScale(RATING_TOP, true).toFixed(2)}`);
+    check("rankedAIScale：rating 超过段位表顶端后 AI 强度封顶（不再无限增强）",
+      raceM.rankedAIScale(RATING_TOP, false) === raceM.rankedAIScale(RATING_TOP * 10, false) &&
+      raceM.rankedAIScale(RATING_TOP, true) === raceM.rankedAIScale(RATING_TOP * 10, true),
+      `rating=${RATING_TOP} 与 rating=${RATING_TOP * 10} 均为 ${raceM.rankedAIScale(RATING_TOP, false).toFixed(2)} / ${raceM.rankedAIScale(RATING_TOP, true).toFixed(2)}`);
     check("rankedAIScale：负数与非法 rating 夹到 0 档（不产生负倍率或 NaN）",
       [-10, -1e9, NaN, null, undefined, "abc"].every((r) => {
         const n = raceM.rankedAIScale(r, false), a = raceM.rankedAIScale(r, true);
@@ -913,7 +935,153 @@ export default async function (ctx) {
       }),
       `负数与非法值均回退为 rating=0 的倍率（${raceM.rankedAIScale(-10, false)} / ${raceM.rankedAIScale(NaN, true)}）`);
 
-    // 4.9 未受邀无法开局排位
+    // ---------- 4.9 段位阶梯（14 段 × 3 星 / 段位下标 / 下一段 / 升段奖励） ----------
+    const PROMO_TOTAL = RANKS.reduce((a, k) => a + k.reward, 0);
+    const RUN_GOLD = LEVELS.reduce((a, L) => a + (L.goldBase || 0) + (L.coinN || 0) * (L.coinVal || 0), 0);
+    const peakName = RANKS.find((k) => k.min === RATING_PEAK).name;
+
+    check("RANKS：段位数 ≥ 14（原来只有 8 段，按高级赛 +40/场一天就刷完了）",
+      RANKS.length >= 14, RANKS.length + " 段：" + RANKS.map((k) => k.name).join(" → "));
+    check("RANKS：min 严格递增、从 0 起步、末段门槛 === RATING_TOP（覆盖整条段位分轴）",
+      RANKS[0].min === 0 && RANKS.every((k, i) => i === 0 || k.min > RANKS[i - 1].min) &&
+      RANKS[RANKS.length - 1].min === RATING_TOP,
+      RANKS[0].min + " … " + RANKS[RANKS.length - 1].min + "（RATING_TOP=" + RATING_TOP + "）");
+    check("RANKS：升段奖励严格递增、青铜为 0（全表奖励合计有量级）",
+      RANKS[0].reward === 0 && RANKS.every((k, i) => i === 0 || k.reward > RANKS[i - 1].reward),
+      RANKS.map((k) => k.reward).join(" → ") + "，合计 " + PROMO_TOTAL.toLocaleString());
+    check("RANKS：全表升段奖励占闯关一轮收入的 15%~40%（有存在意义，但不会盖过主线）",
+      PROMO_TOTAL / RUN_GOLD > 0.15 && PROMO_TOTAL / RUN_GOLD < 0.40,
+      "升段奖励 " + PROMO_TOTAL.toLocaleString() + " / 闯关一轮 " + RUN_GOLD.toLocaleString() +
+      " = " + ((PROMO_TOTAL / RUN_GOLD) * 100).toFixed(1) + "%");
+
+    check("rankIndexOf：每段门槛映射到自己的下标、门槛减 1 映射到上一段；负数与非法值 → 0",
+      RANKS.every((k, i) => rankIndexOf(k.min) === i && (i === 0 || rankIndexOf(k.min - 1) === i - 1)) &&
+      rankIndexOf(-1) === 0 && rankIndexOf(NaN) === 0 && rankIndexOf(1e9) === RANKS.length - 1,
+      "青铜=0 … " + RANKS[RANKS.length - 1].name + "=" + (RANKS.length - 1) + "；负数 / NaN / 1e9 已覆盖");
+    check("rankStars：每段都是「进段 1★ / 段内过半 2★ / 段内 85% 3★」，且**每一段的 3★ 都真的拿得到**",
+      RANKS.every((k, i) => {
+        if (i === 0) return rankStars(k.min) === 0;
+        const span = rankNextOf(k.min) ? rankNextOf(k.min).min - k.min : Math.round(k.min * 0.2);
+        return rankStars(k.min) === 1 &&
+          rankStars(k.min + Math.ceil(span * 0.5)) === 2 &&
+          rankStars(k.min + Math.ceil(span * 0.85)) === 3 &&
+          // 关键不变式：3★ 门槛必须仍在本段内，不能被下一段吃掉
+          (rankNextOf(k.min) === null || k.min + Math.ceil(span * 0.85) < rankNextOf(k.min).min);
+      }),
+      RANKS.slice(1, 4).map((k) => {
+        const span = rankNextOf(k.min).min - k.min;
+        return k.name + " " + k.min + "/★1 · " + (k.min + Math.ceil(span * 0.5)) + "/★★ · " + (k.min + Math.ceil(span * 0.85)) + "/★★★";
+      }).join(" · "));
+    {
+      let bad = 0, n = 0, cross = 0;
+      for (let r = 0; r <= RATING_TOP + 5000; r += 13) {
+        n++;
+        const i = rankIndexOf(r);
+        const k = RANKS[i];
+        const span = rankNextOf(r) ? rankNextOf(r).min - k.min : Math.max(1, Math.round(k.min * 0.2));
+        const t = (r - k.min) / span;
+        const exp = k.min <= 0 ? 0 : (t >= 0.85 ? 3 : t >= 0.5 ? 2 : 1);
+        if (rankStars(r) !== exp) bad++;
+        if (k.min > 0 && rankIndexOf(r) !== i) cross++;
+      }
+      check("rankStars：0 到 " + (RATING_TOP + 5000) + " 每 13 分逐点比对，星数恒与「当前段位门槛公式」一致且落在 0~3",
+        bad === 0 && n > 900 && cross === 0,
+        n + " 个采样点全部命中（跨段后按新段位重算，不虚高）");
+    }
+    check("rankStars：非法与负数 rating 返回合法星数（不抛异常、不越界）",
+      [-1, -1e9, NaN, null, undefined, "abc", 1e9].every((v) => {
+        const n = rankStars(v);
+        return isInt(n) && n >= 0 && n <= 3;
+      }),
+      "-1 / -1e9 / NaN / null / abc / 1e9 均落在 0~3");
+    check("rankNextOf：逐段返回「下一段」，已封顶（" + RANKS[RANKS.length - 1].name + "）返回 null",
+      RANKS.every((k, i) => {
+        const nx = rankNextOf(k.min);
+        return i + 1 < RANKS.length ? !!(nx && nx.name === RANKS[i + 1].name && nx.min === RANKS[i + 1].min) : nx === null;
+      }),
+      "黄金 → " + (rankNextOf(700) || {}).name + " … " + RANKS[RANKS.length - 1].name + " → null");
+
+    check("rankPromoReward：只结算「本次向上新跨过」的段位，降段或原地不动都不发",
+      rankPromoReward(0, 0) === 0 && rankPromoReward(700, 700) === 0 && rankPromoReward(1200, 700) === 0 &&
+      rankPromoReward(299, 300) === RANKS[1].reward &&
+      rankPromoReward(100, 1200) === RANKS[1].reward + RANKS[2].reward + RANKS[3].reward &&
+      rankPromoReward(2000, 5200) === RANKS.slice(5, 9).reduce((a, k) => a + k.reward, 0),
+      "299→300 = " + rankPromoReward(299, 300) + " · 100→1200 = " + rankPromoReward(100, 1200) +
+      " · 2000→5200 = " + rankPromoReward(2000, 5200));
+    check("rankPromoReward：负数 / NaN / 非法输入不抛异常且返回非负整数",
+      [[-100, 500], [NaN, 500], ["abc", 500], [0, null], [500, undefined]].every(([a, b]) => {
+        const n = rankPromoReward(a, b);
+        return isInt(n) && n >= 0;
+      }),
+      "-100→500 / NaN→500 / abc→500 / 0→null / 500→undefined 均为非负整数");
+
+    // ---- 4.9.1 升段奖励真的进了金币（结算层） ----
+    const rPromo = run(() => {
+      fresh(); loadAll();
+      store.rankedAdvanced = false;
+      store.progress.rating = RANKS[1].min - 5;
+      const g0 = store.gold;
+      gameM.settleRanked(true);
+      return { g0, g1: store.gold, r: store.progress.rating };
+    });
+    check("settleRanked：跨段的当局立刻收到升段一次性金币（这一局只有这一笔）",
+      !rPromo.threw && rPromo.g1 - rPromo.g0 === RANKS[1].reward && rPromo.r >= RANKS[1].min,
+      rPromo.threw ? "抛异常：" + rPromo.threw
+        : rPromo.g0 + " → " + rPromo.g1 + "（+" + (rPromo.g1 - rPromo.g0) + "，白银奖励 " + RANKS[1].reward + "）· rating=" + rPromo.r);
+    // 关键用例：真的跨过一次 → 拿到钻石奖励 → 手动掉回铂金 → 再赢回钻石 → 必须一分不再发
+    const rNoPromo = run(() => {
+      fresh(); loadAll();
+      store.rankedAdvanced = false;
+      store.progress.rating = RANKS[4].min - 100;
+      const g0 = store.gold;
+      let g = g0;
+      let crossed = null;
+      for (let i = 0; i < 20 && !crossed; i++) {
+        gameM.settleRanked(true);
+        g = store.gold;
+        if (store.progress.rating >= RANKS[4].min) crossed = { g, r: store.progress.rating };
+      }
+      const gotFirst = crossed ? crossed.g - g0 : -1;
+      store.progress.rating = RANKS[4].min - 30;   // 掉回铂金
+      const before2 = store.gold;
+      for (let i = 0; i < 20 && store.progress.rating < RANKS[4].min; i++) gameM.settleRanked(true);
+      return { g0, g1: crossed ? crossed.g : 0, gotFirst, g2: store.gold - before2, r2: store.progress.rating };
+    });
+    check("settleRanked：升段奖励只发一次 —— 真跨过钻石拿到奖励后，掉回铂金再赢回钻石不再补发",
+      !rNoPromo.threw && rNoPromo.gotFirst === RANKS[4].reward && rNoPromo.g2 === 0 && rNoPromo.r2 >= RANKS[4].min,
+      rNoPromo.threw ? "抛异常：" + rNoPromo.threw
+        : "首次跨段：+" + rNoPromo.gotFirst + "（钻石 " + RANKS[4].reward + "）· 掉段后重登：+" + rNoPromo.g2);
+    const rPromoAll = run(() => {
+      fresh(); loadAll();
+      store.rankedAdvanced = true;
+      store.progress.rating = 0;
+      const g0 = store.gold;
+      let guard = 0;
+      while (store.progress.rating < RATING_TOP && guard++ < 3000) gameM.settleRanked(true);
+      return { g0, g1: store.gold, n: guard, r: store.progress.rating };
+    });
+    check("settleRanked：全胜刷满 14 段，升段奖励合计恰好 " + PROMO_TOTAL.toLocaleString() + "（不多不少）",
+      !rPromoAll.threw && rPromoAll.g1 - rPromoAll.g0 === PROMO_TOTAL && rPromoAll.r >= RATING_TOP,
+      rPromoAll.threw ? "抛异常：" + rPromoAll.threw
+        : rPromoAll.n + " 场连胜刷满全表 · +" + (rPromoAll.g1 - rPromoAll.g0).toLocaleString() + " · 终值 " + rPromoAll.r);
+    {
+      const sim = (from) => {
+        fresh(); loadAll();
+        store.rankedAdvanced = from >= RATING_ADVANCED;
+        store.progress.rating = from;
+        let guard = 0;
+        while (store.progress.rating < RATING_TOP && guard++ < 5000) gameM.settleRanked(true);
+        return guard;
+      };
+      const nPeak = sim(0), nTop = sim(RATING_ADVANCED);
+      check("比赛阶段长度：全胜从 0 刷到登顶「" + peakName + "」需 80~250 场，刷满全表需 100~400 场（不是一天就完）",
+        nPeak >= 80 && nPeak <= 250 && nTop >= 100 && nTop <= 400,
+        "从 0 → " + peakName + "：" + nPeak + " 场 · 从 " + RATING_ADVANCED + " → " +
+        RANKS[RANKS.length - 1].name + "：" + nTop + " 场（每场约 1 分钟，即 " +
+        (nPeak / 60).toFixed(1) + "~" + (nTop / 60).toFixed(1) + " 小时）");
+    }
+
+    // 4.10 未受邀无法开局排位
     const rInv = run(() => {
       fresh(); loadAll();
       store.progress.invited = false;
@@ -1136,8 +1304,9 @@ export default async function (ctx) {
       st.loadProgress();
       return { same: ref === store.progress, keys: Object.keys(store.progress).join(",") };
     });
-    check("loadProgress：store.progress 保持同一对象引用并就地补齐 8 个字段（不破坏外部引用）",
-      !rtProg.threw && rtProg.same === true && rtProg.keys.split(",").length === 8,
+    // 9 = 8 + promoClaimed（升段奖励水位线）
+    check("loadProgress：store.progress 保持同一对象引用并就地补齐 9 个字段（不破坏外部引用）",
+      !rtProg.threw && rtProg.same === true && rtProg.keys.split(",").length === 9,
       rtProg.threw ? `抛异常：${rtProg.threw}` : `引用不变=${rtProg.same} · 字段 ${rtProg.keys}`);
     const rtRating = run(() => {
       fresh(); loadAll();
@@ -1981,20 +2150,21 @@ export default async function (ctx) {
     });
     check("跨层一致：save() 落盘后重读，金币、最佳、解锁、选关、段位、统计全部还原",
       !rX.threw && rX.rawGold === "654" && rX.gold === 654 && rX.best === 321 && rX.unlocked === 9 &&
-      rX.sel === 11 && rX.rating === 2000 && rX.runs === 3 && rX.rank === "星耀",
+      rX.sel === 11 && rX.rating === 2000 && rX.runs === 3 && rX.rank === RANKS.find((k) => k.min <= 2000 && (RANKS.indexOf(k) === RANKS.length - 1 || RANKS[RANKS.indexOf(k) + 1].min > 2000)).name,
       rX.threw ? `抛异常：${rX.threw}` : `gold=${rX.gold} best=${rX.best} unlocked=${rX.unlocked} sel=${rX.sel} rating=${rX.rating}（${rX.rank}）totalRuns=${rX.runs}`);
+    const C_RATING_X2 = RATING_PEAK + 200;
     const rX2 = run(() => {
       fresh(); loadAll();
       store.progress.invited = true;
-      store.progress.rating = 2600; store.progress.peak = false;
+      store.progress.rating = C_RATING_X2; store.progress.peak = false;
       store.stars = new Array(LV).fill(3);
       st.settleProgress();
       gameM.startGame("ranked", 0, { advanced: true });
       return { adv: store.rankedAdvanced, mode: store.mode, state: store.state, peak: store.progress.peak };
     });
-    check("跨层一致：段位 2600 时高级排位可开局（准入与开局档位一致）",
+    check(`跨层一致：段位 ${C_RATING_X2}（已过登顶线 ${RATING_PEAK}）时高级排位可开局且已登顶（准入与开局档位一致）`,
       !rX2.threw && rX2.adv === true && rX2.mode === "ranked" && rX2.state === "play" && rX2.peak === true,
-      rX2.threw ? `抛异常：${rX2.threw}` : `rating=2600 → rankedAdvanced=${rX2.adv} mode=${rX2.mode} state=${rX2.state} peak=${rX2.peak}`);
+      rX2.threw ? `抛异常：${rX2.threw}` : `rating=${C_RATING_X2} → rankedAdvanced=${rX2.adv} mode=${rX2.mode} state=${rX2.state} peak=${rX2.peak}`);
     const rX3 = run(() => {
       fresh(); loadAll();
       store.progress.invited = true;

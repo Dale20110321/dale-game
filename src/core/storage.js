@@ -506,6 +506,11 @@ export function loadProgress() {
   P.losses = Math.max(0, intOr(o.losses));
   P.peak = o.peak === true;
   P.rating = Math.max(0, intOr(lsGet(SAVE_KEYS.rating)));
+  // 升段奖励的水位线：只涨不跌。老存档没有这个字段 → 0，表示"之前都没领过"，
+  // 下一次跨段会把历史该拿的一次性奖励一次性补齐（而不是白送，是把欠的账结清）。
+  P.promoClaimed = Math.max(0, intOr(o.promoClaimed));
+  // 水位线不该低于当前段位分：否则老玩家每赢一局都会被判成"新跨段"反复领同一段的钱
+  if (P.promoClaimed < P.rating) P.promoClaimed = P.rating;
 
   loadStat();
 
@@ -902,6 +907,7 @@ export function resetSave() {
     wins: 0,
     losses: 0,
     peak: false,
+    promoClaimed: 0,
     freeThemes: [],
   };
   store.stat = { totalRuns: 0, totalMeters: 0, totalSeconds: 0, lastPlayed: "" };

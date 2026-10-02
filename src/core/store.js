@@ -120,7 +120,9 @@ export const store = {
   },
 
   // 比赛 AI
-  raceAI: null,
+  raceAI: null,          // 决定胜负的那一个对手（HUD 差距显示 + 胜负判定都只看它）
+  racers: [],            // 本场全部 AI 对手（多人赛 / 团赛时不止一个）
+  raceFormat: "duel",    // duel | melee | relay
 };
 
 /**

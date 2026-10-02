@@ -710,7 +710,8 @@ export default async function (ctx) {
   S("store：容器与流程状态初值");
   {
     T("store 是导出对象", typeof store === "object" && store !== null);
-    T("顶层字段数 = 27", Object.keys(store).length === 27, String(Object.keys(store).length));
+    // 29 = 原 27 + raceFormat / racers（比赛赛制：1V1 / 多人竞技 / 团赛）
+    T("顶层字段数 = 29", Object.keys(store).length === 29, String(Object.keys(store).length));
     T("slot = 0（默认存档1）", store.slot === 0, String(store.slot));
     T("顶层字段与出厂快照一致（本节未改动）", j({ ...store, cam: { ...store.cam }, run: { ...store.run } }) === PRISTINE.store);
     T("state = 'menu'", store.state === "menu", String(store.state));

@@ -2,8 +2,8 @@
 // 本模块不 import 任何 UI 模块，界面动作通过 initGame(presenter) 注入（避免循环依赖）
 import {
   START_X, WHEELBASE, toM, toKmh, LAND_REF,
-  RATING_MIN, RATING_WIN_GAIN, RATING_LOSS,
-  RATING_WIN_GAIN_ADVANCED, RATING_LOSS_ADVANCED, rankName, rankGold } from "../config/constants.js";
+  RATING_MIN, RANK_GAIN_BASE, RANK_GAIN_BASE_ADV, RATING_LOSS, RATING_LOSS_ADVANCED,
+  rankName, rankStars, rankPromoReward, rankDelta, rankGold } from "../config/constants.js";
 import { LEVELS, levelAt, segmentThemeAt, variantRule } from "../config/levels.js";
 import { THEMES } from "../config/themes.js";
 import { store, bike, world } from "../core/store.js";
@@ -26,7 +26,7 @@ import {
   buildLevel, freeInit, freeFill, syncSegmentTheme,
   updateBoosts, updateCanisters, updateCoins, emitRideDust, updateJumps,
 } from "./world.js";
-import { raceInit, raceUpdate } from "./race.js";
+import { raceInit, raceUpdate, raceFormat, racePlace, RACE_FORMATS, RACE_PLACE_GOLD } from "./race.js";
 
 let presenter = { hideOverlay() {}, toMenu() {} };
 
@@ -123,7 +123,9 @@ function beginRun() {
   resetRunState();
   store.cam.x = 0;
   fillTank();
-  if (store.mode === "race" || store.mode === "ranked") raceInit();
+  // 排位赛永远是单挑；普通比赛按玩家在面板上选的赛制（1V1 / 多人 / 团赛）
+  if (store.mode === "ranked") raceInit("duel");
+  else if (store.mode === "race") raceInit(store.raceFormat);
   store.state = "play";
   presenter.hideOverlay();
 }
@@ -141,21 +143,26 @@ export function settleRanked(won) {
   const P = store.progress;
   const adv = store.rankedAdvanced === true;
   const before = P.rating;
-  const delta = won
-    ? (adv ? RATING_WIN_GAIN_ADVANCED : RATING_WIN_GAIN)
-    : -(adv ? RATING_LOSS_ADVANCED : RATING_LOSS);
+  const delta = rankDelta(before, adv, won); // 越高段位单场收益越高（constants 里有推导）
   P.rating = Math.max(RATING_MIN, before + delta);
   const applied = P.rating - before;
   if (won) P.wins++;
   else P.losses++;
+  // 升段一次性奖励：让比赛阶段是"在爬 14 段阶梯"，而不是"重复同一场排位"。
+  // promoClaimed 是只涨的水位线 —— 掉段再升回同一段位不会二次领钱（否则奖励可以反复刷）。
+  const claimed = P.promoClaimed || 0;
+  const promo = rankPromoReward(before, P.rating, claimed);
+  if (promo > 0) addGold(promo);
+  if (P.rating > claimed) P.promoClaimed = P.rating;
   settleProgress(); // 刷新 peak / freeThemes 等派生态并立即落盘
   showToast(
     (won ? "🏆 排位胜利" : "🏳 排位失利") +
       (adv ? " · 高级赛" : " · 排位赛") +
       " · 段位分 " + (applied > 0 ? "+" : "") + applied +
-      " → " + P.rating + "（" + rankName(P.rating) + "）" +
-      " · " + P.wins + "胜" + P.losses + "负",
-    1800
+      " → " + P.rating + "（" + rankName(P.rating) + " " + "★".repeat(rankStars(P.rating)) + "☆".repeat(3 - rankStars(P.rating)) + "）" +
+      " · " + P.wins + "胜" + P.losses + "负" +
+      (promo > 0 ? " · 升段奖励 🪙+" + promo.toLocaleString() : ""),
+    promo > 0 ? 2400 : 1800
   );
   return P.rating;
 }
@@ -183,6 +190,10 @@ export function startGame(m, lv, opt) {
     const wantAdv = opt && opt.advanced !== undefined ? !!opt.advanced : store.rankedAdvanced === true;
     store.rankedAdvanced = mode === "ranked" && wantAdv && isAdvancedUnlocked(store.progress.rating);
     store.selLevel = lv !== undefined ? lv : store.selLevel || 0;
+    // 赛制：显式传入优先，否则沿用上一次选择（重开一局不丢赛制）
+    if (mode === "race" && opt && opt.format && RACE_FORMATS[opt.format]) {
+      store.raceFormat = opt.format;
+    }
     if (store.mode === "free") freeInit(opt && opt.theme);
     else buildLevel(store.selLevel);
     applyUpgrades();
@@ -274,6 +285,7 @@ function handleFuelEmpty() {
       store.state = "menu";
       presenter.toMenu();
       store.raceAI = null;
+      store.racers = [];
     }), 1600);
   } else {
     setFuel(store.phys.fuelMax * 0.3);
@@ -297,17 +309,26 @@ function finishLevel() {
     nextLabel: "下一关 →",
   };
   if (store.mode === "race") {
+    const f = raceFormat();
     const won = !(store.raceAI && store.raceAI.finish);
+    // 名次：多人竞技按名次发奖，团赛按队伍名次发奖（1V1 就是 1 或 2）
+    const place = racePlace(store.racers, bike.rear.x);
+    const p = f.team ? place[0] : place;
+    const total = f.team ? 2 : f.riders + 1;
+    // 名次奖金：第 1 名拿满，越靠后拿得越少，但**只要完赛就有**——
+    // 6 人场跑第 5 也比 1V1 输一把的 0 块强，"多跑一场多赚一点"才有正反馈。
+    const gold = RACE_PLACE_GOLD[Math.min(p - 1, RACE_PLACE_GOLD.length - 1)];
+    addGold(gold);
     result.nextLabel = "继续 →";
-    if (won) {
-      addGold(300);
-      showToast("🏆 比赛获胜！🪙+300", 900, "success");
-      result.title = "🏆 比赛获胜！";
-      result.goldGain = 300;
-    } else {
-      showToast("🏁 抵达终点（对手更快）", 900, "warn");
-      result.title = "🏁 抵达终点（对手更快）";
-    }
+    result.goldGain = gold;
+    result.place = p;
+    result.placeTotal = total;
+    const tag = f.team
+      ? "团队接力 · 我方" + (p === 1 ? "获胜" : "惜败")
+      : f.riders > 1 ? "多人竞技 · 第 " + p + " / " + total + " 名" : "比赛" + (won ? "获胜" : "失利");
+    showToast((won ? "🏆 抵达终点 · " : "🏁 抵达终点 · ") + tag + " · 名次奖金 🪙+" + gold,
+      1100, won ? "success" : "warn");
+    result.title = (won ? "🏆 " : "🏁 ") + tag;
   } else if (store.mode === "ranked") {
     // 排位赛：胜负直接决定段位分变化（结算提示由 settleRanked 内部输出）
     const won = !(store.raceAI && store.raceAI.finish);

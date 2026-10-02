@@ -381,7 +381,12 @@ sect("逐车体检（3 辆车）");
     ck(`${tag} 轮胎升级提升 μ`, mu9 > mu0, `${mu0.toFixed(3)}→${mu9.toFixed(3)}`);
   }
   ck("【全局】3 辆车 id 互不相同", new Set(VEHICLES.map((v) => v.id)).size === VEHICLES.length);
-  ck("【全局】至少一辆车免费可骑", VEHICLES.some((v) => v.price === 0), VEHICLES.map((v) => v.price).join(","));
+  ck("【全局】开局白送的那辆车（index 0）价格为 0，其余全部 > 0",
+    VEHICLES[0].price === 0 && VEHICLES.slice(1).every((v) => v.price > 0),
+    "index0=" + VEHICLES[0].name + "(" + VEHICLES[0].price + ") · 其余 " + VEHICLES.slice(1).map((v) => v.price).join(","));
+  ck("【全局】段位名与车辆名互不重名（玩家不会把段位和车搞混）",
+    RANKS.every((r) => !VEHICLES.some((v) => v.name === r.name)),
+    "段位：" + RANKS.map((r) => r.name).join(" ") + "；车辆：" + VEHICLES.map((v) => v.name).join(" "));
   ck("【全局】车辆速度/抓地/重量确有差异",
     new Set(VEHICLES.map((v) => v.spd)).size > 1 && new Set(VEHICLES.map((v) => v.grp)).size > 1 && new Set(VEHICLES.map((v) => v.wgt)).size > 1,
     `spd=${VEHICLES.map((v) => v.spd)} grp=${VEHICLES.map((v) => v.grp)} wgt=${VEHICLES.map((v) => v.wgt)}`);
@@ -459,7 +464,7 @@ sect("段位与成就与存档键");
   ck("rankName(0) = 青铜", rankName(0) === RANKS[0].name);
   ck("rankName(负数) = 青铜", rankName(-100) === RANKS[0].name);
   ck("rankName(NaN) = 青铜", rankName(NaN) === RANKS[0].name);
-  ck("rankName(3000+) = 传奇", rankName(99999) === "传奇", rankName(99999));
+  ck("rankName(远超段位表) = 表尾段位名", rankName(99999) === RANKS[RANKS.length - 1].name, rankName(99999));
 
   const achIds = ACHS.map((a) => a.id);
   for (let i = 0; i < ACHS.length; i++) {
