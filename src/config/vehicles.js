@@ -99,14 +99,27 @@ export const VEHICLES = [
     price: 0,
 
     speed: 1.0,
-    grip: 1,
+    grip: 1.0,
     weight: 1.0,
     airRot: 1.0,
     fuel: 1,
     color: "#314ccd",
     // 山地车：常规形态 —— 中等胎宽、平把、中等上管、可见避震弹簧、中立骑姿
     art: ART({}),
-    phys: P(1, 1.0, 1.0, 1.0, 16, 1, 1),
+    phys: P(1.0, 1.0, 1.0, 1.0, 16, 1.0, 1.0),
+    /** 特殊终极模式：全部升级满级后可花金币解锁
+     *  ★ 驮马此前是 27 辆里**唯一没有形态**的车 —— 免费新手车反而最没个性。
+     *    给它 phase（相位）语义："老驮马见得多"—— 永不摔车 + 燃料无限 + 危险段豁免。
+     *    数值取该 mode 里的**最低档**：它是基准车，不该因为形态而变强太多。
+     */
+    ultra: {
+      fx: {"speedN": 1.10},
+      name: "老驮马",
+      icon: "🐴",
+      mode: "phase",
+      cost: 6000,
+      desc: "见惯不惊：永不摔车 + 燃料无限 + 危险段限速豁免",
+    },
   },
   {
     id: "sport",
@@ -119,9 +132,9 @@ export const VEHICLES = [
     price: 3000,
 
     speed: 1.4,
-    grip: 0.72,
-    weight: 0.8,
-    airRot: 1.4,
+    grip: 0.55,
+    weight: 0.6,
+    airRot: 2.0,
     fuel: 0.75,
     color: "#e63946",
     // 竞速车：公路姿态 —— 细胎高轮（密而细的辐条、不画内圈）、细管、上管低而向车头下斜、
@@ -132,7 +145,7 @@ export const VEHICLES = [
       helmR: 4.9, peak: false, vents: 0,
       pose: POSE(4.5, 5.5, 6, 5, 1.5, 3.5),
     }),
-    phys: P(0.8, 0.7, 1.25, 1.1, 13, 1.35, 1.25),
+    phys: P(0.55, 0.5, 1.25, 1.1, 13, 1.05, 2.05),
     /** 特殊终极模式：全部升级满级后可花金币解锁 */
     ultra: {
       fx: {"speedN": 3.2, "rpmK": 2.0, "dragK": 0.55},
@@ -154,9 +167,9 @@ export const VEHICLES = [
     price: 10500,
 
     speed: 0.7,
-    grip: 1.45,
-    weight: 1.5,
-    airRot: 0.75,
+    grip: 1.72,
+    weight: 2.0,
+    airRot: 0.455,
     fuel: 1.45,
     color: "#8a5a2b",
     // 越野车：胖胎形态 —— 粗胎配少而粗的辐条、胖管、高而平直的上管、
@@ -173,7 +186,7 @@ export const VEHICLES = [
     //   曾试过把 torque 抬到 2.6 让它在冰面打滑，结果与"最陡上坡不可爬"那条难度断言
     //   **数学冲突**：冰面打滑要 τ > 43,825，而爬不上 43° 坡要 τ/12 < 2,407（τ < 28,884），
     //   两个区间没有交集 —— 这不是标定没做完，是真无解。所以保留"抓地无敌"这个设定。
-    phys: P(1.5, 1.35, 0.85, 0.9, 20, 1.12, 0.85),
+    phys: P(2.05, 2.2, 0.85, 0.9, 20, 0.92, 0.68),
     /** 特殊终极模式：全部升级满级后可花金币解锁 */
     ultra: {
       fx: {"gripK": 1.30, "speedN": 0.95},
@@ -203,9 +216,9 @@ export const VEHICLES = [
     price: 7500,
 
     speed: 1.85,
-    grip: 1.2,
-    weight: 0.85,
-    airRot: 0.87,
+    grip: 1.0,
+    weight: 0.62,
+    airRot: 1.136,
     fuel: 1.3,
     color: "#00d4ff",
     // 电磁车：紧凑轻量、细高轮、大落差上管、车把前伸很低（骑手几乎趴平）
@@ -215,7 +228,7 @@ export const VEHICLES = [
       helmR: 5.0, vents: 2,
       pose: POSE(5, 6, 7, 5.5, 2, 4),
     }),
-    phys: P(0.85, 1.15, 1.35, 1.15, 14, 1.55, 1.3),
+    phys: P(0.6, 0.88, 1.35, 1.15, 14, 2.5, 0.95),
     ultra: {
       fx: {"speedN": 3.4, "rpmK": 2.2, "dragK": 0.52},
       name: "电磁轨道炮",
@@ -236,9 +249,9 @@ export const VEHICLES = [
     price: 19000,
 
     speed: 1.6,
-    grip: 1.55,
-    weight: 0.7,
-    airRot: 1.62,
+    grip: 1.25,
+    weight: 0.48,
+    airRot: 2.778,
     fuel: 2.2,
     color: "#9d4edd",
     // 影行者：细胎 + 细密辐条、几乎无避震、坐垫窄、头盔圆润无前檐、骑手高伏（探身向前）
@@ -248,7 +261,7 @@ export const VEHICLES = [
       helmR: 5.2, peak: false, vents: 0,
       pose: POSE(6, 7, 8, 6, 2.5, 5),
     }),
-    phys: P(0.7, 0.62, 1.5, 1.2, 12, 1.2, 1.45),
+    phys: P(0.45, 0.36, 1.5, 1.2, 12, 1.35, 1.85),
     ultra: {
       fx: {"speedN": 1.30},
       name: "相位穿行",
@@ -269,9 +282,9 @@ export const VEHICLES = [
     price: 75500,
 
     speed: 1.35,
-    grip: 2.1,
-    weight: 2.4,
-    airRot: 0.42,
+    grip: 2.6,
+    weight: 2.7,
+    airRot: 0.385,
     fuel: 2.6,
     color: "#f4a261",
     // 磁力堡垒：全项目最粗的胎与管、超长避震、超宽坐垫、大头盔多通风口、骑手坐得高把手很低
@@ -281,7 +294,7 @@ export const VEHICLES = [
       helmR: 5.4, vents: 4,
       pose: POSE(-4, -6, -2, -7, 0, -6),
     }),
-    phys: P(2.4, 2.4, 0.72, 0.85, 24, 1.6, 1.9),
+    phys: P(2.85, 2.6, 0.72, 0.85, 24, 0.76, 1.0),
     ultra: {
       fx: {"gripK": 1.60, "speedN": 1.30},
       name: "磁力护盾",
@@ -302,9 +315,9 @@ export const VEHICLES = [
     price: 6500,
 
     speed: 2.1,
-    grip: 1.35,
-    weight: 0.6,
-    airRot: 0.95,
+    grip: 1.1,
+    weight: 0.4,
+    airRot: 1.087,
     fuel: 1.6,
     color: "#ff70a6",
     // 光子摩托：介于公路车与电磁车之间的轻薄形态、中等胎宽、粗管、无避震、前倾伏低
@@ -314,7 +327,7 @@ export const VEHICLES = [
       helmR: 5.1, peak: false, vents: 1,
       pose: POSE(7, 8, 9, 7, 3, 5.5),
     }),
-    phys: P(0.6, 1.05, 1.45, 1.25, 13, 1.15, 1.7),
+    phys: P(0.38, 0.92, 1.45, 1.25, 13, 1.0, 2.9),
     ultra: {
       fx: {"speedN": 3.6, "accel": 3.2, "vCap": 40},
       name: "光子跃迁",
@@ -342,9 +355,9 @@ export const VEHICLES = [
     //   **永远不可能突破摩擦极限** —— 冰面空转 / 滑移率等一整套"打滑是物理、
     //   不是特效"的表现会全部归零（实测绿野与冰面滑移率都是 0.000）。
     //   3 是全项目最高，仍低于磁力堡垒满级的水平，且冰面依然能打滑。
-    grip: 3,
-    weight: 1.2,
-    airRot: 0.55,
+    grip: 3.0,
+    weight: 1.22,
+    airRot: 0.532,
     fuel: 3.4,
     color: "#00ff9d",
     // 奇点号：全项目最夸张的形态 —— 中等胎宽配满辐条、极粗车架、超长避震、
@@ -356,7 +369,7 @@ export const VEHICLES = [
       pose: POSE(9, 9, 11, 8, 4, 7),
     }),
     // 全项目最优：扭矩倍率最高、红线最高、抓地最高、油箱最大
-    phys: P(1.2, 1.82, 1.6, 1.5, 26, 3, 3.6),
+    phys: P(1.22, 1.88, 1.6, 1.5, 26, 3.0, 3.6),
     /** 最终形态：升满后花金币解锁 */
     ultra: {
       /* 绝对形态不读参数：极速与推力在 physics/bike.js 里按 350km/h 标定 */ fx: {},
@@ -383,9 +396,9 @@ export const VEHICLES = [
     price: 800000000,
 
     speed: 2.6,
-    grip: 6,
-    weight: 1.42,
-    airRot: 0.5128,
+    grip: 6.0,
+    weight: 1.48,
+    airRot: 0.488,
     fuel: 4,
     color: "#e0f0ff",
     // ★ hover：这是一台**飞行器**，裸车也悬停（物理层见 isFlighter）。
@@ -405,7 +418,7 @@ export const VEHICLES = [
     //   torque/rpm 刻意**低于**奇点号：终焉形态的加速由 flightStep 的推力伺服负责，
     //   扭矩路径在这台车上几乎不参与（见 bike.js 的 omega 分支），
     //   堆扭矩只会在 27,778 px/s 下让车轮空转到 ωR ≈ 2300 rad/s，纯属数值噪声。
-    phys: P(1.42, 1.95, 1.7, 1.5, 12, 2.4, 3.2),
+    phys: P(1.48, 2.05, 1.7, 1.5, 12, 2.4, 3.2),
     /** 最终形态：升满后花 100 亿解锁 */
     ultra: {
       /* 终焉形态不读 fx：极速与推力在 constants.js 按 1000 km/h 标定 */ fx: {},
@@ -447,13 +460,13 @@ export const VEHICLES = [
     price: 4000,
 
     speed: 1.05,
-    grip: 1.05,
-    weight: 0.95,
-    airRot: 1.124,
+    grip: 1.32,
+    weight: 0.85,
+    airRot: 1.351,
     fuel: 1.2,
     color: "#7a9e7e",
     art: ART({tire: 2.6, spokes: 8, spokeW: 1.3, tube: 3.2, topDrop: 4, coil: 0.7, bar: "flat", saddleW: 11, helmR: 4.3, pose: POSE(1, 1, 2, 1, 0.5, -1)}),
-    phys: P(0.95, 0.89, 1.1, 1.05, 15, 1.05, 1.25),
+    phys: P(0.85, 0.74, 1.1, 1.05, 15, 1.22, 1.55),
     ultra: {
       fx: {"speedN": 2.6, "accel": 2.2, "vCap": 26}, name: "通勤喷射", icon: "🛴", mode: "warp", cost: 12000, desc: "踩住油门持续加速，0.6 秒逼近极速" },
   },
@@ -467,13 +480,13 @@ export const VEHICLES = [
     price: 12000,
 
     speed: 0.95,
-    grip: 1.3,
-    weight: 1.25,
-    airRot: 0.862,
+    grip: 1.48,
+    weight: 1.6,
+    airRot: 0.658,
     fuel: 1.35,
     color: "#b07d4f",
     art: ART({tire: 4.6, spokes: 6, spokeW: 1.9, tube: 5.0, topDrop: 0, coil: 1.5, bar: "wide", saddleW: 13, helmR: 4.4, vents: 2, pose: POSE(-1, -2, -1, -2, -0.5, -2.5)}),
-    phys: P(1.25, 1.16, 0.9, 0.95, 19, 1.2, 1.15),
+    phys: P(1.66, 1.52, 0.9, 0.95, 19, 1.28, 0.98),
     ultra: {
       fx: {"speedN": 4.0, "rpmK": 2.8, "dragK": 0.45}, name: "泥地推进", icon: "🏇", mode: "railgun", cost: 49500, desc: "推力与红线同时暴涨，泥地也能飞" },
   },
@@ -489,13 +502,13 @@ export const VEHICLES = [
     price: 5000,
 
     speed: 1.5,
-    grip: 1,
-    weight: 0.9,
-    airRot: 1.22,
+    grip: 0.62,
+    weight: 0.64,
+    airRot: 1.923,
     fuel: 1.4,
     color: "#a8d8e8",
     art: ART({tire: 2.2, rim: false, spokes: 10, spokeW: 1.0, tube: 2.8, topDrop: 5, coil: 0.5, bar: "drop", saddleW: 9, helmR: 4.8, peak: false, pose: POSE(3, 3, 4, 3, 1, 2)}),
-    phys: P(0.9, 0.82, 1.25, 1.1, 14, 1.3, 1.55),
+    phys: P(0.62, 0.52, 1.25, 1.1, 14, 1.68, 2.4),
     ultra: {
       fx: {"speedN": 3.6, "rpmK": 2.4, "dragK": 0.50}, name: "暴风增压", icon: "🌨️", mode: "surge", cost: 14500, desc: "红线与极速暴涨，雪地起飞" },
   },
@@ -509,15 +522,17 @@ export const VEHICLES = [
     price: 26000,
 
     speed: 1.15,
-    grip: 1.75,
-    weight: 1.35,
-    airRot: 0.8,
+    grip: 2.05,
+    weight: 1.12,
+    airRot: 0.952,
     fuel: 1.5,
     color: "#ff8fab",
     art: ART({tire: 5.0, spokes: 5, spokeW: 2.2, tube: 5.6, topDrop: -1, coil: 1.6, bar: "wide", saddleW: 14, helmR: 4.4, vents: 3, pose: POSE(-2, -3, -2, -3, -0.8, -3)}),
-    phys: P(1.35, 1.25, 0.88, 0.92, 19, 1.25, 1.4),
+    phys: P(1.12, 1.05, 0.88, 0.92, 19, 1.35, 1.55),
     ultra: {
-      fx: {"speedN": 1.40}, name: "潮汐穿行", icon: "🐚", mode: "phase", cost: 135500, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" },
+      // ★ 归入 stable：潮生的定位是"礁石上的定海神针"（grip 2.05，全表前列），
+      //   它的形态就该是"贴着礁盘不飞起来"，而不是"摔不下去"。
+      fx: {"gripK": 1.45, "speedN": 1.25}, name: "礁石定根", icon: "🐚", mode: "stable", cost: 135500, desc: "轮轴钉死在礁盘上，抓地再涨四成半" },
   },
 {
     id: "canyon",
@@ -529,13 +544,13 @@ export const VEHICLES = [
     price: 5500,
 
     speed: 1.6,
-    grip: 1.1,
-    weight: 0.88,
-    airRot: 1.163,
+    grip: 1.02,
+    weight: 1.02,
+    airRot: 1.515,
     fuel: 1.25,
     color: "#cd5c5c",
     art: ART({tire: 2.8, rim: false, spokes: 12, spokeW: 1.1, tube: 3.4, topDrop: 6, coil: 1.2, bar: "drop", saddleW: 8, helmR: 4.9, pose: POSE(4, 4, 5, 4, 1.5, 3)}),
-    phys: P(0.88, 0.86, 1.3, 1.15, 17, 1.45, 1.7),
+    phys: P(1.05, 0.66, 1.3, 1.15, 17, 1.38, 1.18),
     ultra: {
       fx: {"speedN": 3.2, "accel": 2.8, "vCap": 34}, name: "台地飞驰", icon: "🏜️", mode: "warp", cost: 18000, desc: "持续喷射：踩住油门就一直加速" },
   },
@@ -549,13 +564,13 @@ export const VEHICLES = [
     price: 3500,
 
     speed: 1.55,
-    grip: 0.95,
-    weight: 0.78,
-    airRot: 1.667,
+    grip: 0.78,
+    weight: 0.5,
+    airRot: 2.941,
     fuel: 1.3,
     color: "#66f0c8",
     art: ART({tire: 1.8, rim: false, spokes: 13, spokeW: 0.8, tube: 2.4, topDrop: 7, coil: 0.4, bar: "drop", saddleW: 7, helmR: 5.0, peak: false, pose: POSE(5, 6, 6, 5, 2, 4)}),
-    phys: P(0.78, 0.6, 1.35, 1.15, 13, 1.35, 1.5),
+    phys: P(0.48, 0.34, 1.35, 1.15, 13, 1.8, 1.42),
     ultra: {
       fx: {"speedN": 1.10}, name: "极光穿行", icon: "🌌", mode: "phase", cost: 10000, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" },
   },
@@ -571,13 +586,13 @@ export const VEHICLES = [
     price: 9000,
 
     speed: 1.7,
-    grip: 1,
-    weight: 1.02,
-    airRot: 1.099,
+    grip: 0.92,
+    weight: 1.08,
+    airRot: 1.01,
     fuel: 1.8,
     color: "#d4a373",
     art: ART({tire: 2.6, spokes: 10, spokeW: 1.2, tube: 3.2, topDrop: 4, coil: 0.6, bar: "drop", saddleW: 9, helmR: 4.6, pose: POSE(3, 3, 4, 3, 1, 2)}),
-    phys: P(1.02, 0.91, 1.4, 1.25, 15, 1.5, 1.9),
+    phys: P(1.1, 0.99, 1.4, 1.25, 15, 1.36, 1.4),
     ultra: {
       fx: {"speedN": 1.20}, name: "沙暴穿行", icon: "🌪️", mode: "phase", cost: 33000, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" },
   },
@@ -591,13 +606,13 @@ export const VEHICLES = [
     price: 47500,
 
     speed: 1.4,
-    grip: 1.85,
-    weight: 2,
-    airRot: 0.595,
+    grip: 2.1,
+    weight: 2.2,
+    airRot: 0.575,
     fuel: 2.1,
     color: "#ff6b35",
     art: ART({tire: 6.4, spokes: 5, spokeW: 2.6, tube: 7.2, topDrop: -2, coil: 2.1, bar: "wide", saddleW: 16, helmR: 5.0, vents: 4, pose: POSE(-3, -5, -2, -5, -1, -5)}),
-    phys: P(2, 1.68, 0.8, 0.88, 22, 1.7, 1.45),
+    phys: P(2.3, 1.74, 0.8, 0.88, 22, 1.85, 1.45),
     ultra: {
       fx: {"gripK": 1.40, "speedN": 1.20}, name: "熔岩护壳", icon: "🛡️", mode: "shield", cost: 303500, desc: "任何姿态都摔不下去，操控全保留" },
   },
@@ -611,15 +626,19 @@ export const VEHICLES = [
     price: 55500,
 
     speed: 1.3,
-    grip: 2.05,
-    weight: 2.2,
-    airRot: 0.526,
+    grip: 2.35,
+    weight: 1.95,
+    airRot: 0.538,
     fuel: 2.3,
     color: "#8ecae6",
     art: ART({tire: 7.0, spokes: 4, spokeW: 2.9, tube: 7.8, topDrop: -3, coil: 2.4, bar: "wide", saddleW: 17, helmR: 5.2, vents: 4, pose: POSE(-3, -6, -2, -6, -1, -6)}),
-    phys: P(2.2, 1.9, 0.75, 0.85, 23, 1.55, 1.35),
+    phys: P(2.0, 1.86, 0.75, 0.85, 23, 1.18, 1.14),
     ultra: {
-      fx: {"gripK": 1.75, "speedN": 1.10}, name: "冰封锁地", icon: "❄️", mode: "stable", cost: 371500, desc: "贴地滑行，永不腾空翻车" },
+      // ★ 从 stable 改为 shield：冰魄的设定是"大悬挂漂浮"（suspK 0.75 / travel 23，
+      //   全表最软的悬挂之一），它的挑战本来就来自"起伏中保持平衡"而不是"贴地不飞"。
+      //   shield 保留全部腾空与操控、只给摔车免疫 —— 正好是"晃但摔不死"。
+      //   同时把 stable 让给真正该"永不腾空"的那四台重型低转车。
+      fx: {"gripK": 1.75, "speedN": 1.10}, name: "冰魄浮壳", icon: "❄️", mode: "shield", cost: 371500, desc: "大悬挂继续晃，但怎么都摔不下去" },
   },
 {
     id: "monsoon",
@@ -631,13 +650,13 @@ export const VEHICLES = [
     price: 22000,
 
     speed: 1.75,
-    grip: 1.35,
-    weight: 1.15,
-    airRot: 0.909,
+    grip: 1.18,
+    weight: 1.25,
+    airRot: 0.82,
     fuel: 1.9,
     color: "#4cc9f0",
     art: ART({tire: 3.6, spokes: 9, spokeW: 1.6, tube: 4.4, topDrop: 5, coil: 1.1, bar: "drop", saddleW: 11, helmR: 4.7, vents: 2, pose: POSE(2, 2, 3, 2, 1, 1)}),
-    phys: P(1.15, 1.1, 1.2, 1.1, 18, 1.6, 1.8),
+    phys: P(1.28, 1.22, 1.2, 1.1, 18, 1.6, 1.8),
     ultra: {
       fx: {"speedN": 4.4, "rpmK": 3.0, "dragK": 0.42}, name: "季风过载", icon: "🌧️", mode: "surge", cost: 110500, desc: "红线与极速暴涨" },
   },
@@ -651,13 +670,13 @@ export const VEHICLES = [
     price: 65000,
 
     speed: 1.6,
-    grip: 1.55,
-    weight: 2.3,
-    airRot: 0.5,
+    grip: 1.32,
+    weight: 2.5,
+    airRot: 0.435,
     fuel: 2.2,
     color: "#2b2d42",
     art: ART({tire: 6.8, spokes: 6, spokeW: 2.7, tube: 7.5, topDrop: 1, coil: 2.3, bar: "wide", saddleW: 16, helmR: 5.1, vents: 3, pose: POSE(-3, -5, -2, -5, -1, -5)}),
-    phys: P(2.3, 2.0, 0.7, 0.82, 24, 1.85, 1.55),
+    phys: P(2.6, 2.3, 0.7, 0.82, 24, 2.6, 1.24),
     ultra: {
       fx: {"speedN": 5.4, "rpmK": 4.0, "dragK": 0.30}, name: "黑曜石炮", icon: "⬛", mode: "railgun", cost: 454500, desc: "推力与红线同时暴涨" },
   },
@@ -673,13 +692,13 @@ export const VEHICLES = [
     price: 41000,
 
     speed: 1.35,
-    grip: 2.15,
-    weight: 2.5,
-    airRot: 0.441,
+    grip: 1.7,
+    weight: 3.2,
+    airRot: 0.328,
     fuel: 2.5,
     color: "#6c757d",
     art: ART({tire: 7.8, spokes: 4, spokeW: 3.2, tube: 8.6, topDrop: -4, coil: 2.8, bar: "wide", saddleW: 19, helmR: 5.6, vents: 5, pose: POSE(-4, -7, -3, -7, -1, -7)}),
-    phys: P(2.5, 2.27, 0.68, 0.8, 25, 1.3, 1.25),
+    phys: P(3.35, 3.05, 0.68, 0.8, 25, 1.12, 1.08),
     ultra: {
       fx: {"gripK": 1.55, "speedN": 1.05}, name: "泰坦领域", icon: "🗿", mode: "stable", cost: 248000, desc: "贴地推进，永不腾空" },
   },
@@ -693,13 +712,13 @@ export const VEHICLES = [
     price: 14000,
 
     speed: 2.05,
-    grip: 1.15,
-    weight: 0.97,
-    airRot: 1.149,
+    grip: 1.02,
+    weight: 0.88,
+    airRot: 1.25,
     fuel: 2.2,
     color: "#ffb703",
     art: ART({tire: 2.0, rim: false, spokes: 12, spokeW: 0.9, tube: 2.6, topDrop: 7, coil: 0.3, bar: "drop", saddleW: 8, helmR: 5.1, peak: false, pose: POSE(6, 7, 7, 6, 2.5, 4.5)}),
-    phys: P(0.97, 0.87, 1.5, 1.3, 14, 1.65, 2.1),
+    phys: P(0.86, 0.8, 1.5, 1.3, 14, 2.2, 1.85),
     ultra: {
       fx: {"speedN": 4.2, "accel": 3.8, "vCap": 50}, name: "至日喷射", icon: "☀️", mode: "warp", cost: 60500, desc: "一脚油门不见尽头" },
   },
@@ -713,13 +732,13 @@ export const VEHICLES = [
     price: 35000,
 
     speed: 1.75,
-    grip: 1.7,
+    grip: 1.58,
     weight: 2.1,
-    airRot: 0.472,
+    airRot: 0.417,
     fuel: 2.4,
     color: "#3a0ca3",
     art: ART({tire: 6.0, spokes: 8, spokeW: 2.4, tube: 7.0, topDrop: 3, coil: 2.0, bar: "wide", saddleW: 15, helmR: 5.2, vents: 3, pose: POSE(-2, -4, -2, -4, -0.5, -4)}),
-    phys: P(2.1, 2.12, 0.75, 0.86, 22, 1.4, 1.6),
+    phys: P(2.2, 2.4, 0.75, 0.86, 22, 1.38, 1.52),
     ultra: {
       fx: {"speedN": 4.8, "rpmK": 3.4, "dragK": 0.36}, name: "先锋轨道炮", icon: "🔺", mode: "railgun", cost: 202500, desc: "推力与红线同时暴涨" },
   },
@@ -733,15 +752,15 @@ export const VEHICLES = [
     price: 16500,
 
     speed: 2,
-    grip: 1.4,
-    weight: 0.82,
-    airRot: 1.493,
+    grip: 1.12,
+    weight: 0.72,
+    airRot: 1.786,
     fuel: 2,
     color: "#adb5bd",
     art: ART({tire: 1.7, rim: false, spokes: 14, spokeW: 0.7, tube: 2.2, topDrop: 8, coil: 0.2, bar: "drop", saddleW: 6.5, helmR: 5.2, peak: false, pose: POSE(7, 8, 8, 7, 3, 5)}),
-    phys: P(0.82, 0.67, 1.55, 1.35, 12, 1.55, 2.15),
+    phys: P(0.7, 0.56, 1.55, 1.35, 12, 1.72, 2.55),
     ultra: {
-      fx: {"gripK": 1.20, "speedN": 1.10}, name: "幻影护盾", icon: "🌫️", mode: "shield", cost: 74000, desc: "任何姿态都摔不下去" },
+      fx: {"gripK": 1.20, "speedN": 1.10}, name: "幻影护盾", icon: "🌫️", mode: "shield", cost: 74000, desc: "任何姿态都摔不下去，腾空与操控全部保留" },
   },
 {
     id: "eclipse",
@@ -753,15 +772,18 @@ export const VEHICLES = [
     price: 103000,
 
     speed: 1.9,
-    grip: 1.9,
-    weight: 1.9,
-    airRot: 0.559,
+    grip: 1.65,
+    weight: 1.36,
+    airRot: 0.769,
     fuel: 2.3,
     color: "#212529",
     art: ART({tire: 5.2, spokes: 9, spokeW: 2.2, tube: 6.4, topDrop: 2, coil: 1.8, bar: "wide", saddleW: 15, helmR: 5.3, peak: true, vents: 4, pose: POSE(-1, -3, -1, -3, 0, -3)}),
-    phys: P(1.9, 1.79, 0.82, 0.9, 21, 1.95, 1.75),
+    phys: P(1.38, 1.3, 0.82, 0.9, 21, 2.15, 2.85),
     ultra: {
-      fx: {"gripK": 1.80, "speedN": 1.40}, name: "蚀之护盾", icon: "🌑", mode: "shield", cost: 833500, desc: "任何姿态都摔不下去" },
+      // ★ 归入 surge：天蚀是"重而快"（mass 1.38 / rpm 2.85，全表第 4 高红线），
+      //   surge 的"扭矩域拉满换极速"正对着它的画像；shield 是给"稳"的车准备的。
+      //   迁过来之后 surge 里多了一台神话档重高速车，与其余四台轻车拉开差异。
+      fx: {"speedN": 4.2, "rpmK": 2.6, "dragK": 0.44}, name: "蚀之超载", icon: "🌑", mode: "surge", cost: 833500, desc: "暗蚀引擎全功率：红线与极速暴涨，风阻压到四成半" },
   },
 
   // ---------------- 神话档 ----------------
@@ -775,13 +797,13 @@ export const VEHICLES = [
     price: 30000,
 
     speed: 2.3,
-    grip: 1.6,
-    weight: 0.92,
-    airRot: 1.235,
+    grip: 1.42,
+    weight: 0.76,
+    airRot: 1.563,
     fuel: 2.6,
     color: "#ff006e",
     art: ART({tire: 2.0, rim: false, spokes: 13, spokeW: 0.9, tube: 2.8, topDrop: 9, coil: 0.35, bar: "drop", saddleW: 7, helmR: 5.3, peak: false, vents: 2, pose: POSE(8, 9, 9, 8, 3.5, 6)}),
-    phys: P(0.92, 0.81, 1.5, 1.3, 13, 2, 2.5),
+    phys: P(0.74, 0.64, 1.5, 1.3, 13, 1.42, 3.35),
     ultra: {
       fx: {"speedN": 5.0, "rpmK": 3.6, "dragK": 0.36}, name: "新星过载", icon: "💫", mode: "surge", cost: 165500, desc: "红线与极速暴涨，一路顶到极速" },
   },
@@ -795,13 +817,13 @@ export const VEHICLES = [
     price: 88000,
 
     speed: 1.8,
-    grip: 2.1,
-    weight: 2.6,
-    airRot: 0.38,
+    grip: 1.95,
+    weight: 3.4,
+    airRot: 0.303,
     fuel: 2.9,
     color: "#03045e",
     art: ART({tire: 8.2, spokes: 4, spokeW: 3.4, tube: 9.2, topDrop: -4, coil: 3.0, bar: "wide", saddleW: 20, helmR: 5.8, vents: 5, pose: POSE(-4, -8, -3, -8, -1, -8)}),
-    phys: P(2.6, 2.63, 0.65, 0.78, 26, 1.6, 1.5),
+    phys: P(3.6, 3.3, 0.65, 0.78, 26, 0.98, 1.0),
     ultra: {
       fx: {"gripK": 2.00, "speedN": 1.20}, name: "湮灭领域", icon: "🕳️", mode: "stable", cost: 681000, desc: "贴地推进，永不腾空" },
   },
