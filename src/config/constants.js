@@ -487,36 +487,233 @@ export const SAVE_KEYS = {
   sel: "bike_sel",
 };
 
-// ---------------- 进度阶梯阈值 ----------------
-/** 高级排位赛准入段位分 */
+// ---------------- 排位赛段位 ----------------
+/** 高级排位赛准入门槛：铂金段 */
 export const RATING_ADVANCED = 1200;
-/** 登顶段位分（登顶后无限模式可自由选图） */
-export const RATING_PEAK = 2400;
+/** 登顶段位分：达到「大师」段（rating ≥ 3300）即解锁无限模式自由选图 */
+export const RATING_PEAK = 3300;
+/** 段位表最高门槛（「超越」段）：AI 强度与段位奖励都以它为封顶基准 */
+export const RATING_TOP = 12000;
 /** 排位赛下限段位分（永不出现负数） */
 export const RATING_MIN = 0;
 
-// ---------------- 排位赛段位（Task 11） ----------------
-/** 普通排位赛：胜 +25 / 负 20 */
-export const RATING_WIN_GAIN = 25;
+/**
+ * 单场段位分 = 基数 + 段位系数 × floor(rating / 1000)（见 rankDelta）。
+ * ★ 为什么不是固定加减：段位越高对手越强，固定 +25 会让 3000 分之后每爬一级
+ *   都要几十场。奖励随高度递增（0 分 +25 → 10000 分 +105），登顶大师约 150 场、
+ *   刷满全表约 300 场 —— 这才是"一个阶段"该有的长度。
+ */
+export const RANK_GAIN_BASE = 25;        // 普通赛基数
+export const RANK_GAIN_STEP = 8;         // 普通赛：每 1000 段位分 +8
+export const RANK_GAIN_BASE_ADV = 40;    // 高级赛基数
+export const RANK_GAIN_STEP_ADV = 12;    // 高级赛：每 1000 段位分 +12
+/** 单场扣分恒定（不随高度增长）——高分段位一次失误不至于直接跌段 */
 export const RATING_LOSS = 20;
-/** 高级排位赛：胜 +40 / 负 30（收益与风险同步放大） */
-export const RATING_WIN_GAIN_ADVANCED = 40;
 export const RATING_LOSS_ADVANCED = 30;
 
 /**
- * 段位表：按段位分升序，min 为进入该段位的门槛。
- * 覆盖 0 → 3000+ 全区间（RATING_PEAK = 2400 恰为"王者"门槛）。
+ * 段位表：14 段 × 3 星，覆盖 0 → 12000 全区间。
+ *
+ * ★ 为什么从 8 段扩到 14 段：原来 0→3000、封顶王者 2400，按高级赛 +40/场打到顶
+ *   也就六十来场，一天就玩完了 —— 比赛阶段形同虚设。扩段之后：
+ *     · 1200 铂金 → 解锁高级排位赛
+ *     · 3300 大师 → 登顶，解锁无限模式自由选图（`RATING_PEAK`）
+ *     · 12000 超越 → 段位表刷满，比赛阶段真正的"通关"
+ *   每一段都有**看得见的一次性金币奖励**，刷起来是"在爬阶梯"而不是"重复同一件事"。
+ *
+ * 每段 3 星：★ = 进段，★★ = 段内过半，★★★ = 段内 85%（青铜恒为 0 星）。
+ *   ★ 星数按**段内跨度**（下一段门槛 − 本段门槛）算，不按本段门槛的倍数算：
+ *     门槛倍数口径在 14 段表里大多数段位根本够不到 3★（1.5× 门槛会先跨进下一段），
+ *     等于把 3★ 设成不可达。跨度口径保证每一段的 3★ 都能拿到，"还差一格"始终可见。
+ *
+ * ★ 段位名**不得与车辆名重复**（「奇点」曾是段位名，也是一台车的名字，玩家会分不清）。
+ * 升段奖励只在**首次向上跨过**该段门槛时发一次，降段再升回来不重复发。
+ * 全表升段奖励合计 562,000 ≈ 闯关一轮（212 万）的 26%：够买一两台中高档车，
+ * 但不会盖过主线。
  */
 export const RANKS = [
-  { min: 0, name: "青铜" },
-  { min: 400, name: "白银" },
-  { min: 800, name: "黄金" },
-  { min: 1200, name: "铂金" },
-  { min: 1600, name: "钻石" },
-  { min: 2000, name: "星耀" },
-  { min: 2400, name: "王者" },
-  { min: 3000, name: "传奇" },
+  { min: 0, name: "青铜", reward: 0 },
+  { min: 300, name: "白银", reward: 2000 },
+  { min: 700, name: "黄金", reward: 4000 },
+  { min: 1200, name: "铂金", reward: 7000 },
+  { min: 1800, name: "钻石", reward: 11000 },
+  { min: 2500, name: "星耀", reward: 16000 },
+  { min: 3300, name: "大师", reward: 22000 },
+  { min: 4200, name: "宗师", reward: 30000 },
+  { min: 5200, name: "王者", reward: 40000 },
+  { min: 6300, name: "星之巅", reward: 52000 },
+  { min: 7500, name: "永恒", reward: 66000 },
+  { min: 8800, name: "虚空", reward: 82000 },
+  { min: 10200, name: "凌驾", reward: 100000 },
+  { min: 12000, name: "超越", reward: 130000 },
 ];
+
+/** 段位分 → 段位下标（纯函数；越界钳到表尾） */
+export function rankIndexOf(rating) {
+  const r = Math.max(0, Number(rating) || 0);
+  let i = 0;
+  for (let k = 0; k < RANKS.length; k++) {
+    if (r >= RANKS[k].min) i = k;
+    else break;
+  }
+  return i;
+}
+
+/**
+ * 某一段的"段内跨度"：下一段门槛 − 本段门槛。
+ * 末段（超越）没有下一段，用自身的 1/5 当跨度，保证它的 3★ 同样可达。
+ */
+export function rankSpanOf(index) {
+  const r = RANKS[index];
+  if (!r) return 0;
+  const nx = RANKS[index + 1];
+  return nx ? nx.min - r.min : Math.max(1, Math.round(r.min * 0.2));
+}
+
+/**
+ * 段位星数（0~3）：进段 1★ / 段内过半 2★ / 段内 85% 3★（青铜恒为 0 星）。
+ * ★ 用**当前所在段位的跨度**来算，而不是本段门槛的倍数 —— 倍数口径在 14 段表里
+ *   大多数段位根本到不了 3★（1.5× 门槛会先跨进下一段，星数被"吃掉"）。
+ *   跨度口径保证每段的 3★ 都拿得到，升段后星数从 1★ 重新起算，"还差一格"始终可见。
+ */
+export function rankStars(rating) {
+  const i = rankIndexOf(rating);
+  const r = RANKS[i];
+  if (!r || r.min <= 0) return 0;
+  const span = rankSpanOf(i);
+  const t = (Math.max(0, Number(rating) || 0) - r.min) / span;
+  if (t >= 0.85) return 3;
+  if (t >= 0.5) return 2;
+  return 1;
+}
+
+/** 下一个段位（纯函数）；已封顶（「超越」）返回 null */
+export function rankNextOf(rating) {
+  const i = rankIndexOf(rating);
+  return i + 1 < RANKS.length ? RANKS[i + 1] : null;
+}
+
+/**
+ * 单场段位分增减（纯函数，便于测试）。
+ * @param {number} rating 当前段位分
+ * @param {boolean} advanced 是否高级赛
+ * @param {boolean} won 是否获胜
+ * @returns {number} 有符号增量
+ */
+export function rankDelta(rating, advanced, won) {
+  if (!won) return -(advanced ? RATING_LOSS_ADVANCED : RATING_LOSS);
+  const r = Math.max(0, Number(rating) || 0);
+  const k = Math.floor(r / 1000);
+  return advanced
+    ? RANK_GAIN_BASE_ADV + RANK_GAIN_STEP_ADV * k
+    : RANK_GAIN_BASE + RANK_GAIN_STEP * k;
+}
+
+/**
+ * 升段一次性奖励：from → to 期间**新跨过、且此前从未领取过**的那些段位之和（纯函数，不写状态）。
+ *
+ * @param {number} from 本局开始前的段位分
+ * @param {number} to 本局结束后的段位分
+ * @param {number} [claimed] 历史已发到哪一档（progress.promoClaimed，只增不减）
+ *
+ * ★ 为什么必须带 claimed：只看 from → to 的话，"钻石掉回铂金、再赢回钻石"会二次发钱，
+ *   等于奖励可以反复刷。claimed 是一条只涨的水位线，跨过的段位一旦结算就永久作废。
+ *   老存档没有这个字段时按 0 处理，等于"之前都没领过"，下一次跨段会一次性补齐。
+ */
+export function rankPromoReward(from, to, claimed) {
+  const a = Math.max(0, Number(from) || 0);
+  const b = Math.max(0, Number(to) || 0);
+  if (b <= a) return 0;
+  const floorV = Math.max(a, Math.max(0, Number(claimed) || 0));
+  if (b <= floorV) return 0;
+  let sum = 0;
+  for (const r of RANKS) if (r.min > floorV && r.min <= b) sum += r.reward || 0;
+  return sum;
+}
+
+// ---------------- 比赛赛制（纯配置 / 纯函数） ----------------
+/**
+ * 三种赛制。`riders` = AI 人数（不含玩家），`team` = 是否团赛。
+ *
+ * ★ 为什么要分赛制：1V1 只有"赢 / 输"两个结果，打二十场和打一场的信息量一样；
+ *   多人竞技按**名次**给奖，团赛按**两队累计里程**给奖 ——
+ *   同一个终点线，玩法就从"比谁快"变成"怎么配合 / 怎么超车"，比赛阶段才立得住。
+ */
+export const RACE_FORMATS = {
+  duel: {
+    id: "duel", name: "1V1 竞速", icon: "⚔️", riders: 1, team: false,
+    desc: "单挑一名对手，冲过终点即获胜",
+  },
+  melee: {
+    id: "melee", name: "多人竞技", icon: "🏁", riders: 5, team: false,
+    desc: "5 名对手同场，按最终名次发奖（第 1 名最多）",
+  },
+  relay: {
+    id: "relay", name: "团队接力", icon: "🤝", riders: 5, team: true, teamSize: 3,
+    desc: "3v3：你的队伍累计里程先到终点即获胜，两队都贡献了里程",
+  },
+};
+/**
+ * 名次奖金（第 1~6 名，px/s 无关，纯金币）。团赛按队伍名次取，1V1 只有第 1 / 第 2 两档。
+ * ★ 第 6 名仍然给钱是刻意的：6 人场跑最后一名也有正反馈，
+ *   否则玩家会觉得"多打 5 个人只是多了 5 次挫败"，不如一直刷 1V1。
+ */
+export const RACE_PLACE_GOLD = [600, 400, 300, 220, 160, 120];
+
+/** 赛制列表（面板渲染顺序） */
+export const RACE_FORMAT_IDS = ["duel", "melee", "relay"];
+
+/** 团赛里玩家所在队伍编号；非团赛返回 -1 */
+export const PLAYER_TEAM = 0;
+/** 团赛的对手队伍编号 */
+export const RIVAL_TEAM = 1;
+
+/** AI 车手名（按名次固定分配，同一赛制每次开局的阵容一致，玩家能形成记忆点） */
+const RIDER_NAMES = ["疾风", "铁砧", "青隼", "赤影", "磐岩", "游隼", "夜枭·二", "铜铃", "白鸦", "砂砾"];
+
+/**
+ * 建一整场比赛的对手（纯函数：不碰 store，便于测试）。
+ * @param {string} format RACE_FORMATS 的键
+ * @returns {{r:object[], team:number}} 对手数组与玩家队伍号
+ */
+export function buildRacers(format) {
+  const f = RACE_FORMATS[format] || RACE_FORMATS.duel;
+  const size = f.team ? f.teamSize : 0;
+  const r = [];
+  for (let i = 0; i < f.riders; i++) {
+    r.push({
+      name: RIDER_NAMES[i % RIDER_NAMES.length],
+      // 错开起跑位置：6 个人挤在同一个点，开局就叠在一起看不出是多人场
+      x: START_X - 120 - i * 190,
+      spd: 0,
+      finish: false,
+      // ★ bias 是稳定的个体配速系数：同一名车手每局快慢一致，才谈得上"知己知彼"；
+      //   用取模而不是 Math.random，是为了让阵容在同赛制下可复现（不然后台无法断言）。
+      bias: 0.93 + (((i * 7 + 3) % 11) / 100),
+      team: f.team ? (i < size - 1 ? PLAYER_TEAM : RIVAL_TEAM) : -1,
+    });
+  }
+  return { r, team: f.team ? PLAYER_TEAM : -1 };
+}
+
+/**
+ * 玩家名次（纯函数，render 与 game 共用）。
+ * @param {object[]} list 本场 AI 列表
+ * @param {number} playerX 玩家横坐标
+ * @param {{team?:boolean, riders?:number, teamSize?:number}} fmt 当前赛制
+ * @returns {number|number[]} 非团赛 = 个人名次（1 起）；团赛 = [队伍名次, 队内名次]
+ */
+export function racePlaceOf(list, playerX, fmt) {
+  const f = fmt || RACE_FORMATS.duel;
+  if (!f.team) {
+    let p = 1;
+    for (const a of list || []) if (a.x > playerX) p++;
+    return p;
+  }
+  const ahead = (list || []).filter((a) => a.team === PLAYER_TEAM && a.x > playerX).length;
+  const rivalAhead = (list || []).filter((a) => a.team === RIVAL_TEAM && a.x > playerX).length;
+  return [ahead <= rivalAhead ? 1 : 2, ahead + 1];
+}
 
 /** 段位分 → 段位名（纯函数：任意输入都返回非空段位名，负数/NaN 视为青铜） */
 export function rankName(rating) {

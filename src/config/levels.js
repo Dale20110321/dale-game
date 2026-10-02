@@ -368,11 +368,23 @@ export function levelGroundInfo(L, x, e = 2) {
   return { y: levelHillY(L, x), m: (yR - yL) / (2 * e) };
 }
 
-/** 无限模式：按"地块"换地貌体格，同一地块恒定（纯函数，不含状态） */
+/**
+ * 无限模式的**本局种子**。每次进入无限模式由 freeInit 重新摇一次（setFreeSeed）。
+ *
+ * ★ 修 bug：原来 freeHill 完全没有随机源 —— 每次打开无限模式，
+ *   前几百米的地形轮廓、起伏相位、断层落点**逐字节相同**，玩十次像玩一次。
+ *   种子只影响"这一局的地图长什么样"，同一局内仍然连续（同一 x 恒得同一个 y），
+ *   物理与存档都不受影响。
+ */
+let freeSeed = 0;
+export function setFreeSeed(s) { freeSeed = (Number(s) || 0) >>> 0; }
+export function getFreeSeed() { return freeSeed; }
+
+/** 无限模式：按"地块"换地貌体格，同一地块恒定（含本局种子 → 每局地图不同） */
 function freeMoodOf(x) {
   const t = Math.floor(x / 3000);
   // 哈希 → 12 种气质：让相邻地块体格不同、整体覆盖全部 12 种
-  const h = Math.imul(t ^ 0x9e3779b9, 0x85ebca6b) >>> 0;
+  const h = Math.imul((t ^ freeSeed) ^ 0x9e3779b9, 0x85ebca6b) >>> 0;
   return TERRAIN_MOODS[h % TERRAIN_MOODS.length];
 }
 
@@ -387,10 +399,11 @@ export function freeHill(x) {
   // 地块内局部相位：同一地块恒定 → 边界不跳变
   const seg = Math.floor(x / 3000);
   const mood = freeMoodOf(x);
-  const ph = (seg * 2.399963) % 6.283185307;
+  // 相位与波长抖动都掺进本局种子：只换体格的话，两局的"轮廓节奏"仍然一样
+  const ph = (seg * 2.399963 + (freeSeed % 6283) * 0.001) % 6.283185307;
   for (let i = 0; i < mood.waves.length; i++) {
     const w = mood.waves[i];
-    const wl = Math.max(MIN_WAVELEN, w[0] * (0.85 + ((seg * 7 + i * 13) % 31) / 31 * 0.3));
+    const wl = Math.max(MIN_WAVELEN, w[0] * (0.85 + (((seg * 7 + i * 13 + freeSeed) % 31) / 31) * 0.3));
     y += Math.sin((x / wl) * 6.283185307 + ph + i * 1.9) * (w[1] * 0.5 + w[1] * 0.5 * diffS + w[2] * diffS);
   }
   const stepGap = mood.stepGap;

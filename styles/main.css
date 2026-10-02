@@ -583,14 +583,64 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 .lvCell.locked { cursor: not-allowed; }
 
 /* ============================================================
+   比赛赛制选择（1V1 / 多人竞技 / 团赛）
+   ============================================================ */
+.fmtRow {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-2); margin-bottom: var(--space-3);
+}
+.fmtBtn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1);
+  padding: var(--space-2) var(--space-3); text-align: left; cursor: pointer;
+  background: var(--glass-fill); color: var(--text-mid);
+  border: 2px solid transparent; border-radius: var(--radius-card);
+  font: inherit; min-height: 44px;
+}
+.fmtBtn:hover { background: var(--glass-fill-strong); }
+.fmtBtn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.fmtBtn.on { border-color: var(--gold); color: var(--text-hi); }
+.fmtIcon { font-size: 20px; }
+.fmtName { font-weight: var(--font-display-weight); font-size: var(--font-body-size); }
+.fmtDesc { font-size: var(--font-caption-size); color: var(--text-lo); }
+.fmtGold { font-size: var(--font-caption-size); color: var(--gold); }
+
+/* ============================================================
    排位赛
    ============================================================ */
+/* 段位块改成纵向堆叠：段位分 / 星 / 进度条 / 下一段差多少，四行各自成行更好读 */
 .rankBox {
-  display: flex; align-items: baseline; justify-content: center; gap: var(--space-3);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-1);
   background: var(--glass-fill); border-radius: var(--radius-card); padding: var(--space-3); margin-bottom: var(--space-2);
 }
 .rankBox .rankScore { font-size: 34px; font-weight: var(--font-display-weight); color: var(--gold); }
-.rankBox .rankSub { font-size: var(--font-caption-size); color: var(--text-mid); }
+.rankBox .rankSub { font-size: var(--font-caption-size); color: var(--text-mid); text-align: center; }
+.rankBox .rankSub b { color: var(--gold); }
+.rankBox .rankStars { letter-spacing: 1px; color: var(--gold); font-size: var(--font-body-size); }
+.rankBox .rankStars .dim { color: var(--text-lo); }
+.rankBox .rankBar {
+  width: min(320px, 100%); height: 6px; border-radius: 3px;
+  background: var(--scrim-strong); overflow: hidden;
+}
+.rankBox .rankBar > i { display: block; height: 100%; background: var(--gold); border-radius: 3px; }
+
+/* ---- 段位阶梯折叠表（14 段 × 3 星 + 升段奖励） ---- */
+.rankLadder { margin: var(--space-2) 0; }
+.rankLadder > summary {
+  cursor: pointer; font-size: var(--font-caption-size); color: var(--text-mid);
+  padding: var(--space-2); border-radius: var(--radius-chip); background: var(--glass-fill);
+}
+.rankLadder > summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.rankList { list-style: none; margin: var(--space-2) 0 0; padding: 0; }
+.rankList li {
+  display: grid; grid-template-columns: 52px 1fr auto auto; align-items: center; gap: var(--space-2);
+  padding: var(--space-1) var(--space-2); font-size: var(--font-caption-size); color: var(--text-lo);
+  border-bottom: 1px solid var(--scrim-strong);
+}
+.rankList li.on { color: var(--text-mid); }
+.rankList li.cur { color: var(--gold); font-weight: var(--font-display-weight); }
+.rankList .rkMin { font-variant-numeric: tabular-nums; text-align: right; }
+.rankList .rkStar { letter-spacing: 1px; }
+.rankList .rkRew { font-variant-numeric: tabular-nums; }
 .vehCard.locked { color: var(--text-lo); cursor: not-allowed; }
 
 /* ---- 特殊终极模式（车库内） ---- */

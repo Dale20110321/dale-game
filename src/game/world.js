@@ -3,7 +3,7 @@ import { mulberry32, clamp } from "../core/utils.js";
 import { SUB_DT, DT, REF_SPEED, DUST_V, DUST_HEAVY_V, KICK_V, KICK_MIN_V, CAN_FUEL, hazardSpeed, gateSpeed } from "../config/constants.js";
 import { THEMES } from "../config/themes.js";
 import { token } from "../config/ui-tokens.js";
-import { levelAt, levelHillY, STEP_W, variantRule, segmentThemeAt } from "../config/levels.js";
+import { levelAt, levelHillY, STEP_W, variantRule, segmentThemeAt, setFreeSeed } from "../config/levels.js";
 import { store, world, bike } from "../core/store.js";
 import { groundInfo, groundY, canSpot } from "../physics/terrain.js";
 import { getUp } from "../core/storage.js";
@@ -280,7 +280,12 @@ export function freeInit(theme) {
   store.mode = "free";
   store.lvIdx = 0;
   store.finishX = Infinity;
-  const th = freeThemeOf(theme);
+  // ★ 每局重摇地形种子：不然每次打开都是同一条路（地形函数本身没有随机源）
+  setFreeSeed((Math.random() * 0xffffffff) >>> 0);
+  // 场景也随机：主题决定重力 / 抓地 / 装饰，固定主题会让"无限模式"永远是同一个画面。
+  // 未指定时在全部场景里等概率摇一个；已通关场景仍然可以在面板里点名自选。
+  const picked = Number.isInteger(theme) ? freeThemeOf(theme) : rollFreeTheme();
+  const th = picked;
   store.phys.theme = th;
   store.phys.minY = 0; // 无限模式用"当前位置地面以下 800px"判定
   store.phys.GRAV = (THEMES[th] || THEMES[0]).g;
@@ -304,6 +309,11 @@ export function freeInit(theme) {
  * 注意：0 是"默认场景/随机地形"的基准（随机地形本身不依赖场景数据，
  * 只有重力/抓地/装饰按该场景取，与既有行为一致）。
  */
+/** 随机摇一个场景主题（无限模式默认入口，纯函数式取值） */
+function rollFreeTheme() {
+  return THEMES.length ? Math.floor(Math.random() * THEMES.length) : 0;
+}
+
 export function freeThemeOf(theme) {
   const P = store.progress || {};
   if (P.peak !== true) return 0;

@@ -11,7 +11,7 @@
 //    因此「跑出三星水平必赢」。
 //  · 排位赛（ranked）：基准 rankedAIScale(rating, advanced)×den3，不带追赶——
 //    段位赛是纯粹的配速检验，段位越高越接近、乃至超过三星节奏。
-import { START_X, RATING_PEAK } from "../config/constants.js";
+import { START_X, RATING_PEAK, RATING_TOP, RACE_FORMATS, PLAYER_TEAM, RIVAL_TEAM, racePlaceOf, buildRacers } from "../config/constants.js";
 import { levelAt } from "../config/levels.js";
 import { store, bike } from "../core/store.js";
 import { groundInfo } from "../physics/terrain.js";
@@ -33,15 +33,21 @@ const RANKED_BASE_ADV = 0.95;
 const RANKED_GAIN_ADV = 0.30;
 
 /**
- * 排位赛 AI 强度（相对本关三星要求均速 den3 的倍率）——纯函数，便于测试。
- * @param {number} rating 当前段位分
- * @param {boolean} advanced 是否高级赛
- * @returns {number} 倍率：普通档 [0.70, 0.90]，高级档 [0.95, 1.25]（任意 rating 下高级 > 普通）
+ * 段位分 → AI 强度的归一化系数 k ∈ [0, 1+TOP_EXTRA]，纯函数便于测试。
+ *
+ * ★ 两段折线而不是一条直线：
+ *   1) 0 → RATING_PEAK（3300，大师）线性爬到 1 —— 这段是"打上大师"的主线，
+ *      沿用原来的难度曲线手感不变。
+ *   2) 登顶之后继续爬 TOP_EXTRA —— 段位表扩到 12000「超越」共 14 段，
+ *      如果登顶就封顶，后面 5 个段位难度完全一样，阶梯就白设了。
  */
+const RANKED_TOP_EXTRA = 0.35;
 export function rankedAIScale(rating, advanced) {
   const r = Math.max(0, Number(rating) || 0);
   const t = Math.min(1, r / RATING_PEAK);
-  return advanced ? RANKED_BASE_ADV + RANKED_GAIN_ADV * t : RANKED_BASE + RANKED_GAIN * t;
+  const over = Math.min(1, Math.max(0, r - RATING_PEAK) / Math.max(1, RATING_TOP - RATING_PEAK));
+  const k = t + RANKED_TOP_EXTRA * over;
+  return advanced ? RANKED_BASE_ADV + RANKED_GAIN_ADV * k : RANKED_BASE + RANKED_GAIN * k;
 }
 
 // ---- 普通比赛的「追赶」参数（rubber band）----
@@ -73,38 +79,77 @@ export function catchupFactor(leadPx) {
   return Math.max(CATCHUP_MIN, Math.min(CATCHUP_MAX, k));
 }
 
-export function raceInit() {
-  store.raceAI = { x: START_X, spd: 0, finish: false };
+// 赛制配置与名次计算是**纯数据 / 纯函数**，放在 config/constants.js ——
+// render/hud.js 要显示"第 N / 6 名"，而 render/** 不允许 import game/**（见 audit-render）。
+// 这里转出，game 层与测试都仍从 race.js 取。
+export { RACE_FORMATS, RACE_FORMAT_IDS, RACE_PLACE_GOLD, PLAYER_TEAM, RIVAL_TEAM, racePlaceOf, buildRacers } from "../config/constants.js";
+
+/** 当前赛制（缺省 duel） */
+export function raceFormat() {
+  const id = store.raceFormat;
+  return (id && RACE_FORMATS[id]) || RACE_FORMATS.duel;
 }
 
-/** 每个固定步推进 AI */
-export function raceUpdate(dt) {
-  const ai = store.raceAI;
-  if (!ai || ai.finish) return;
-  const gi = groundInfo(ai.x);
-  if (gi.y === Infinity) return;
-
-  const L = levelAt(store.lvIdx);
-  let mult;
-  if (store.mode === "ranked") {
-    // 排位赛：纯配速，无追赶
-    mult = rankedAIScale(store.progress.rating, store.rankedAdvanced);
-  } else {
-    // 普通比赛：基准配速 × 追赶修正
-    const playerX = (bike.rear.x + bike.front.x) / 2;
-    mult = RACE_PACE * catchupFactor(ai.x - playerX);
+/**
+ * 决定胜负的那个对手（纯函数）：非团赛取全场最靠前者，团赛取**对手队**最靠前者。
+ * game.js / HUD 都只看这一个对象，所以"6 人场"不需要改任何下游判定逻辑。
+ */
+export function raceDecider(list) {
+  const f = raceFormat();
+  let best = null;
+  for (const a of list || []) {
+    if (f.team && a.team !== RIVAL_TEAM) continue;
+    if (!best || a.x > best.x) best = a;
   }
-  // 轻微起伏（正弦均值≈0）：只让画面不呆板，不改变平均配速
-  const target = raceBaseSpeed(L, mult) * (1 + 0.06 * Math.sin(store.time * 0.9 + ai.x * 0.0007));
+  return best;
+}
 
-  ai.spd += (target - ai.spd) * Math.min(1, dt * 3);
-  ai.x += ai.spd * dt;
+/** 玩家名次（1 = 第一）。团赛返回 [队名次, 队内名次]，其余返回单个名次 */
+export function racePlace(list, playerX) {
+  return racePlaceOf(list, playerX, raceFormat());
+}
 
-  if (store.finishX !== Infinity && ai.x >= store.finishX) {
-    ai.finish = true;
-    const gy = groundInfo(store.finishX);
-    if (gy.y !== Infinity) {
-      emitParticles(store.finishX, gy.y - 20, 16, { color: token("danger"), spd: 2, life: 30, size: 3, grav: 0.03 });
+export function raceInit(format) {
+  store.raceFormat = format && RACE_FORMATS[format] ? format : "duel";
+  const built = buildRacers(store.raceFormat);
+  store.racers = built.r;
+  store.raceAI = raceDecider(store.racers);
+}
+
+/** 每个固定步推进全部 AI */
+export function raceUpdate(dt) {
+  const list = store.racers;
+  if (!list || !list.length) return;
+  const L = levelAt(store.lvIdx);
+  const playerX = (bike.rear.x + bike.front.x) / 2;
+
+  for (const ai of list) {
+    if (ai.finish) continue;
+    if (groundInfo(ai.x).y === Infinity) continue;
+
+    let mult;
+    if (store.mode === "ranked") {
+      // 排位赛：纯配速，无追赶；多人局里每位对手再乘自己的个体系数
+      mult = rankedAIScale(store.progress.rating, store.rankedAdvanced) * ai.bias;
+    } else {
+      // 普通比赛：基准配速 × 追赶修正 × 个体系数。
+      // 追赶仍然以**玩家**为参照 —— 团赛里队友也要被拉住，否则玩家掉队时队友会一骑绝尘。
+      mult = RACE_PACE * catchupFactor(ai.x - playerX) * ai.bias;
+    }
+    const target = raceBaseSpeed(L, mult) * (1 + 0.06 * Math.sin(store.time * 0.9 + ai.x * 0.0007));
+
+    ai.spd += (target - ai.spd) * Math.min(1, dt * 3);
+    ai.x += ai.spd * dt;
+
+    if (store.finishX !== Infinity && ai.x >= store.finishX) {
+      ai.finish = true;
+      const gy = groundInfo(store.finishX);
+      if (gy.y !== Infinity) {
+        emitParticles(store.finishX, gy.y - 20, 16, { color: token("danger"), spd: 2, life: 30, size: 3, grav: 0.03 });
+      }
     }
   }
+
+  // 下游（HUD 差距显示、胜负判定）只认一个"决定性对手"，这里每帧刷新
+  store.raceAI = raceDecider(list);
 }

@@ -275,8 +275,8 @@
   var upCost = (lv) => Math.round(10 + 1.2 * lv);
   var upCostOf = (veh, lv) => Math.round(upCost(lv) * (veh && veh.costK || 1));
   var CAN_FUEL = 0.6;
-  var RANK_WIN_GOLD_BASE = 500;
-  var RANK_WIN_GOLD_K = 0.25;
+  var RANK_WIN_GOLD_BASE = 800;
+  var RANK_WIN_GOLD_K = 0.5;
   var RANK_LOSS_GOLD = 150;
   var rankGold = (won, rating) => Math.round(won ? RANK_WIN_GOLD_BASE + Math.max(0, rating || 0) * RANK_WIN_GOLD_K : RANK_LOSS_GOLD);
   var GOLD_MAX = 1000000000000000;
@@ -314,22 +314,148 @@
     sel: "bike_sel"
   };
   var RATING_ADVANCED = 1200;
-  var RATING_PEAK = 2400;
+  var RATING_PEAK = 3300;
+  var RATING_TOP = 12000;
   var RATING_MIN = 0;
-  var RATING_WIN_GAIN = 25;
+  var RANK_GAIN_BASE = 25;
+  var RANK_GAIN_STEP = 8;
+  var RANK_GAIN_BASE_ADV = 40;
+  var RANK_GAIN_STEP_ADV = 12;
   var RATING_LOSS = 20;
-  var RATING_WIN_GAIN_ADVANCED = 40;
   var RATING_LOSS_ADVANCED = 30;
   var RANKS = [
-    { min: 0, name: "青铜" },
-    { min: 400, name: "白银" },
-    { min: 800, name: "黄金" },
-    { min: 1200, name: "铂金" },
-    { min: 1600, name: "钻石" },
-    { min: 2000, name: "星耀" },
-    { min: 2400, name: "王者" },
-    { min: 3000, name: "传奇" }
+    { min: 0, name: "青铜", reward: 0 },
+    { min: 300, name: "白银", reward: 2000 },
+    { min: 700, name: "黄金", reward: 4000 },
+    { min: 1200, name: "铂金", reward: 7000 },
+    { min: 1800, name: "钻石", reward: 11000 },
+    { min: 2500, name: "星耀", reward: 16000 },
+    { min: 3300, name: "大师", reward: 22000 },
+    { min: 4200, name: "宗师", reward: 30000 },
+    { min: 5200, name: "王者", reward: 40000 },
+    { min: 6300, name: "星之巅", reward: 52000 },
+    { min: 7500, name: "永恒", reward: 66000 },
+    { min: 8800, name: "虚空", reward: 82000 },
+    { min: 10200, name: "凌驾", reward: 1e5 },
+    { min: 12000, name: "超越", reward: 130000 }
   ];
+  function rankIndexOf(rating) {
+    const r = Math.max(0, Number(rating) || 0);
+    let i = 0;
+    for (let k = 0;k < RANKS.length; k++) {
+      if (r >= RANKS[k].min)
+        i = k;
+      else
+        break;
+    }
+    return i;
+  }
+  function rankSpanOf(index) {
+    const r = RANKS[index];
+    if (!r)
+      return 0;
+    const nx = RANKS[index + 1];
+    return nx ? nx.min - r.min : Math.max(1, Math.round(r.min * 0.2));
+  }
+  function rankStars(rating) {
+    const i = rankIndexOf(rating);
+    const r = RANKS[i];
+    if (!r || r.min <= 0)
+      return 0;
+    const span = rankSpanOf(i);
+    const t = (Math.max(0, Number(rating) || 0) - r.min) / span;
+    if (t >= 0.85)
+      return 3;
+    if (t >= 0.5)
+      return 2;
+    return 1;
+  }
+  function rankNextOf(rating) {
+    const i = rankIndexOf(rating);
+    return i + 1 < RANKS.length ? RANKS[i + 1] : null;
+  }
+  function rankDelta(rating, advanced, won) {
+    if (!won)
+      return -(advanced ? RATING_LOSS_ADVANCED : RATING_LOSS);
+    const r = Math.max(0, Number(rating) || 0);
+    const k = Math.floor(r / 1000);
+    return advanced ? RANK_GAIN_BASE_ADV + RANK_GAIN_STEP_ADV * k : RANK_GAIN_BASE + RANK_GAIN_STEP * k;
+  }
+  function rankPromoReward(from, to, claimed) {
+    const a = Math.max(0, Number(from) || 0);
+    const b = Math.max(0, Number(to) || 0);
+    if (b <= a)
+      return 0;
+    const floorV = Math.max(a, Math.max(0, Number(claimed) || 0));
+    if (b <= floorV)
+      return 0;
+    let sum = 0;
+    for (const r of RANKS)
+      if (r.min > floorV && r.min <= b)
+        sum += r.reward || 0;
+    return sum;
+  }
+  var RACE_FORMATS = {
+    duel: {
+      id: "duel",
+      name: "1V1 竞速",
+      icon: "⚔️",
+      riders: 1,
+      team: false,
+      desc: "单挑一名对手，冲过终点即获胜"
+    },
+    melee: {
+      id: "melee",
+      name: "多人竞技",
+      icon: "\uD83C\uDFC1",
+      riders: 5,
+      team: false,
+      desc: "5 名对手同场，按最终名次发奖（第 1 名最多）"
+    },
+    relay: {
+      id: "relay",
+      name: "团队接力",
+      icon: "\uD83E\uDD1D",
+      riders: 5,
+      team: true,
+      teamSize: 3,
+      desc: "3v3：你的队伍累计里程先到终点即获胜，两队都贡献了里程"
+    }
+  };
+  var RACE_PLACE_GOLD = [600, 400, 300, 220, 160, 120];
+  var RACE_FORMAT_IDS = ["duel", "melee", "relay"];
+  var PLAYER_TEAM = 0;
+  var RIVAL_TEAM = 1;
+  var RIDER_NAMES = ["疾风", "铁砧", "青隼", "赤影", "磐岩", "游隼", "夜枭·二", "铜铃", "白鸦", "砂砾"];
+  function buildRacers(format) {
+    const f = RACE_FORMATS[format] || RACE_FORMATS.duel;
+    const size = f.team ? f.teamSize : 0;
+    const r = [];
+    for (let i = 0;i < f.riders; i++) {
+      r.push({
+        name: RIDER_NAMES[i % RIDER_NAMES.length],
+        x: START_X - 120 - i * 190,
+        spd: 0,
+        finish: false,
+        bias: 0.93 + (i * 7 + 3) % 11 / 100,
+        team: f.team ? i < size - 1 ? PLAYER_TEAM : RIVAL_TEAM : -1
+      });
+    }
+    return { r, team: f.team ? PLAYER_TEAM : -1 };
+  }
+  function racePlaceOf(list, playerX, fmt) {
+    const f = fmt || RACE_FORMATS.duel;
+    if (!f.team) {
+      let p = 1;
+      for (const a of list || [])
+        if (a.x > playerX)
+          p++;
+      return p;
+    }
+    const ahead = (list || []).filter((a) => a.team === PLAYER_TEAM && a.x > playerX).length;
+    const rivalAhead = (list || []).filter((a) => a.team === RIVAL_TEAM && a.x > playerX).length;
+    return [ahead <= rivalAhead ? 1 : 2, ahead + 1];
+  }
   function rankName(rating) {
     const r = Math.max(0, Number(rating) || 0);
     let name = RANKS[0].name;
@@ -416,7 +542,7 @@
         name: "极速模式",
         icon: "\uD83D\uDE80",
         mode: "surge",
-        cost: 5000,
+        cost: 8000,
         desc: "引擎过载：加速与极速大幅提升，风驰电掣"
       }
     },
@@ -425,9 +551,9 @@
       name: "岩驼",
       icon: "\uD83D\uDC2B",
       desc: "抓地强，耐撞，油箱大，旋转慢",
-      tier: "普通",
-      costK: 1,
-      price: 16000,
+      tier: "稀有",
+      costK: 5,
+      price: 10500,
       drv: 1.12,
       spd: 0.7,
       grp: 1.45,
@@ -453,7 +579,7 @@
         name: "贴地模式",
         icon: "\uD83D\uDEE1️",
         mode: "stable",
-        cost: 30000,
+        cost: 40500,
         desc: "磁悬浮贴地：始终贴地，永不翻车"
       }
     },
@@ -463,8 +589,8 @@
       icon: "⚡",
       desc: "满级极速是山地车的 2 倍，爬坡不喘",
       tier: "稀有",
-      costK: 6,
-      price: 30000,
+      costK: 5,
+      price: 7500,
       drv: 1.55,
       spd: 1.85,
       grp: 1.2,
@@ -491,7 +617,7 @@
         name: "电磁轨道炮",
         icon: "\uD83D\uDD0C",
         mode: "railgun",
-        cost: 60000,
+        cost: 27000,
         desc: "电磁轨道炮：推力与红线同时暴涨，平地直接贴地飞行"
       }
     },
@@ -500,9 +626,9 @@
       name: "夜枭",
       icon: "\uD83E\uDD89",
       desc: "摔不坏、油无限、危险段随便冲",
-      tier: "稀有",
-      costK: 6,
-      price: 90000,
+      tier: "史诗",
+      costK: 12,
+      price: 19000,
       drv: 1.4,
       spd: 1.6,
       grp: 1.55,
@@ -530,7 +656,7 @@
         name: "相位穿行",
         icon: "\uD83C\uDF00",
         mode: "phase",
-        cost: 180000,
+        cost: 90500,
         desc: "相位穿行：永不摔车 + 燃料无限 + 危险段限速豁免"
       }
     },
@@ -539,9 +665,9 @@
       name: "磐石",
       icon: "\uD83D\uDEE1️",
       desc: "巨重巨稳，抓地碾压，翻过来也能爬起来",
-      tier: "史诗",
-      costK: 18,
-      price: 150000,
+      tier: "神话",
+      costK: 40,
+      price: 75500,
       drv: 1.6,
       spd: 1.35,
       grp: 2.1,
@@ -567,7 +693,7 @@
         name: "磁力护盾",
         icon: "\uD83D\uDD30",
         mode: "shield",
-        cost: 300000,
+        cost: 556500,
         desc: "磁力护盾：任何姿态都摔不下去，腾空与操控全部保留"
       }
     },
@@ -576,9 +702,9 @@
       name: "光子",
       icon: "\uD83D\uDCAB",
       desc: "神话档第一台：极速与操控的巅峰",
-      tier: "神话",
-      costK: 120,
-      price: 700000,
+      tier: "稀有",
+      costK: 5,
+      price: 6500,
       drv: 1.9,
       spd: 2.1,
       grp: 1.35,
@@ -606,7 +732,7 @@
         name: "光子跃迁",
         icon: "\uD83C\uDF0C",
         mode: "warp",
-        cost: 1400000,
+        cost: 22000,
         desc: "光子跃迁：踩住油门持续喷射，0.7 秒逼近极速"
       }
     },
@@ -616,14 +742,14 @@
       icon: "\uD83C\uDF0C",
       desc: "究极终局：350 km/h 极速 · 摔不坏 · 全项目最强参数",
       tier: "神话",
-      costK: 300,
-      price: 1500000,
+      costK: 40,
+      price: 120000,
       drv: 2.4,
       spd: 2.6,
-      grp: 1.9,
+      grp: 3,
       wgt: 1.2,
       air: 0.55,
-      tank: 3.2,
+      tank: 3.4,
       color: "#00ff9d",
       art: ART({
         tire: 6.2,
@@ -639,13 +765,13 @@
         vents: 5,
         pose: POSE(9, 9, 11, 8, 4, 7)
       }),
-      phys: P(1.2, 1.82, 1.6, 1.5, 26, 3, 2.2),
+      phys: P(1.2, 1.82, 1.6, 1.5, 26, 3, 3.6),
       ultra: {
         name: "绝对形态",
         icon: "\uD83C\uDF0C",
         mode: "absolut",
         builtin: true,
-        cost: 0,
+        cost: 1020000,
         desc: "免解锁：350 km/h 极速 · 怎么摔都摔不坏 · 抗摔不设上限"
       }
     },
@@ -656,7 +782,7 @@
       desc: "城市里最灵活的一台，钻小巷、爬缓坡都不费力",
       tier: "普通",
       costK: 1,
-      price: 8000,
+      price: 4000,
       drv: 1.05,
       spd: 1.05,
       grp: 1.05,
@@ -666,16 +792,16 @@
       color: "#7a9e7e",
       art: ART({ tire: 2.6, spokes: 8, spokeW: 1.3, tube: 3.2, topDrop: 4, coil: 0.7, bar: "flat", saddleW: 11, helmR: 4.3, pose: POSE(1, 1, 2, 1, 0.5, -1) }),
       phys: P(0.95, 0.89, 1.1, 1.05, 15, 1.05, 1.25),
-      ultra: { name: "通勤喷射", icon: "\uD83D\uDEF4", mode: "warp", cost: 15000, desc: "踩住油门持续加速，0.6 秒逼近极速" }
+      ultra: { name: "通勤喷射", icon: "\uD83D\uDEF4", mode: "warp", cost: 12000, desc: "踩住油门持续加速，0.6 秒逼近极速" }
     },
     {
       id: "dirt",
       name: "山魈",
       icon: "\uD83D\uDC12",
       desc: "松软地面上的老手，颠簸路面也稳当",
-      tier: "普通",
-      costK: 1,
-      price: 24000,
+      tier: "稀有",
+      costK: 5,
+      price: 12000,
       drv: 1.2,
       spd: 0.95,
       grp: 1.3,
@@ -685,16 +811,16 @@
       color: "#b07d4f",
       art: ART({ tire: 4.6, spokes: 6, spokeW: 1.9, tube: 5, topDrop: 0, coil: 1.5, bar: "wide", saddleW: 13, helmR: 4.4, vents: 2, pose: POSE(-1, -2, -1, -2, -0.5, -2.5) }),
       phys: P(1.25, 1.16, 0.9, 0.95, 19, 1.2, 1.15),
-      ultra: { name: "泥地推进", icon: "\uD83C\uDFC7", mode: "railgun", cost: 50000, desc: "推力与红线同时暴涨，泥地也能飞" }
+      ultra: { name: "泥地推进", icon: "\uD83C\uDFC7", mode: "railgun", cost: 49500, desc: "推力与红线同时暴涨，泥地也能飞" }
     },
     {
       id: "storm",
       name: "白毛风",
       icon: "\uD83C\uDF2C️",
       desc: "雪地极速，滑起来比谁都远",
-      tier: "稀有",
-      costK: 6,
-      price: 50000,
+      tier: "普通",
+      costK: 1,
+      price: 5000,
       drv: 1.3,
       spd: 1.5,
       grp: 1,
@@ -704,16 +830,16 @@
       color: "#a8d8e8",
       art: ART({ tire: 2.2, rim: false, spokes: 10, spokeW: 1, tube: 2.8, topDrop: 5, coil: 0.5, bar: "drop", saddleW: 9, helmR: 4.8, peak: false, pose: POSE(3, 3, 4, 3, 1, 2) }),
       phys: P(0.9, 0.82, 1.25, 1.1, 14, 1.3, 1.55),
-      ultra: { name: "暴风增压", icon: "\uD83C\uDF28️", mode: "surge", cost: 1e5, desc: "红线与极速暴涨，雪地起飞" }
+      ultra: { name: "暴风增压", icon: "\uD83C\uDF28️", mode: "surge", cost: 14500, desc: "红线与极速暴涨，雪地起飞" }
     },
     {
       id: "reef",
       name: "潮生",
       icon: "\uD83D\uDC1A",
       desc: "潮间带专属，湿滑礁石上稳如磐石",
-      tier: "稀有",
-      costK: 6,
-      price: 70000,
+      tier: "史诗",
+      costK: 12,
+      price: 26000,
       drv: 1.25,
       spd: 1.15,
       grp: 1.75,
@@ -723,7 +849,7 @@
       color: "#ff8fab",
       art: ART({ tire: 5, spokes: 5, spokeW: 2.2, tube: 5.6, topDrop: -1, coil: 1.6, bar: "wide", saddleW: 14, helmR: 4.4, vents: 3, pose: POSE(-2, -3, -2, -3, -0.8, -3) }),
       phys: P(1.35, 1.25, 0.88, 0.92, 19, 1.25, 1.4),
-      ultra: { name: "潮汐穿行", icon: "\uD83D\uDC1A", mode: "phase", cost: 140000, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" }
+      ultra: { name: "潮汐穿行", icon: "\uD83D\uDC1A", mode: "phase", cost: 135500, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" }
     },
     {
       id: "canyon",
@@ -731,8 +857,8 @@
       icon: "\uD83E\uDD85",
       desc: "台地上连落差，俯冲落地比谁都稳",
       tier: "稀有",
-      costK: 6,
-      price: 110000,
+      costK: 5,
+      price: 5500,
       drv: 1.45,
       spd: 1.6,
       grp: 1.1,
@@ -742,16 +868,16 @@
       color: "#cd5c5c",
       art: ART({ tire: 2.8, rim: false, spokes: 12, spokeW: 1.1, tube: 3.4, topDrop: 6, coil: 1.2, bar: "drop", saddleW: 8, helmR: 4.9, pose: POSE(4, 4, 5, 4, 1.5, 3) }),
       phys: P(0.88, 0.86, 1.3, 1.15, 17, 1.45, 1.7),
-      ultra: { name: "台地飞驰", icon: "\uD83C\uDFDC️", mode: "warp", cost: 220000, desc: "持续喷射：踩住油门就一直加速" }
+      ultra: { name: "台地飞驰", icon: "\uD83C\uDFDC️", mode: "warp", cost: 18000, desc: "持续喷射：踩住油门就一直加速" }
     },
     {
       id: "aurora",
       name: "星轨",
       icon: "\uD83C\uDF20",
       desc: "极夜里最亮的一辆，空中转得飞快",
-      tier: "稀有",
-      costK: 6,
-      price: 130000,
+      tier: "普通",
+      costK: 1,
+      price: 3500,
       drv: 1.35,
       spd: 1.55,
       grp: 0.95,
@@ -761,16 +887,16 @@
       color: "#66f0c8",
       art: ART({ tire: 1.8, rim: false, spokes: 13, spokeW: 0.8, tube: 2.4, topDrop: 7, coil: 0.4, bar: "drop", saddleW: 7, helmR: 5, peak: false, pose: POSE(5, 6, 6, 5, 2, 4) }),
       phys: P(0.78, 0.6, 1.35, 1.15, 13, 1.35, 1.5),
-      ultra: { name: "极光穿行", icon: "\uD83C\uDF0C", mode: "phase", cost: 260000, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" }
+      ultra: { name: "极光穿行", icon: "\uD83C\uDF0C", mode: "phase", cost: 1e4, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" }
     },
     {
       id: "sandstorm",
       name: "噬沙",
       icon: "\uD83C\uDFDC️",
       desc: "能见度为零也照样全速",
-      tier: "史诗",
-      costK: 18,
-      price: 200000,
+      tier: "稀有",
+      costK: 5,
+      price: 9000,
       drv: 1.75,
       spd: 1.7,
       grp: 1,
@@ -780,16 +906,16 @@
       color: "#d4a373",
       art: ART({ tire: 2.6, spokes: 10, spokeW: 1.2, tube: 3.2, topDrop: 4, coil: 0.6, bar: "drop", saddleW: 9, helmR: 4.6, pose: POSE(3, 3, 4, 3, 1, 2) }),
       phys: P(1.02, 0.91, 1.4, 1.25, 15, 1.5, 1.9),
-      ultra: { name: "沙暴穿行", icon: "\uD83C\uDF2A️", mode: "phase", cost: 400000, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" }
+      ultra: { name: "沙暴穿行", icon: "\uD83C\uDF2A️", mode: "phase", cost: 33000, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" }
     },
     {
       id: "magma",
       name: "焰裔",
       icon: "\uD83D\uDD25",
       desc: "高重力熔岩滩上的重型战车",
-      tier: "史诗",
-      costK: 18,
-      price: 260000,
+      tier: "传说",
+      costK: 25,
+      price: 47500,
       drv: 1.7,
       spd: 1.4,
       grp: 1.85,
@@ -799,16 +925,16 @@
       color: "#ff6b35",
       art: ART({ tire: 6.4, spokes: 5, spokeW: 2.6, tube: 7.2, topDrop: -2, coil: 2.1, bar: "wide", saddleW: 16, helmR: 5, vents: 4, pose: POSE(-3, -5, -2, -5, -1, -5) }),
       phys: P(2, 1.68, 0.8, 0.88, 22, 1.7, 1.45),
-      ultra: { name: "熔岩护壳", icon: "\uD83D\uDEE1️", mode: "shield", cost: 520000, desc: "任何姿态都摔不下去，操控全保留" }
+      ultra: { name: "熔岩护壳", icon: "\uD83D\uDEE1️", mode: "shield", cost: 303500, desc: "任何姿态都摔不下去，操控全保留" }
     },
     {
       id: "glacier",
       name: "冰魄",
       icon: "\uD83E\uDDCA",
       desc: "冰面上最不容易失控的那台",
-      tier: "史诗",
-      costK: 18,
-      price: 320000,
+      tier: "传说",
+      costK: 25,
+      price: 55500,
       drv: 1.55,
       spd: 1.3,
       grp: 2.05,
@@ -818,7 +944,7 @@
       color: "#8ecae6",
       art: ART({ tire: 7, spokes: 4, spokeW: 2.9, tube: 7.8, topDrop: -3, coil: 2.4, bar: "wide", saddleW: 17, helmR: 5.2, vents: 4, pose: POSE(-3, -6, -2, -6, -1, -6) }),
       phys: P(2.2, 1.9, 0.75, 0.85, 23, 1.55, 1.35),
-      ultra: { name: "冰封锁地", icon: "❄️", mode: "stable", cost: 640000, desc: "贴地滑行，永不腾空翻车" }
+      ultra: { name: "冰封锁地", icon: "❄️", mode: "stable", cost: 371500, desc: "贴地滑行，永不腾空翻车" }
     },
     {
       id: "monsoon",
@@ -826,8 +952,8 @@
       icon: "\uD83C\uDF27️",
       desc: "暴雨泥石流里照样全油门",
       tier: "史诗",
-      costK: 18,
-      price: 380000,
+      costK: 12,
+      price: 22000,
       drv: 1.6,
       spd: 1.75,
       grp: 1.35,
@@ -837,16 +963,16 @@
       color: "#4cc9f0",
       art: ART({ tire: 3.6, spokes: 9, spokeW: 1.6, tube: 4.4, topDrop: 5, coil: 1.1, bar: "drop", saddleW: 11, helmR: 4.7, vents: 2, pose: POSE(2, 2, 3, 2, 1, 1) }),
       phys: P(1.15, 1.1, 1.2, 1.1, 18, 1.6, 1.8),
-      ultra: { name: "季风过载", icon: "\uD83C\uDF27️", mode: "surge", cost: 760000, desc: "红线与极速暴涨" }
+      ultra: { name: "季风过载", icon: "\uD83C\uDF27️", mode: "surge", cost: 110500, desc: "红线与极速暴涨" }
     },
     {
       id: "obsidian",
       name: "玄铁",
       icon: "⬛",
       desc: "重到离谱，却快得离谱",
-      tier: "史诗",
-      costK: 18,
-      price: 450000,
+      tier: "传说",
+      costK: 25,
+      price: 65000,
       drv: 1.85,
       spd: 1.6,
       grp: 1.55,
@@ -856,7 +982,7 @@
       color: "#2b2d42",
       art: ART({ tire: 6.8, spokes: 6, spokeW: 2.7, tube: 7.5, topDrop: 1, coil: 2.3, bar: "wide", saddleW: 16, helmR: 5.1, vents: 3, pose: POSE(-3, -5, -2, -5, -1, -5) }),
       phys: P(2.3, 2, 0.7, 0.82, 24, 1.85, 1.55),
-      ultra: { name: "黑曜石炮", icon: "⬛", mode: "railgun", cost: 900000, desc: "推力与红线同时暴涨" }
+      ultra: { name: "黑曜石炮", icon: "⬛", mode: "railgun", cost: 454500, desc: "推力与红线同时暴涨" }
     },
     {
       id: "titan",
@@ -864,8 +990,8 @@
       icon: "\uD83D\uDDFF",
       desc: "传说档最重的一台，压过去就是了",
       tier: "传说",
-      costK: 35,
-      price: 250000,
+      costK: 25,
+      price: 41000,
       drv: 1.9,
       spd: 1.35,
       grp: 2.15,
@@ -875,16 +1001,16 @@
       color: "#6c757d",
       art: ART({ tire: 7.8, spokes: 4, spokeW: 3.2, tube: 8.6, topDrop: -4, coil: 2.8, bar: "wide", saddleW: 19, helmR: 5.6, vents: 5, pose: POSE(-4, -7, -3, -7, -1, -7) }),
       phys: P(2.5, 2.27, 0.68, 0.8, 25, 1.3, 1.25),
-      ultra: { name: "泰坦领域", icon: "\uD83D\uDDFF", mode: "stable", cost: 500000, desc: "贴地推进，永不腾空" }
+      ultra: { name: "泰坦领域", icon: "\uD83D\uDDFF", mode: "stable", cost: 248000, desc: "贴地推进，永不腾空" }
     },
     {
       id: "solstice",
       name: "逐日",
       icon: "☀️",
       desc: "追着太阳跑，滑行距离长得离谱",
-      tier: "传说",
-      costK: 35,
-      price: 350000,
+      tier: "史诗",
+      costK: 12,
+      price: 14000,
       drv: 1.65,
       spd: 2.05,
       grp: 1.15,
@@ -894,7 +1020,7 @@
       color: "#ffb703",
       art: ART({ tire: 2, rim: false, spokes: 12, spokeW: 0.9, tube: 2.6, topDrop: 7, coil: 0.3, bar: "drop", saddleW: 8, helmR: 5.1, peak: false, pose: POSE(6, 7, 7, 6, 2.5, 4.5) }),
       phys: P(0.97, 0.87, 1.5, 1.3, 14, 1.65, 2.1),
-      ultra: { name: "至日喷射", icon: "☀️", mode: "warp", cost: 700000, desc: "一脚油门不见尽头" }
+      ultra: { name: "至日喷射", icon: "☀️", mode: "warp", cost: 60500, desc: "一脚油门不见尽头" }
     },
     {
       id: "vanguard",
@@ -902,8 +1028,8 @@
       icon: "\uD83D\uDD3A",
       desc: "重装与速度的折中，攻守兼备",
       tier: "传说",
-      costK: 35,
-      price: 480000,
+      costK: 25,
+      price: 35000,
       drv: 2,
       spd: 1.75,
       grp: 1.7,
@@ -913,16 +1039,16 @@
       color: "#3a0ca3",
       art: ART({ tire: 6, spokes: 8, spokeW: 2.4, tube: 7, topDrop: 3, coil: 2, bar: "wide", saddleW: 15, helmR: 5.2, vents: 3, pose: POSE(-2, -4, -2, -4, -0.5, -4) }),
       phys: P(2.1, 2.12, 0.75, 0.86, 22, 1.4, 1.6),
-      ultra: { name: "先锋轨道炮", icon: "\uD83D\uDD3A", mode: "railgun", cost: 960000, desc: "推力与红线同时暴涨" }
+      ultra: { name: "先锋轨道炮", icon: "\uD83D\uDD3A", mode: "railgun", cost: 202500, desc: "推力与红线同时暴涨" }
     },
     {
       id: "phantom",
       name: "幽影",
       icon: "\uD83C\uDF2B️",
       desc: "传说档里最轻，撞不坏还滑得远",
-      tier: "传说",
-      costK: 35,
-      price: 550000,
+      tier: "史诗",
+      costK: 12,
+      price: 16500,
       drv: 1.55,
       spd: 2,
       grp: 1.4,
@@ -932,16 +1058,16 @@
       color: "#adb5bd",
       art: ART({ tire: 1.7, rim: false, spokes: 14, spokeW: 0.7, tube: 2.2, topDrop: 8, coil: 0.2, bar: "drop", saddleW: 6.5, helmR: 5.2, peak: false, pose: POSE(7, 8, 8, 7, 3, 5) }),
       phys: P(0.82, 0.67, 1.55, 1.35, 12, 1.55, 2.15),
-      ultra: { name: "幻影护盾", icon: "\uD83C\uDF2B️", mode: "shield", cost: 1100000, desc: "任何姿态都摔不下去" }
+      ultra: { name: "幻影护盾", icon: "\uD83C\uDF2B️", mode: "shield", cost: 74000, desc: "任何姿态都摔不下去" }
     },
     {
       id: "eclipse",
       name: "天蚀",
       icon: "\uD83C\uDF11",
       desc: "传说档的终点，越暗的地方它越快",
-      tier: "传说",
-      costK: 35,
-      price: 650000,
+      tier: "神话",
+      costK: 40,
+      price: 103000,
       drv: 1.95,
       spd: 1.9,
       grp: 1.9,
@@ -951,16 +1077,16 @@
       color: "#212529",
       art: ART({ tire: 5.2, spokes: 9, spokeW: 2.2, tube: 6.4, topDrop: 2, coil: 1.8, bar: "wide", saddleW: 15, helmR: 5.3, peak: true, vents: 4, pose: POSE(-1, -3, -1, -3, 0, -3) }),
       phys: P(1.9, 1.79, 0.82, 0.9, 21, 1.95, 1.75),
-      ultra: { name: "蚀之护盾", icon: "\uD83C\uDF11", mode: "shield", cost: 1300000, desc: "任何姿态都摔不下去" }
+      ultra: { name: "蚀之护盾", icon: "\uD83C\uDF11", mode: "shield", cost: 833500, desc: "任何姿态都摔不下去" }
     },
     {
       id: "nova",
       name: "猎户",
       icon: "\uD83C\uDFAF",
       desc: "神话档第二台：极速与操控的巅峰",
-      tier: "神话",
-      costK: 120,
-      price: 1100000,
+      tier: "史诗",
+      costK: 12,
+      price: 30000,
       drv: 2.1,
       spd: 2.3,
       grp: 1.6,
@@ -970,7 +1096,7 @@
       color: "#ff006e",
       art: ART({ tire: 2, rim: false, spokes: 13, spokeW: 0.9, tube: 2.8, topDrop: 9, coil: 0.35, bar: "drop", saddleW: 7, helmR: 5.3, peak: false, vents: 2, pose: POSE(8, 9, 9, 8, 3.5, 6) }),
       phys: P(0.92, 0.81, 1.5, 1.3, 13, 2, 2.5),
-      ultra: { name: "新星过载", icon: "\uD83D\uDCAB", mode: "surge", cost: 2200000, desc: "红线与极速暴涨，一路顶到极速" }
+      ultra: { name: "新星过载", icon: "\uD83D\uDCAB", mode: "surge", cost: 165500, desc: "红线与极速暴涨，一路顶到极速" }
     },
     {
       id: "oblivion",
@@ -978,8 +1104,8 @@
       icon: "\uD83D\uDD73️",
       desc: "神话档最重：一台会走路的深坑",
       tier: "神话",
-      costK: 120,
-      price: 900000,
+      costK: 40,
+      price: 88000,
       drv: 2.2,
       spd: 1.8,
       grp: 2.1,
@@ -989,7 +1115,7 @@
       color: "#03045e",
       art: ART({ tire: 8.2, spokes: 4, spokeW: 3.4, tube: 9.2, topDrop: -4, coil: 3, bar: "wide", saddleW: 20, helmR: 5.8, vents: 5, pose: POSE(-4, -8, -3, -8, -1, -8) }),
       phys: P(2.6, 2.63, 0.65, 0.78, 26, 1.6, 1.5),
-      ultra: { name: "湮灭领域", icon: "\uD83D\uDD73️", mode: "stable", cost: 1800000, desc: "贴地推进，永不腾空" }
+      ultra: { name: "湮灭领域", icon: "\uD83D\uDD73️", mode: "stable", cost: 681000, desc: "贴地推进，永不腾空" }
     }
   ];
 
@@ -1067,7 +1193,9 @@
       gateIdx: 0,
       failed: false
     },
-    raceAI: null
+    raceAI: null,
+    racers: [],
+    raceFormat: "duel"
   };
   var bike = {
     rear: { x: 0, y: 0, px: 0, py: 0 },
@@ -2471,9 +2599,13 @@
     const yR = levelHillY(L, x + e);
     return { y: levelHillY(L, x), m: (yR - yL) / (2 * e) };
   }
+  var freeSeed = 0;
+  function setFreeSeed(s) {
+    freeSeed = (Number(s) || 0) >>> 0;
+  }
   function freeMoodOf(x) {
     const t = Math.floor(x / 3000);
-    const h = Math.imul(t ^ 2654435769, 2246822507) >>> 0;
+    const h = Math.imul(t ^ freeSeed ^ 2654435769, 2246822507) >>> 0;
     return TERRAIN_MOODS[h % TERRAIN_MOODS.length];
   }
   function freeHill(x) {
@@ -2484,10 +2616,10 @@
     const ramp = ss((x - LAUNCH_PAD) / RUN_IN);
     const seg = Math.floor(x / 3000);
     const mood = freeMoodOf(x);
-    const ph = seg * 2.399963 % 6.283185307;
+    const ph = (seg * 2.399963 + freeSeed % 6283 * 0.001) % 6.283185307;
     for (let i = 0;i < mood.waves.length; i++) {
       const w = mood.waves[i];
-      const wl = Math.max(MIN_WAVELEN, w[0] * (0.85 + (seg * 7 + i * 13) % 31 / 31 * 0.3));
+      const wl = Math.max(MIN_WAVELEN, w[0] * (0.85 + (seg * 7 + i * 13 + freeSeed) % 31 / 31 * 0.3));
       y += Math.sin(x / wl * 6.283185307 + ph + i * 1.9) * (w[1] * 0.5 + w[1] * 0.5 * diffS + w[2] * diffS);
     }
     const stepGap = mood.stepGap;
@@ -3116,6 +3248,9 @@
     P.losses = Math.max(0, intOr(o.losses));
     P.peak = o.peak === true;
     P.rating = Math.max(0, intOr(lsGet(SAVE_KEYS.rating)));
+    P.promoClaimed = Math.max(0, intOr(o.promoClaimed));
+    if (P.promoClaimed < P.rating)
+      P.promoClaimed = P.rating;
     loadStat();
     P.branchCleared = deriveBranchCleared();
     const d = deriveUnlocks(P, store.stars);
@@ -3401,6 +3536,7 @@
       wins: 0,
       losses: 0,
       peak: false,
+      promoClaimed: 0,
       freeThemes: []
     };
     store.stat = { totalRuns: 0, totalMeters: 0, totalSeconds: 0, lastPlayed: "" };
@@ -4972,7 +5108,9 @@
     store.mode = "free";
     store.lvIdx = 0;
     store.finishX = Infinity;
-    const th = freeThemeOf(theme);
+    setFreeSeed(Math.random() * 4294967295 >>> 0);
+    const picked = Number.isInteger(theme) ? freeThemeOf(theme) : rollFreeTheme();
+    const th = picked;
     store.phys.theme = th;
     store.phys.minY = 0;
     store.phys.GRAV = (THEMES[th] || THEMES[0]).g;
@@ -4987,6 +5125,9 @@
     world.jumps = [];
     world.prepFuel = 0;
     world.freeGenX = 0;
+  }
+  function rollFreeTheme() {
+    return THEMES.length ? Math.floor(Math.random() * THEMES.length) : 0;
   }
   function freeThemeOf(theme) {
     const P = store.progress || {};
@@ -5164,10 +5305,13 @@
   var RANKED_GAIN = 0.2;
   var RANKED_BASE_ADV = 0.95;
   var RANKED_GAIN_ADV = 0.3;
+  var RANKED_TOP_EXTRA = 0.35;
   function rankedAIScale(rating, advanced) {
     const r = Math.max(0, Number(rating) || 0);
     const t = Math.min(1, r / RATING_PEAK);
-    return advanced ? RANKED_BASE_ADV + RANKED_GAIN_ADV * t : RANKED_BASE + RANKED_GAIN * t;
+    const over = Math.min(1, Math.max(0, r - RATING_PEAK) / Math.max(1, RATING_TOP - RATING_PEAK));
+    const k = t + RANKED_TOP_EXTRA * over;
+    return advanced ? RANKED_BASE_ADV + RANKED_GAIN_ADV * k : RANKED_BASE + RANKED_GAIN * k;
   }
   var CATCHUP_SPAN = 2600;
   var CATCHUP_K = 0.4;
@@ -5181,34 +5325,59 @@
     const k = 1 - leadPx / CATCHUP_SPAN * CATCHUP_K;
     return Math.max(CATCHUP_MIN, Math.min(CATCHUP_MAX, k));
   }
-  function raceInit() {
-    store.raceAI = { x: START_X, spd: 0, finish: false };
+  function raceFormat() {
+    const id = store.raceFormat;
+    return id && RACE_FORMATS[id] || RACE_FORMATS.duel;
+  }
+  function raceDecider(list) {
+    const f = raceFormat();
+    let best = null;
+    for (const a of list || []) {
+      if (f.team && a.team !== RIVAL_TEAM)
+        continue;
+      if (!best || a.x > best.x)
+        best = a;
+    }
+    return best;
+  }
+  function racePlace(list, playerX) {
+    return racePlaceOf(list, playerX, raceFormat());
+  }
+  function raceInit(format) {
+    store.raceFormat = format && RACE_FORMATS[format] ? format : "duel";
+    const built = buildRacers(store.raceFormat);
+    store.racers = built.r;
+    store.raceAI = raceDecider(store.racers);
   }
   function raceUpdate(dt) {
-    const ai = store.raceAI;
-    if (!ai || ai.finish)
-      return;
-    const gi = groundInfo(ai.x);
-    if (gi.y === Infinity)
+    const list = store.racers;
+    if (!list || !list.length)
       return;
     const L = levelAt(store.lvIdx);
-    let mult;
-    if (store.mode === "ranked") {
-      mult = rankedAIScale(store.progress.rating, store.rankedAdvanced);
-    } else {
-      const playerX = (bike.rear.x + bike.front.x) / 2;
-      mult = RACE_PACE * catchupFactor(ai.x - playerX);
-    }
-    const target = raceBaseSpeed(L, mult) * (1 + 0.06 * Math.sin(store.time * 0.9 + ai.x * 0.0007));
-    ai.spd += (target - ai.spd) * Math.min(1, dt * 3);
-    ai.x += ai.spd * dt;
-    if (store.finishX !== Infinity && ai.x >= store.finishX) {
-      ai.finish = true;
-      const gy = groundInfo(store.finishX);
-      if (gy.y !== Infinity) {
-        emitParticles(store.finishX, gy.y - 20, 16, { color: token("danger"), spd: 2, life: 30, size: 3, grav: 0.03 });
+    const playerX = (bike.rear.x + bike.front.x) / 2;
+    for (const ai of list) {
+      if (ai.finish)
+        continue;
+      if (groundInfo(ai.x).y === Infinity)
+        continue;
+      let mult;
+      if (store.mode === "ranked") {
+        mult = rankedAIScale(store.progress.rating, store.rankedAdvanced) * ai.bias;
+      } else {
+        mult = RACE_PACE * catchupFactor(ai.x - playerX) * ai.bias;
+      }
+      const target = raceBaseSpeed(L, mult) * (1 + 0.06 * Math.sin(store.time * 0.9 + ai.x * 0.0007));
+      ai.spd += (target - ai.spd) * Math.min(1, dt * 3);
+      ai.x += ai.spd * dt;
+      if (store.finishX !== Infinity && ai.x >= store.finishX) {
+        ai.finish = true;
+        const gy = groundInfo(store.finishX);
+        if (gy.y !== Infinity) {
+          emitParticles(store.finishX, gy.y - 20, 16, { color: token("danger"), spd: 2, life: 30, size: 3, grav: 0.03 });
+        }
       }
     }
+    store.raceAI = raceDecider(list);
   }
 
   // src/game/game.js
@@ -5282,8 +5451,10 @@
     resetRunState();
     store.cam.x = 0;
     fillTank();
-    if (store.mode === "race" || store.mode === "ranked")
-      raceInit();
+    if (store.mode === "ranked")
+      raceInit("duel");
+    else if (store.mode === "race")
+      raceInit(store.raceFormat);
     store.state = "play";
     presenter.hideOverlay();
   }
@@ -5291,15 +5462,21 @@
     const P = store.progress;
     const adv = store.rankedAdvanced === true;
     const before = P.rating;
-    const delta = won ? adv ? RATING_WIN_GAIN_ADVANCED : RATING_WIN_GAIN : -(adv ? RATING_LOSS_ADVANCED : RATING_LOSS);
+    const delta = rankDelta(before, adv, won);
     P.rating = Math.max(RATING_MIN, before + delta);
     const applied = P.rating - before;
     if (won)
       P.wins++;
     else
       P.losses++;
+    const claimed = P.promoClaimed || 0;
+    const promo = rankPromoReward(before, P.rating, claimed);
+    if (promo > 0)
+      addGold(promo);
+    if (P.rating > claimed)
+      P.promoClaimed = P.rating;
     settleProgress();
-    showToast((won ? "\uD83C\uDFC6 排位胜利" : "\uD83C\uDFF3 排位失利") + (adv ? " · 高级赛" : " · 排位赛") + " · 段位分 " + (applied > 0 ? "+" : "") + applied + " → " + P.rating + "（" + rankName(P.rating) + "）" + " · " + P.wins + "胜" + P.losses + "负", 1800);
+    showToast((won ? "\uD83C\uDFC6 排位胜利" : "\uD83C\uDFF3 排位失利") + (adv ? " · 高级赛" : " · 排位赛") + " · 段位分 " + (applied > 0 ? "+" : "") + applied + " → " + P.rating + "（" + rankName(P.rating) + " " + "★".repeat(rankStars(P.rating)) + "☆".repeat(3 - rankStars(P.rating)) + "）" + " · " + P.wins + "胜" + P.losses + "负" + (promo > 0 ? " · 升段奖励 \uD83E\uDE99+" + promo.toLocaleString() : ""), promo > 0 ? 2400 : 1800);
     return P.rating;
   }
   function startGame(m, lv, opt) {
@@ -5314,6 +5491,9 @@
       const wantAdv = opt && opt.advanced !== undefined ? !!opt.advanced : store.rankedAdvanced === true;
       store.rankedAdvanced = mode === "ranked" && wantAdv && isAdvancedUnlocked(store.progress.rating);
       store.selLevel = lv !== undefined ? lv : store.selLevel || 0;
+      if (mode === "race" && opt && opt.format && RACE_FORMATS[opt.format]) {
+        store.raceFormat = opt.format;
+      }
       if (store.mode === "free")
         freeInit(opt && opt.theme);
       else
@@ -5392,6 +5572,7 @@
         store.state = "menu";
         presenter.toMenu();
         store.raceAI = null;
+        store.racers = [];
       }), 1600);
     } else {
       setFuel(store.phys.fuelMax * 0.3);
@@ -5412,17 +5593,20 @@
       nextLabel: "下一关 →"
     };
     if (store.mode === "race") {
+      const f = raceFormat();
       const won = !(store.raceAI && store.raceAI.finish);
+      const place = racePlace(store.racers, bike.rear.x);
+      const p = f.team ? place[0] : place;
+      const total = f.team ? 2 : f.riders + 1;
+      const gold = RACE_PLACE_GOLD[Math.min(p - 1, RACE_PLACE_GOLD.length - 1)];
+      addGold(gold);
       result.nextLabel = "继续 →";
-      if (won) {
-        addGold(300);
-        showToast("\uD83C\uDFC6 比赛获胜！\uD83E\uDE99+300", 900, "success");
-        result.title = "\uD83C\uDFC6 比赛获胜！";
-        result.goldGain = 300;
-      } else {
-        showToast("\uD83C\uDFC1 抵达终点（对手更快）", 900, "warn");
-        result.title = "\uD83C\uDFC1 抵达终点（对手更快）";
-      }
+      result.goldGain = gold;
+      result.place = p;
+      result.placeTotal = total;
+      const tag = f.team ? "团队接力 · 我方" + (p === 1 ? "获胜" : "惜败") : f.riders > 1 ? "多人竞技 · 第 " + p + " / " + total + " 名" : "比赛" + (won ? "获胜" : "失利");
+      showToast((won ? "\uD83C\uDFC6 抵达终点 · " : "\uD83C\uDFC1 抵达终点 · ") + tag + " · 名次奖金 \uD83E\uDE99+" + gold, 1100, won ? "success" : "warn");
+      result.title = (won ? "\uD83C\uDFC6 " : "\uD83C\uDFC1 ") + tag;
     } else if (store.mode === "ranked") {
       const won = !(store.raceAI && store.raceAI.finish);
       const before = store.progress.rating;
@@ -7467,6 +7651,19 @@
   }
 
   // src/render/hud.js
+  function placeTag() {
+    if (store.mode !== "race")
+      return "";
+    const f = RACE_FORMATS[store.raceFormat] || RACE_FORMATS.duel;
+    if (f.riders < 2)
+      return "";
+    const p = racePlaceOf(store.racers || [], (bike.rear.x + bike.front.x) / 2, f);
+    if (f.team) {
+      const [tp, ip] = p;
+      return (tp === 1 ? "我方领先" : "我方落后") + " · 队内第 " + ip + " / " + f.teamSize;
+    }
+    return "第 " + p + " / " + (f.riders + 1) + " 名";
+  }
   var WARN_H = 26;
   function hudLayout(hasWarn = false, touch = false) {
     const W = view.W;
@@ -7593,7 +7790,10 @@
     if ((store.mode === "race" || store.mode === "ranked") && store.raceAI) {
       const lead = (bike.rear.x + bike.front.x) / 2 - store.raceAI.x;
       const txt = lead >= 0 ? "领先 " + Math.round(toM(lead)) + "m" : "落后 " + Math.round(toM(-lead)) + "m";
-      badgeText(txt, bx, r.y + 1, token("glass-fill-strong"), lead >= 0 ? token("success") : token("danger"));
+      bx += badgeText(txt, bx, r.y + 1, token("glass-fill-strong"), lead >= 0 ? token("success") : token("danger")) + 4;
+      const ps = placeTag();
+      if (ps)
+        bx += badgeText(ps, bx, r.y + 1, token("glass-fill-strong"), token("gold")) + 4;
     }
     const info = [];
     if (store.mode === "free") {
@@ -8076,6 +8276,7 @@
   function showMenu() {
     store.state = "menu";
     store.raceAI = null;
+    store.racers = [];
     hidePanel();
     setMenuGroupsVisible(true);
     if (pauseBar)
@@ -8357,6 +8558,14 @@
       case "ranked":
         api.startGame("ranked", store.selLevel || 0, { advanced: el.dataset.adv === "1" });
         return;
+      case "raceFmt": {
+        const id = el.dataset.fmt;
+        if (RACE_FORMATS[id]) {
+          store.raceFormat = id;
+          renderRacePanel(openBranch);
+        }
+        return;
+      }
       case "freeRandom":
         api.startGame("free");
         return;
@@ -8555,10 +8764,21 @@
   function renderRacePanel(openBi) {
     panelKind = "race";
     openBranch = Number.isInteger(openBi) && branchOpen(openBi) ? openBi : -1;
+    const cur = store.raceFormat && RACE_FORMATS[store.raceFormat] ? store.raceFormat : "duel";
     showPanel(`<div class="modeTitle">\uD83C\uDFC6 比赛模式 · 与 AI 竞速</div>
+  <div class="fmtRow">${RACE_FORMAT_IDS.map((id) => {
+      const f = RACE_FORMATS[id];
+      const on = id === cur;
+      return `<button class="fmtBtn${on ? " on" : ""}" data-act="raceFmt" data-fmt="${id}"
+      aria-pressed="${on}" title="${f.desc}">
+      <span class="fmtIcon">${f.icon}</span><span class="fmtName">${f.name}</span>
+      <span class="fmtDesc">${f.desc}</span>
+      <span class="fmtGold">名次奖金 ${RACE_PLACE_GOLD[0]} / ${RACE_PLACE_GOLD[1]} / …</span>
+    </button>`;
+    }).join("")}</div>
   <div class="branchWall">${BRANCHES.map((_, i) => branchCard(i)).join("")}</div>
   ${openBranch >= 0 ? levelBlock(true) : ""}
-  <div class="panelNote">先到终点赢 300 \uD83E\uDE99（赛道需已解锁）</div>
+  <div class="panelNote">按名次发奖（第 1 名 ${RACE_PLACE_GOLD[0]} \uD83E\uDE99，完赛即有）· 赛道需已解锁</div>
   <button class="btn backBtn" data-act="back">返回</button>`);
   }
   function playCell(gi) {
@@ -8572,7 +8792,10 @@
       }
       return;
     }
-    api.startGame(panelKind === "race" ? "race" : "level", gi);
+    if (panelKind === "race")
+      api.startGame("race", gi, { format: store.raceFormat });
+    else
+      api.startGame("level", gi);
   }
   function rankedTier(advanced, label, desc, ok, note) {
     return card({
@@ -8593,16 +8816,54 @@
     const adv = isAdvancedUnlocked(rating);
     const segIdx = Number.isInteger(store.selLevel) ? store.selLevel : 0;
     const seg = LEVELS[segIdx] || LEVELS[0];
+    const stars = rankStars(rating);
+    const next = rankNextOf(rating);
+    const cur = rankIndexOf(rating);
+    const curR = RANKS[cur] || RANKS[0];
+    const starOf = (r, i) => {
+      if (i === 0 || rating < r.min)
+        return 0;
+      if (i < cur)
+        return 3;
+      if (rating >= r.min * 2)
+        return 3;
+      if (rating >= r.min * 1.5)
+        return 2;
+      return 1;
+    };
+    const lo = curR.min;
+    const hi = next ? next.min : curR.min * 2;
+    const pct = next ? Math.max(0, Math.min(100, (rating - lo) / Math.max(1, hi - lo) * 100)) : 100;
+    const gainN = rankDelta(rating, false, true);
+    const gainA = rankDelta(rating, true, true);
     showPanel(`<div class="modeTitle">\uD83C\uDFC6 排位赛${P.peak ? " · 已登顶" : ""}</div>
   <div class="rankBox">
     <div class="rankScore">${rating}</div>
-    <div class="rankSub">段位：${rankName(rating)} · 战绩 ${P.wins} 胜 ${P.losses} 负</div>
+    <div class="rankSub">${rankName(rating)}
+      <span class="rankStars" aria-label="本段星数 ${stars} / 3">${"★".repeat(stars)}<span class="dim">${"☆".repeat(3 - stars)}</span></span>
+      · 战绩 ${P.wins} 胜 ${P.losses} 负</div>
+    <div class="rankBar" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"
+         aria-label="${rankName(rating)} 段内进度"><i style="width:${pct.toFixed(1)}%"></i></div>
+    ${next ? `<div class="rankSub">下一段「${next.name}」还差 <b>${next.min - rating}</b> 分 · 升段奖励 \uD83E\uDE99 ${next.reward.toLocaleString()}</div>` : `<div class="rankSub">段位表已刷满 · 累计升段奖励 \uD83E\uDE99 ${RANKS.reduce((a, r) => a + r.reward, 0).toLocaleString()}</div>`}
   </div>
   ${invited ? "" : `<div class="panelNote">\uD83D\uDD12 尚未收到排位赛邀请：通关「最终任务」后解锁</div>`}
-  ${rankedTier(false, "普通排位赛", "AI 配速随段位分提升（三星节奏的 0.70× → 0.90×）", invited, invited ? `胜 +${RATING_WIN_GAIN} / 负 -${RATING_LOSS}` : "未解锁")}
-  ${rankedTier(true, "高级排位赛", "AI 配速显著更高，可超过三星节奏（0.95× → 1.25×）", invited && adv, !invited ? "未解锁" : adv ? `胜 +${RATING_WIN_GAIN_ADVANCED} / 负 -${RATING_LOSS_ADVANCED}` : `段位分 ≥ ${RATING_ADVANCED} 解锁（当前 ${rating}）`)}
+  ${rankedTier(false, "普通排位赛", "AI 配速随段位分提升（三星节奏的 0.70× → 1.25×）", invited, invited ? `胜 +${gainN} / 负 -${RATING_LOSS}` : "未解锁")}
+  ${rankedTier(true, "高级排位赛", "AI 配速显著更高，可超过三星节奏（0.95× → 1.41×）", invited && adv, !invited ? "未解锁" : adv ? `胜 +${gainA} / 负 -${RATING_LOSS_ADVANCED}` : `段位分 ≥ ${RATING_ADVANCED}（${RANKS.find((r) => r.min === RATING_ADVANCED).name}）解锁（当前 ${rating}）`)}
+  <details class="rankLadder"><summary>段位阶梯（${RANKS.length} 段 × 3 星）</summary>
+    <ol class="rankList">${RANKS.map((r, i) => {
+      const got = starOf(r, i);
+      return `<li class="${rating >= r.min ? "on" : ""}${i === cur ? " cur" : ""}">
+        <span class="rkMin">${r.min}</span>
+        <span class="rkName">${r.name}</span>
+        <span class="rkStar" aria-label="${got} 星">${i === 0 ? "" : "★".repeat(got) + "☆".repeat(3 - got)}</span>
+        <span class="rkRew">${r.reward ? "\uD83E\uDE99 " + r.reward.toLocaleString() : "—"}</span>
+      </li>`;
+    }).join("")}</ol>
+    <div class="panelNote">升段奖励只在首次跨过该段门槛时发一次（掉段再升回来不补发）；
+      ★ 进段 · ★★ 段内过半 · ★★★ 段内 85%</div>
+  </details>
   <div class="panelNote">赛道：第 ${segIdx + 1} 关 · ${seg.name}（随你最近选择的关卡）</div>
-  <div class="panelNote">登顶（段位分 ≥ ${RATING_PEAK}）解锁无限模式自由选图${P.peak ? " · 已达成" : ""}</div>
+  <div class="panelNote">登顶「${RANKS.find((r) => r.min === RATING_PEAK).name}」（段位分 ≥ ${RATING_PEAK}）解锁无限模式自由选图${P.peak ? " · 已达成" : ""}</div>
   <button class="btn backBtn" data-act="back">返回</button>`);
   }
   function renderFreePanel() {

@@ -361,7 +361,11 @@ export default async function (ctx) {
     T('race AI 速度与 raceBaseSpeed 同量级', Math.abs(store.raceAI.spd - raceBaseSpeed(level, RACE_PACE)) / level.den3 < 0.15, `spd=${f0(store.raceAI.spd)} base=${f0(raceBaseSpeed(level, RACE_PACE))}`);
     T('race 无参数 restart 保持比赛模式', (() => { restart(); return store.mode === 'race' && !!store.raceAI; })(), `mode=${store.mode}`);
     T('race 记录 lastMode 供无参重开使用', store.lastMode === 'race', `lastMode=${store.lastMode}`);
-    T('race AI 从起点出发且速度为 0', (() => { fresh(); startGame('race', index); return store.raceAI.x === START_X && store.raceAI.spd === 0; })(), `x=${store.raceAI.x} spd=${store.raceAI.spd}`);
+    // 多人赛 / 团赛要错开起跑位（6 个人挤在一点看不出是多人场），所以对手起跑在起点**后方**
+    T('race AI 从起点后方错开出发且速度为 0', (() => {
+      fresh(); startGame('race', index);
+      return store.raceAI.x < START_X && store.raceAI.x >= START_X - 1400 && store.raceAI.spd === 0;
+    })(), `x=${store.raceAI.x}（起点 ${START_X}）spd=${store.raceAI.spd} · 同场对手 ${store.racers.length} 人`);
     T('race 不做危险段超速判定（机制仅限闯关）', (() => {
       const hazardIndex = LEVELS.findIndex((item) => world.hazards.length > 0 || item.hazardN > 0);
       fresh();
@@ -397,9 +401,9 @@ export default async function (ctx) {
       world.gates = [];
       teleport(store.finishX + 10);
       update(DT);
-      return store.gold === 300 && store.run.clearing === true &&
-        !!lastResult && String(lastResult.title).includes('获胜');
-    })(), `gold=${store.gold} title=${lastResult && lastResult.title}`);
+      return store.gold === C.RACE_PLACE_GOLD[0] && store.run.clearing === true &&
+        !!lastResult && String(lastResult.title).includes('获胜') && lastResult.place === 1;
+    })(), `gold=${store.gold} 名次=${lastResult && lastResult.place} title=${lastResult && lastResult.title}`);
     T('race 结算累计本局里程', store.stat.totalRuns === 1 && store.stat.totalMeters === toM(store.finishX), `runs=${store.stat.totalRuns} meters=${store.stat.totalMeters}`);
     T('race AI 越过终点后标记完赛', (() => {
       fresh();
@@ -422,7 +426,7 @@ export default async function (ctx) {
       const goldAfterWin = store.gold;
       teleport(store.finishX + 40);
       update(DT);
-      return store.gold === goldAfterWin && store.gold === 300;
+      return store.gold === goldAfterWin && store.gold === C.RACE_PLACE_GOLD[0];
     })(), '第二次越线不再发奖');
     T('race 结算后 run.clearing 阻止门与危险段判定', (() => {
       fresh();
@@ -486,7 +490,7 @@ export default async function (ctx) {
         !!lastResult && lastResult.ratingDelta > 0;
     })(), `rating=${store.progress.rating} Δ=${lastResult && lastResult.ratingDelta}`);
     // 记下结算后的段位分（= 下一场的赛前段位分），供下面的金币断言用
-    var RANKED_BEFORE = store.progress.rating - C.RATING_WIN_GAIN;
+    var RANKED_BEFORE = store.progress.rating - C.rankDelta(store.progress.rating, store.rankedAdvanced === true, true);
     T('ranked 判胜不写关卡星级与解锁', store.stars.every((stars) => stars === 0) && store.unlocked === 0, `stars非零=${store.stars.filter((stars) => stars > 0).length} unlocked=${store.unlocked}`);
     // 排位赛现在按 rankGold(won, rating) 发放金币：段位越高、胜得越多。
     // 期望值必须用**那场比赛开始前**的段位分算 —— 前置用例已打过若干场，rating 不为 0。
@@ -506,9 +510,9 @@ export default async function (ctx) {
       const win = afterWin - 1000;
       const afterLoss = settleRanked(false);
       const loss = afterLoss - afterWin;
-      return win === C.RATING_WIN_GAIN && loss === -C.RATING_LOSS;
-    })(), `胜 +${C.RATING_WIN_GAIN} / 负 ${C.RATING_LOSS}`);
-    T('高级排位赛档位数值更高', (() => {
+      return win === C.rankDelta(1000, false, true) && loss === -C.RATING_LOSS;
+    })(), `胜 +${C.rankDelta(1000, false, true)} / 负 ${C.RATING_LOSS}`);
+    const _advCmp = (() => {
       fresh();
       store.progress.rating = 2000;
       const afterNormal = settleRanked(true);
@@ -517,10 +521,12 @@ export default async function (ctx) {
       const afterAdvanced = settleRanked(true);
       const advanced = afterAdvanced - afterNormal;
       store.rankedAdvanced = false;
-      return advanced === C.RATING_WIN_GAIN_ADVANCED && advanced > normal;
-    })(), `普通 +${C.RATING_WIN_GAIN} / 高级 +${C.RATING_WIN_GAIN_ADVANCED}`);
+      return { normal, advanced, ok: advanced === C.rankDelta(afterNormal, true, true) && advanced > normal };
+    })();
+    T('高级排位赛档位数值更高（且随段位高度递增）', _advCmp.ok,
+      `普通 +${_advCmp.normal} / 高级 +${_advCmp.advanced}`);
     T('高级赛准入阈值判定正确', isAdvancedUnlocked(RATING_ADVANCED) && !isAdvancedUnlocked(RATING_ADVANCED - 1), `RATING_ADVANCED=${RATING_ADVANCED}`);
-    T('段位名覆盖全区间且非空', [0, 600, 1200, 1800, 2400, 3000].every((rating) => typeof rankName(rating) === 'string' && rankName(rating).length > 0), [0, 1200, 2400, 3000].map((rating) => rankName(rating)).join('/'));
+    T('段位名覆盖全区间且非空', Array.from({ length: 100 }, (_, i) => i * (C.RATING_TOP / 99)).every((rating) => typeof rankName(rating) === 'string' && rankName(rating).length > 0), [0, C.RATING_ADVANCED, C.RATING_PEAK, C.RATING_TOP].map((rating) => rating + "→" + rankName(rating)).join(' / '));
     T('ranked 普通档 AI 慢于三星线、高级档可超过', (() => {
       fresh();
       store.progress.invited = true;
@@ -546,7 +552,10 @@ export default async function (ctx) {
     T('free 不生成门 / 危险段 / 跳台', world.gates.length === 0 && world.hazards.length === 0 && world.jumps.length === 0, `gates=${world.gates.length} hazards=${world.hazards.length} jumps=${world.jumps.length}`);
     T('free 不创建 AI 且不计金币预算', store.raceAI === null && store.run.totalCoins === 0, `AI=${store.raceAI} coins=${store.run.totalCoins}`);
     T('free 开局满油', store.phys.fuel === store.phys.fuelMax, `fuel=${f2(store.phys.fuel)}/${f2(store.phys.fuelMax)}`);
-    T('free 未登顶时拒绝自定义场景', freeThemeOf(99) === 0 && store.phys.theme === 0, `theme=${store.phys.theme}`);
+    // 默认入口现在是"随机摇一个场景"（不然每次打开都是同一张图），所以这里只钉死
+    // **显式传入**非法主题时的回退行为，而不是默认场景本身
+    T('free 显式传入非法场景时回退到 0（未登顶不能自选）', freeThemeOf(99) === 0 && freeThemeOf(-1) === 0,
+      `freeThemeOf(99)=${freeThemeOf(99)} · freeThemeOf(-1)=${freeThemeOf(-1)} · 当前生效主题=${store.phys.theme}（默认入口为随机）`);
     T('free 不启用变体预加油', world.prepFuel === 0, `prepFuel=${world.prepFuel}`);
 
     const realRandom = Math.random;
