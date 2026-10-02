@@ -815,6 +815,8 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   font-size: var(--font-micro-size); line-height: 1;
 }
 .slotNew { width: 100%; margin-bottom: var(--space-1); }
+/* 形态的量化效果行：与 prose 描述分开，靠等宽数字让人横向比形态 */
+.ultraFx { color: var(--gold); font-variant-numeric: tabular-nums; font-weight: var(--font-title-weight); }
 
 /* 打赏按钮独占一行（heroCoffeeRow）：用**留白**而不是加重颜色来获得存在感。
    上下留出 space-3 的呼吸位，与上方进度 chip 分属两个视觉区块 ——

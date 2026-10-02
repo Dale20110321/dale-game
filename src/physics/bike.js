@@ -89,14 +89,20 @@ const WARP_V_CAP = 90;
  *
  * ★ 模式的**效果**按 mode 分派，而不是到处写 `v.id === "xxx"`：
  *   每辆车的 ultra.mode 是一个稳定标识，物理层只认这一个字符串，
- *   以后加车只要在 vehicles.js 里挂一个 mode，不用改物理层的任何 if。
- * 模式表（vehicles.js 里的 ultra.mode，括号内为代表车）：
- *   stable 贴地   —— 轮/轴钉在地表，永不腾空、摔车无效（岩驼）
- *   surge  极速   —— 红线与极速暴涨（银箭）
- *   shield 护盾   —— 摔车免疫，但保留全部腾空与操控（磐石）
- *   phase  相位   —— 摔车免疫 + 燃料无限 + 危险段限速豁免（夜枭）
- *   railgun 轨道炮 —— 推力与红线同时暴涨（磁暴）
- *   warp   跃迁   —— 持续推力冲量 + 红线倍增（蜂鸟）
+ *   以后加车只要在 vehicles.js 里挂一个 mode + 一组 fx，不用改物理层的任何 if。
+ *
+ * ★★ `mode` 只决定**效果种类**，`fx` 决定**这一辆有多猛** ——
+ *   同一 mode 下的每辆车参数各不相同：¥3000 的银箭与 ¥30000 的猎户都是「极速」，
+ *   但前者的红线只拉到 3.5 倍、后者 7 倍；前者风阻仍有 45%、后者压到 14%。
+ *   这样"买哪辆车的形态"才真的是一次选择，而不是换个名字买同一件东西。
+ *
+ * 模式表（vehicles.js 里的 ultra.mode）：
+ *   stable 贴地   —— 轮/轴钉在地表，永不腾空、摔车无效；换来的是抓地与极速（岩驼 → 终焉）
+ *   surge  极速   —— 扭矩域拉满换极速，代价是抓地余量被吃掉（银箭 → 猎户）
+ *   shield 护盾   —— 摔车免疫但保留全部腾空与操控，换来的是抓地（幽影 → 天蚀）
+ *   phase  相位   —— 摔车免疫 + 燃料无限 + 危险段豁免，代价是脆（星轨 → 潮生）
+ *   railgun 轨道炮 —— 扭矩与红线同时暴涨，最暴力的一档（磁暴 → 玄铁）
+ *   warp   跃迁   —— 持续推力，逼近极速的速度按 accel/vCap 分档（蜂鸟 → 逐日）
  *   absolut 绝对  —— 350 km/h 稳定极速 + 全姿态摔车免疫（奇点，免解锁）
  */
 export function activeMode(veh) {
@@ -106,6 +112,36 @@ export function activeMode(veh) {
   //   不需要也不应该在车库花金币解锁。免的只是这一项特性 —— 四项升级仍照常花钱。
   if (v.ultra.builtin === true) return v.ultra.mode;
   return store.ultra[v.id] === true ? v.ultra.mode : "";
+}
+
+/**
+ * 当前形态的**开关类**效果。哪些形态天生带哪些特权，只取决于 mode —— 与 fx 无关。
+ *
+ * ★ phase 的「燃料无限 + 危险段豁免」以前只是文案：drainFuel 与危险段判定
+ *   都是无条件执行的，玩家为 ¥26000 买到的两个特权一个都没生效。
+ *   现在把它们收敛到这里，由 physics/fuel.js 与 game/game.js 真正去读。
+ */
+const MODE_FLAGS = {
+  stable:  { pinGround: true, noCrash: true },
+  shield:  { noCrash: true },
+  phase:   { noCrash: true, noFuel: true, noHazard: true },
+  railgun: {},
+  surge:   {},
+  warp:    {},
+  absolut: { noCrash: true, noFuel: true, noHazard: true },
+};
+
+/** 当前生效形态的效果开关（未解锁 / 无形态 → 全 false 的空对象） */
+export function ultraFlags() {
+  return MODE_FLAGS[activeMode()] || {};
+}
+
+/** 当前生效形态的**数值参数**（vehicles.js 里逐车手写；未解锁 → 空对象） */
+export function ultraFx() {
+  const v = VEHICLES[store.currentVehicle];
+  const m = activeMode(v);
+  if (!m || !v.ultra) return {};
+  return v.ultra.fx || {};
 }
 
 /** 究极终局车「绝对形态」是否生效（免解锁，恒为真） */
@@ -120,13 +156,22 @@ export function isUltraActive() {
 
 /** 「贴地模式」是否生效（stable：轮轴钉地，永不腾空） */
 export function isUltraStable() {
-  return activeMode() === "stable";
+  return ultraFlags().pinGround === true;
 }
 
-/** 是否处于"摔车免疫"模式（护盾 / 相位 / 绝对形态；贴地模式另行处理） */
+/** 是否处于"摔车免疫"形态（贴地 / 护盾 / 相位 / 绝对形态） */
 export function isCrashImmune() {
-  const m = activeMode();
-  return m === "shield" || m === "phase" || m === "stable" || m === "absolut";
+  return ultraFlags().noCrash === true;
+}
+
+/** 燃料无限（相位 / 绝对形态）：physics/fuel.js 据此跳过消耗 */
+export function hasInfiniteFuel() {
+  return ultraFlags().noFuel === true;
+}
+
+/** 危险段限速豁免（相位 / 绝对形态）：game/game.js 据此跳过超速判定 */
+export function ignoresHazardLimit() {
+  return ultraFlags().noHazard === true;
 }
 
 /** 贴地模式：把车轮/轮轴垂直钉到各自下方地表，头保持在轴中线 SEAT_H 上方（水平滑行，永不腾空） */
@@ -176,22 +221,33 @@ export function applyUpgrades() {
   //     效果对但读起来像"关掉风阻"，是句有误导性的写法。）
   store.phys.airDragK = AIR_DRAG_K;
 
-  // 特殊终极模式（放在所有派生量覆写之后：μ 由 deriveFriction 派生，
-  // 若在前面放大会被覆盖，车会因打滑而极速上不去）
+  // 特殊终极形态（放在所有派生量覆写之后：μ 由 deriveFriction 派生，
+  // 若在前面放大会被覆盖，车会因打滑而极速上不去）。
+  //
+  // ★ 这里的每个数字都来自**当前这辆车自己手写的 fx**，不再是全局常量 ——
+  //   同 mode 的车效果同类、量级不同。fx 里没写的字段一律取 1 / 不改，
+  //   所以某个形态只想要"其中一样"时不必把七项都抄一遍。
+  const fx = ultraFx();
   const mode = activeMode(v);
+  const MAXED = { engine: MAX_LV, tire: MAX_LV };
   if (mode === "surge") {
-    // 极速模式：扭矩域拉到极高 → 扭矩曲线在高速段仍是满功率，配合极低风阻真的冲得上去。
-    store.phys.rpmK *= ULTRA_RPM_N;
-    store.phys.topSpeed = Math.max(store.phys.topSpeed, ULTRA_SPEED_N * REF_SPEED);
-    store.phys.mu = Math.max(store.phys.mu, 4); // 高抓地：大扭矩不打滑
-    store.phys.airDragK = AIR_DRAG_K * 0.1; // 极低风阻，极速真正冲上去
+    // 极速形态：扭矩曲线**拉长**（高速段仍接近满功率）+ 低风阻。
+    // ★ 刻意不给抓地下限：把 μ 抬到 3 以上，驱动力就超过翘头临界，
+    //   实测银箭满级挂形态后每 2 秒翻一次车，而同一辆车裸车 30 秒零摔车。
+    //   抓地留给 stable / shield 形态（它们给的是倍率，不改绝对量级）。
+    store.phys.rpmK *= fx.rpmK || 1;
+    store.phys.topSpeed = Math.max(store.phys.topSpeed, (fx.speedN || 1) * REF_SPEED);
+    if (fx.dragK) store.phys.airDragK = AIR_DRAG_K * fx.dragK;
   } else if (mode === "railgun") {
-    // 电磁轨道炮：推力与红线同时暴涨（"变态"到极速表读数本身都不够用了）
-    store.phys.torquePeak *= ULTRA_TORQUE_N;
-    store.phys.rpmK *= ULTRA_RPM_N * 1.6;
-    store.phys.mu = Math.max(store.phys.mu, 3.4);
-    store.phys.airDragK = AIR_DRAG_K * 0.2;
-    store.phys.topSpeed = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N;
+    // 轨道炮：把扭矩曲线**拉得又高又长**（红线暴涨 → 高速段仍有满功率），
+    // 配合低风阻把极速顶上去。
+    // ★ 刻意**不**再乘扭矩峰值：那个值一旦堆过牵引上限就完全无效（纯空转），
+    //   而堆得刚好有效的那一档已经会把车后空翻 —— 实测玄铁扭矩 ×3 就第 55 帧翻过去。
+    //   "按住不放就翻车"本身是这游戏的核心手感（README：松油门比按什么键重要），
+    //   形态不该替玩家把这个决定代劳，所以只给红线与极速。
+    store.phys.rpmK *= fx.rpmK || 1;
+    if (fx.dragK) store.phys.airDragK = AIR_DRAG_K * fx.dragK;
+    if (fx.speedN) store.phys.topSpeed = topSpeedOf(v, MAXED) * fx.speedN;
   } else if (mode === "absolut") {
     // 绝对形态：表盘满量程钉在 350 km/h，并把风阻调到该速度上恰好能与附加推力相抵
     // （默认阻力在 9722px/s 处减速约 7.8 万 px/s²，任何驱动力都顶不住，
@@ -203,11 +259,17 @@ export function applyUpgrades() {
     //   350 km/h 由下面那段附加推力负责，扭矩路径保持正常尺度。
     store.phys.airDragK = ABSOLUT_DRAG_K;
   } else if (mode === "warp") {
-    // 跃迁形态：直接给整车注入持续推力冲量（见 stepPhysics 的 boost 段）
-    store.phys.topSpeed = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N * 1.6;
+    // 跃迁形态：直接给整车注入持续推力冲量（见 stepPhysics 的 boost 段）。
+    // accel / vCap 决定"逼近极速有多快"，逐车不同 —— 便宜的蜂鸟要踩更久才上得去。
+    if (fx.speedN) store.phys.topSpeed = topSpeedOf(v, MAXED) * fx.speedN;
     store.phys.rpmK *= 2;
+    if (fx.dragK) store.phys.airDragK = AIR_DRAG_K * fx.dragK;
+  } else if (mode === "stable" || mode === "shield" || mode === "phase") {
+    // 这三个形态的卖点是"不摔/不腾空/不掉油"，它们**不碰扭矩与红线**，
+    // 换来的额外收益各不相同：贴地给抓地、护盾给抓地、相位给极速。
+    if (fx.gripK) store.phys.mu *= fx.gripK;
+    if (fx.speedN) store.phys.topSpeed *= fx.speedN;
   }
-  // 普通模式与稳定/护盾/相位形态走到这里就是上面复位后的基准风阻，不再改动。
   bike.rb = rb;
   bindMasses(rb);
 }
@@ -859,6 +921,7 @@ export function stepPhysics() {
   const rev = revReady ? 1 : 0;
   // 附加推力模式在整帧内固定，每子步重查 mode 是纯浪费
   const mode0 = activeMode();
+  const fx = ultraFx();
   const warp = mode0 === "warp";
   const absolut = mode0 === "absolut";
   const prevGrounded = b.grounded;
@@ -882,17 +945,21 @@ export function stepPhysics() {
     applyDrive(b, P, sub, drvK, brkK, rev);
     // 5) 空气阻力
     applyDrag(b, P, sub);
-    // 5.5) 附加推力：「光子跃迁」与「绝对形态」共用，**传动链保持完整**
+    // 5.5) 附加推力：「跃迁」与「绝对形态」共用，**传动链保持完整**
     // （早期版本试过用速度伺服整条替换传动链，结果刹车锁死 / 打滑率 / 场景抓地缩放
     //   三条不变式同时失效，一次就打挂 15 项断言 —— 所以只能"叠加"，不能"替换"）
     if ((warp || absolut) && drvK && !run.crashed) {
       const svw = systemVel(b);
       let add;
       if (warp) {
-        add = clamp((P.topSpeed * 0.98 - svw.vx) * WARP_ACC * sub, 0, WARP_V_CAP * sub);
+        // accel / vCap 逐车手写：贵的形态"踩一下就贴上去"，便宜的要多踩一会儿。
+        // 两者都从 fx 读，缺省回落到旧的两个全局值（= 当年逐日那台的档位）。
+        const acc = fx.accel || WARP_ACC;
+        const cap = fx.vCap || WARP_V_CAP;
+        add = clamp((P.topSpeed * 0.98 - svw.vx) * acc * sub, 0, cap * sub);
       } else {
-        // 上限 = 可用抓地。★ 不能再套 WARP_V_CAP：那个值（90）是按"整秒"标定的
-        // 光子跃迁限速，除以子步长只剩 0.25px/子步，把 350km/h 的推力掐到只剩万分之一。
+        // 上限 = 可用抓地。★ 不能再套跃迁的 vCap：那个值是按"整秒"标定的单子步限速，
+        // 除以子步长后只剩零点几 px/子步，会把 350km/h 的推力掐到只剩万分之一。
         const grip = P.mu * P.rb.mTot * P.gravity * REAR_LOAD;
         add = clamp((P.topSpeed - svw.vx) * ABSOLUT_SERVO_ACC * sub, 0, grip * ABSOLUT_THRUST_K * sub);
       }

@@ -488,6 +488,24 @@
     vents: 1,
     pose: POSE(0, 0, 0, 0, 0, 0)
   }, o);
+  function fxText(fx) {
+    if (!fx || !Object.keys(fx).length)
+      return "";
+    const out = [];
+    if (fx.speedN != null)
+      out.push("极速 ×" + fx.speedN);
+    if (fx.rpmK != null)
+      out.push("红线 ×" + fx.rpmK);
+    if (fx.gripK != null)
+      out.push("抓地 ×" + fx.gripK);
+    if (fx.dragK != null)
+      out.push("风阻 ×" + fx.dragK);
+    if (fx.accel != null)
+      out.push("推进 " + fx.accel);
+    if (fx.vCap != null)
+      out.push("限速 " + fx.vCap);
+    return out.join(" · ");
+  }
   var VEHICLES = [
     {
       id: "trail",
@@ -537,6 +555,7 @@
       }),
       phys: P(0.8, 0.7, 1.25, 1.1, 13, 1.35, 1.25),
       ultra: {
+        fx: { speedN: 3.2, rpmK: 2, dragK: 0.55 },
         name: "极速模式",
         icon: "\uD83D\uDE80",
         mode: "surge",
@@ -573,6 +592,7 @@
       }),
       phys: P(1.5, 1.35, 0.85, 0.9, 20, 1.12, 0.85),
       ultra: {
+        fx: { gripK: 1.3, speedN: 0.95 },
         name: "贴地模式",
         icon: "\uD83D\uDEE1️",
         mode: "stable",
@@ -610,6 +630,7 @@
       }),
       phys: P(0.85, 1.15, 1.35, 1.15, 14, 1.55, 1.3),
       ultra: {
+        fx: { speedN: 3.4, rpmK: 2.2, dragK: 0.52 },
         name: "电磁轨道炮",
         icon: "\uD83D\uDD0C",
         mode: "railgun",
@@ -648,6 +669,7 @@
       }),
       phys: P(0.7, 0.62, 1.5, 1.2, 12, 1.2, 1.45),
       ultra: {
+        fx: { speedN: 1.3 },
         name: "相位穿行",
         icon: "\uD83C\uDF00",
         mode: "phase",
@@ -684,6 +706,7 @@
       }),
       phys: P(2.4, 2.4, 0.72, 0.85, 24, 1.6, 1.9),
       ultra: {
+        fx: { gripK: 1.6, speedN: 1.3 },
         name: "磁力护盾",
         icon: "\uD83D\uDD30",
         mode: "shield",
@@ -722,6 +745,7 @@
       }),
       phys: P(0.6, 1.05, 1.45, 1.25, 13, 1.15, 1.7),
       ultra: {
+        fx: { speedN: 3.6, accel: 3.2, vCap: 40 },
         name: "光子跃迁",
         icon: "\uD83C\uDF0C",
         mode: "warp",
@@ -759,6 +783,7 @@
       }),
       phys: P(1.2, 1.82, 1.6, 1.5, 26, 3, 3.6),
       ultra: {
+        fx: {},
         name: "绝对形态",
         icon: "\uD83C\uDF0C",
         mode: "absolut",
@@ -783,7 +808,14 @@
       color: "#7a9e7e",
       art: ART({ tire: 2.6, spokes: 8, spokeW: 1.3, tube: 3.2, topDrop: 4, coil: 0.7, bar: "flat", saddleW: 11, helmR: 4.3, pose: POSE(1, 1, 2, 1, 0.5, -1) }),
       phys: P(0.95, 0.89, 1.1, 1.05, 15, 1.05, 1.25),
-      ultra: { name: "通勤喷射", icon: "\uD83D\uDEF4", mode: "warp", cost: 12000, desc: "踩住油门持续加速，0.6 秒逼近极速" }
+      ultra: {
+        fx: { speedN: 2.6, accel: 2.2, vCap: 26 },
+        name: "通勤喷射",
+        icon: "\uD83D\uDEF4",
+        mode: "warp",
+        cost: 12000,
+        desc: "踩住油门持续加速，0.6 秒逼近极速"
+      }
     },
     {
       id: "dirt",
@@ -801,7 +833,14 @@
       color: "#b07d4f",
       art: ART({ tire: 4.6, spokes: 6, spokeW: 1.9, tube: 5, topDrop: 0, coil: 1.5, bar: "wide", saddleW: 13, helmR: 4.4, vents: 2, pose: POSE(-1, -2, -1, -2, -0.5, -2.5) }),
       phys: P(1.25, 1.16, 0.9, 0.95, 19, 1.2, 1.15),
-      ultra: { name: "泥地推进", icon: "\uD83C\uDFC7", mode: "railgun", cost: 49500, desc: "推力与红线同时暴涨，泥地也能飞" }
+      ultra: {
+        fx: { speedN: 4, rpmK: 2.8, dragK: 0.45 },
+        name: "泥地推进",
+        icon: "\uD83C\uDFC7",
+        mode: "railgun",
+        cost: 49500,
+        desc: "推力与红线同时暴涨，泥地也能飞"
+      }
     },
     {
       id: "storm",
@@ -819,7 +858,14 @@
       color: "#a8d8e8",
       art: ART({ tire: 2.2, rim: false, spokes: 10, spokeW: 1, tube: 2.8, topDrop: 5, coil: 0.5, bar: "drop", saddleW: 9, helmR: 4.8, peak: false, pose: POSE(3, 3, 4, 3, 1, 2) }),
       phys: P(0.9, 0.82, 1.25, 1.1, 14, 1.3, 1.55),
-      ultra: { name: "暴风增压", icon: "\uD83C\uDF28️", mode: "surge", cost: 14500, desc: "红线与极速暴涨，雪地起飞" }
+      ultra: {
+        fx: { speedN: 3.6, rpmK: 2.4, dragK: 0.5 },
+        name: "暴风增压",
+        icon: "\uD83C\uDF28️",
+        mode: "surge",
+        cost: 14500,
+        desc: "红线与极速暴涨，雪地起飞"
+      }
     },
     {
       id: "reef",
@@ -837,7 +883,14 @@
       color: "#ff8fab",
       art: ART({ tire: 5, spokes: 5, spokeW: 2.2, tube: 5.6, topDrop: -1, coil: 1.6, bar: "wide", saddleW: 14, helmR: 4.4, vents: 3, pose: POSE(-2, -3, -2, -3, -0.8, -3) }),
       phys: P(1.35, 1.25, 0.88, 0.92, 19, 1.25, 1.4),
-      ultra: { name: "潮汐穿行", icon: "\uD83D\uDC1A", mode: "phase", cost: 135500, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" }
+      ultra: {
+        fx: { speedN: 1.4 },
+        name: "潮汐穿行",
+        icon: "\uD83D\uDC1A",
+        mode: "phase",
+        cost: 135500,
+        desc: "摔不坏 + 燃料无限 + 危险段限速豁免"
+      }
     },
     {
       id: "canyon",
@@ -855,7 +908,14 @@
       color: "#cd5c5c",
       art: ART({ tire: 2.8, rim: false, spokes: 12, spokeW: 1.1, tube: 3.4, topDrop: 6, coil: 1.2, bar: "drop", saddleW: 8, helmR: 4.9, pose: POSE(4, 4, 5, 4, 1.5, 3) }),
       phys: P(0.88, 0.86, 1.3, 1.15, 17, 1.45, 1.7),
-      ultra: { name: "台地飞驰", icon: "\uD83C\uDFDC️", mode: "warp", cost: 18000, desc: "持续喷射：踩住油门就一直加速" }
+      ultra: {
+        fx: { speedN: 3.2, accel: 2.8, vCap: 34 },
+        name: "台地飞驰",
+        icon: "\uD83C\uDFDC️",
+        mode: "warp",
+        cost: 18000,
+        desc: "持续喷射：踩住油门就一直加速"
+      }
     },
     {
       id: "aurora",
@@ -873,7 +933,14 @@
       color: "#66f0c8",
       art: ART({ tire: 1.8, rim: false, spokes: 13, spokeW: 0.8, tube: 2.4, topDrop: 7, coil: 0.4, bar: "drop", saddleW: 7, helmR: 5, peak: false, pose: POSE(5, 6, 6, 5, 2, 4) }),
       phys: P(0.78, 0.6, 1.35, 1.15, 13, 1.35, 1.5),
-      ultra: { name: "极光穿行", icon: "\uD83C\uDF0C", mode: "phase", cost: 1e4, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" }
+      ultra: {
+        fx: { speedN: 1.1 },
+        name: "极光穿行",
+        icon: "\uD83C\uDF0C",
+        mode: "phase",
+        cost: 1e4,
+        desc: "摔不坏 + 燃料无限 + 危险段限速豁免"
+      }
     },
     {
       id: "sandstorm",
@@ -891,7 +958,14 @@
       color: "#d4a373",
       art: ART({ tire: 2.6, spokes: 10, spokeW: 1.2, tube: 3.2, topDrop: 4, coil: 0.6, bar: "drop", saddleW: 9, helmR: 4.6, pose: POSE(3, 3, 4, 3, 1, 2) }),
       phys: P(1.02, 0.91, 1.4, 1.25, 15, 1.5, 1.9),
-      ultra: { name: "沙暴穿行", icon: "\uD83C\uDF2A️", mode: "phase", cost: 33000, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" }
+      ultra: {
+        fx: { speedN: 1.2 },
+        name: "沙暴穿行",
+        icon: "\uD83C\uDF2A️",
+        mode: "phase",
+        cost: 33000,
+        desc: "摔不坏 + 燃料无限 + 危险段限速豁免"
+      }
     },
     {
       id: "magma",
@@ -909,7 +983,14 @@
       color: "#ff6b35",
       art: ART({ tire: 6.4, spokes: 5, spokeW: 2.6, tube: 7.2, topDrop: -2, coil: 2.1, bar: "wide", saddleW: 16, helmR: 5, vents: 4, pose: POSE(-3, -5, -2, -5, -1, -5) }),
       phys: P(2, 1.68, 0.8, 0.88, 22, 1.7, 1.45),
-      ultra: { name: "熔岩护壳", icon: "\uD83D\uDEE1️", mode: "shield", cost: 303500, desc: "任何姿态都摔不下去，操控全保留" }
+      ultra: {
+        fx: { gripK: 1.4, speedN: 1.2 },
+        name: "熔岩护壳",
+        icon: "\uD83D\uDEE1️",
+        mode: "shield",
+        cost: 303500,
+        desc: "任何姿态都摔不下去，操控全保留"
+      }
     },
     {
       id: "glacier",
@@ -927,7 +1008,14 @@
       color: "#8ecae6",
       art: ART({ tire: 7, spokes: 4, spokeW: 2.9, tube: 7.8, topDrop: -3, coil: 2.4, bar: "wide", saddleW: 17, helmR: 5.2, vents: 4, pose: POSE(-3, -6, -2, -6, -1, -6) }),
       phys: P(2.2, 1.9, 0.75, 0.85, 23, 1.55, 1.35),
-      ultra: { name: "冰封锁地", icon: "❄️", mode: "stable", cost: 371500, desc: "贴地滑行，永不腾空翻车" }
+      ultra: {
+        fx: { gripK: 1.75, speedN: 1.1 },
+        name: "冰封锁地",
+        icon: "❄️",
+        mode: "stable",
+        cost: 371500,
+        desc: "贴地滑行，永不腾空翻车"
+      }
     },
     {
       id: "monsoon",
@@ -945,7 +1033,14 @@
       color: "#4cc9f0",
       art: ART({ tire: 3.6, spokes: 9, spokeW: 1.6, tube: 4.4, topDrop: 5, coil: 1.1, bar: "drop", saddleW: 11, helmR: 4.7, vents: 2, pose: POSE(2, 2, 3, 2, 1, 1) }),
       phys: P(1.15, 1.1, 1.2, 1.1, 18, 1.6, 1.8),
-      ultra: { name: "季风过载", icon: "\uD83C\uDF27️", mode: "surge", cost: 110500, desc: "红线与极速暴涨" }
+      ultra: {
+        fx: { speedN: 4.4, rpmK: 3, dragK: 0.42 },
+        name: "季风过载",
+        icon: "\uD83C\uDF27️",
+        mode: "surge",
+        cost: 110500,
+        desc: "红线与极速暴涨"
+      }
     },
     {
       id: "obsidian",
@@ -963,7 +1058,14 @@
       color: "#2b2d42",
       art: ART({ tire: 6.8, spokes: 6, spokeW: 2.7, tube: 7.5, topDrop: 1, coil: 2.3, bar: "wide", saddleW: 16, helmR: 5.1, vents: 3, pose: POSE(-3, -5, -2, -5, -1, -5) }),
       phys: P(2.3, 2, 0.7, 0.82, 24, 1.85, 1.55),
-      ultra: { name: "黑曜石炮", icon: "⬛", mode: "railgun", cost: 454500, desc: "推力与红线同时暴涨" }
+      ultra: {
+        fx: { speedN: 5.4, rpmK: 4, dragK: 0.3 },
+        name: "黑曜石炮",
+        icon: "⬛",
+        mode: "railgun",
+        cost: 454500,
+        desc: "推力与红线同时暴涨"
+      }
     },
     {
       id: "titan",
@@ -981,7 +1083,14 @@
       color: "#6c757d",
       art: ART({ tire: 7.8, spokes: 4, spokeW: 3.2, tube: 8.6, topDrop: -4, coil: 2.8, bar: "wide", saddleW: 19, helmR: 5.6, vents: 5, pose: POSE(-4, -7, -3, -7, -1, -7) }),
       phys: P(2.5, 2.27, 0.68, 0.8, 25, 1.3, 1.25),
-      ultra: { name: "泰坦领域", icon: "\uD83D\uDDFF", mode: "stable", cost: 248000, desc: "贴地推进，永不腾空" }
+      ultra: {
+        fx: { gripK: 1.55, speedN: 1.05 },
+        name: "泰坦领域",
+        icon: "\uD83D\uDDFF",
+        mode: "stable",
+        cost: 248000,
+        desc: "贴地推进，永不腾空"
+      }
     },
     {
       id: "solstice",
@@ -999,7 +1108,14 @@
       color: "#ffb703",
       art: ART({ tire: 2, rim: false, spokes: 12, spokeW: 0.9, tube: 2.6, topDrop: 7, coil: 0.3, bar: "drop", saddleW: 8, helmR: 5.1, peak: false, pose: POSE(6, 7, 7, 6, 2.5, 4.5) }),
       phys: P(0.97, 0.87, 1.5, 1.3, 14, 1.65, 2.1),
-      ultra: { name: "至日喷射", icon: "☀️", mode: "warp", cost: 60500, desc: "一脚油门不见尽头" }
+      ultra: {
+        fx: { speedN: 4.2, accel: 3.8, vCap: 50 },
+        name: "至日喷射",
+        icon: "☀️",
+        mode: "warp",
+        cost: 60500,
+        desc: "一脚油门不见尽头"
+      }
     },
     {
       id: "vanguard",
@@ -1017,7 +1133,14 @@
       color: "#3a0ca3",
       art: ART({ tire: 6, spokes: 8, spokeW: 2.4, tube: 7, topDrop: 3, coil: 2, bar: "wide", saddleW: 15, helmR: 5.2, vents: 3, pose: POSE(-2, -4, -2, -4, -0.5, -4) }),
       phys: P(2.1, 2.12, 0.75, 0.86, 22, 1.4, 1.6),
-      ultra: { name: "先锋轨道炮", icon: "\uD83D\uDD3A", mode: "railgun", cost: 202500, desc: "推力与红线同时暴涨" }
+      ultra: {
+        fx: { speedN: 4.8, rpmK: 3.4, dragK: 0.36 },
+        name: "先锋轨道炮",
+        icon: "\uD83D\uDD3A",
+        mode: "railgun",
+        cost: 202500,
+        desc: "推力与红线同时暴涨"
+      }
     },
     {
       id: "phantom",
@@ -1035,7 +1158,14 @@
       color: "#adb5bd",
       art: ART({ tire: 1.7, rim: false, spokes: 14, spokeW: 0.7, tube: 2.2, topDrop: 8, coil: 0.2, bar: "drop", saddleW: 6.5, helmR: 5.2, peak: false, pose: POSE(7, 8, 8, 7, 3, 5) }),
       phys: P(0.82, 0.67, 1.55, 1.35, 12, 1.55, 2.15),
-      ultra: { name: "幻影护盾", icon: "\uD83C\uDF2B️", mode: "shield", cost: 74000, desc: "任何姿态都摔不下去" }
+      ultra: {
+        fx: { gripK: 1.2, speedN: 1.1 },
+        name: "幻影护盾",
+        icon: "\uD83C\uDF2B️",
+        mode: "shield",
+        cost: 74000,
+        desc: "任何姿态都摔不下去"
+      }
     },
     {
       id: "eclipse",
@@ -1053,7 +1183,14 @@
       color: "#212529",
       art: ART({ tire: 5.2, spokes: 9, spokeW: 2.2, tube: 6.4, topDrop: 2, coil: 1.8, bar: "wide", saddleW: 15, helmR: 5.3, peak: true, vents: 4, pose: POSE(-1, -3, -1, -3, 0, -3) }),
       phys: P(1.9, 1.79, 0.82, 0.9, 21, 1.95, 1.75),
-      ultra: { name: "蚀之护盾", icon: "\uD83C\uDF11", mode: "shield", cost: 833500, desc: "任何姿态都摔不下去" }
+      ultra: {
+        fx: { gripK: 1.8, speedN: 1.4 },
+        name: "蚀之护盾",
+        icon: "\uD83C\uDF11",
+        mode: "shield",
+        cost: 833500,
+        desc: "任何姿态都摔不下去"
+      }
     },
     {
       id: "nova",
@@ -1071,7 +1208,14 @@
       color: "#ff006e",
       art: ART({ tire: 2, rim: false, spokes: 13, spokeW: 0.9, tube: 2.8, topDrop: 9, coil: 0.35, bar: "drop", saddleW: 7, helmR: 5.3, peak: false, vents: 2, pose: POSE(8, 9, 9, 8, 3.5, 6) }),
       phys: P(0.92, 0.81, 1.5, 1.3, 13, 2, 2.5),
-      ultra: { name: "新星过载", icon: "\uD83D\uDCAB", mode: "surge", cost: 165500, desc: "红线与极速暴涨，一路顶到极速" }
+      ultra: {
+        fx: { speedN: 5, rpmK: 3.6, dragK: 0.36 },
+        name: "新星过载",
+        icon: "\uD83D\uDCAB",
+        mode: "surge",
+        cost: 165500,
+        desc: "红线与极速暴涨，一路顶到极速"
+      }
     },
     {
       id: "oblivion",
@@ -1089,9 +1233,20 @@
       color: "#03045e",
       art: ART({ tire: 8.2, spokes: 4, spokeW: 3.4, tube: 9.2, topDrop: -4, coil: 3, bar: "wide", saddleW: 20, helmR: 5.8, vents: 5, pose: POSE(-4, -8, -3, -8, -1, -8) }),
       phys: P(2.6, 2.63, 0.65, 0.78, 26, 1.6, 1.5),
-      ultra: { name: "湮灭领域", icon: "\uD83D\uDD73️", mode: "stable", cost: 681000, desc: "贴地推进，永不腾空" }
+      ultra: {
+        fx: { gripK: 2, speedN: 1.2 },
+        name: "湮灭领域",
+        icon: "\uD83D\uDD73️",
+        mode: "stable",
+        cost: 681000,
+        desc: "贴地推进，永不腾空"
+      }
     }
   ];
+  for (const v of VEHICLES) {
+    if (v.ultra && v.ultra.fx)
+      v.ultra.fxText = fxText(v.ultra.fx);
+  }
 
   // src/core/store.js
   var store = {
@@ -3965,9 +4120,6 @@
   function bikeVx() {
     return systemVel(bike).vx;
   }
-  var ULTRA_SPEED_N = 10;
-  var ULTRA_RPM_N = 8;
-  var ULTRA_TORQUE_N = 10;
   var WARP_ACC = 6.5;
   var WARP_V_CAP = 90;
   function activeMode(veh) {
@@ -3978,12 +4130,36 @@
       return v.ultra.mode;
     return store.ultra[v.id] === true ? v.ultra.mode : "";
   }
+  var MODE_FLAGS = {
+    stable: { pinGround: true, noCrash: true },
+    shield: { noCrash: true },
+    phase: { noCrash: true, noFuel: true, noHazard: true },
+    railgun: {},
+    surge: {},
+    warp: {},
+    absolut: { noCrash: true, noFuel: true, noHazard: true }
+  };
+  function ultraFlags() {
+    return MODE_FLAGS[activeMode()] || {};
+  }
+  function ultraFx() {
+    const v = VEHICLES[store.currentVehicle];
+    const m = activeMode(v);
+    if (!m || !v.ultra)
+      return {};
+    return v.ultra.fx || {};
+  }
   function isUltraStable() {
-    return activeMode() === "stable";
+    return ultraFlags().pinGround === true;
   }
   function isCrashImmune() {
-    const m = activeMode();
-    return m === "shield" || m === "phase" || m === "stable" || m === "absolut";
+    return ultraFlags().noCrash === true;
+  }
+  function hasInfiniteFuel() {
+    return ultraFlags().noFuel === true;
+  }
+  function ignoresHazardLimit() {
+    return ultraFlags().noHazard === true;
   }
   function pinToGround() {
     const b = bike;
@@ -4018,24 +4194,34 @@
     store.phys.wheelI = wheelInertia(rb.mW);
     store.phys.baseTopSpeed = store.phys.topSpeed;
     store.phys.airDragK = AIR_DRAG_K;
+    const fx = ultraFx();
     const mode = activeMode(v);
+    const MAXED = { engine: MAX_LV, tire: MAX_LV };
     if (mode === "surge") {
-      store.phys.rpmK *= ULTRA_RPM_N;
-      store.phys.topSpeed = Math.max(store.phys.topSpeed, ULTRA_SPEED_N * REF_SPEED);
-      store.phys.mu = Math.max(store.phys.mu, 4);
-      store.phys.airDragK = AIR_DRAG_K * 0.1;
+      store.phys.rpmK *= fx.rpmK || 1;
+      store.phys.topSpeed = Math.max(store.phys.topSpeed, (fx.speedN || 1) * REF_SPEED);
+      if (fx.dragK)
+        store.phys.airDragK = AIR_DRAG_K * fx.dragK;
     } else if (mode === "railgun") {
-      store.phys.torquePeak *= ULTRA_TORQUE_N;
-      store.phys.rpmK *= ULTRA_RPM_N * 1.6;
-      store.phys.mu = Math.max(store.phys.mu, 3.4);
-      store.phys.airDragK = AIR_DRAG_K * 0.2;
-      store.phys.topSpeed = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N;
+      store.phys.rpmK *= fx.rpmK || 1;
+      if (fx.dragK)
+        store.phys.airDragK = AIR_DRAG_K * fx.dragK;
+      if (fx.speedN)
+        store.phys.topSpeed = topSpeedOf(v, MAXED) * fx.speedN;
     } else if (mode === "absolut") {
       store.phys.topSpeed = ABSOLUT_V;
       store.phys.airDragK = ABSOLUT_DRAG_K;
     } else if (mode === "warp") {
-      store.phys.topSpeed = topSpeedOf(v, { engine: MAX_LV, tire: MAX_LV }) * ULTRA_SPEED_N * 1.6;
+      if (fx.speedN)
+        store.phys.topSpeed = topSpeedOf(v, MAXED) * fx.speedN;
       store.phys.rpmK *= 2;
+      if (fx.dragK)
+        store.phys.airDragK = AIR_DRAG_K * fx.dragK;
+    } else if (mode === "stable" || mode === "shield" || mode === "phase") {
+      if (fx.gripK)
+        store.phys.mu *= fx.gripK;
+      if (fx.speedN)
+        store.phys.topSpeed *= fx.speedN;
     }
     bike.rb = rb;
     bindMasses(rb);
@@ -4587,6 +4773,7 @@
     const brkK = (key.left || revK && !revReady) && !run.crashed ? 1 : 0;
     const rev = revReady ? 1 : 0;
     const mode0 = activeMode();
+    const fx = ultraFx();
     const warp = mode0 === "warp";
     const absolut = mode0 === "absolut";
     const prevGrounded = b.grounded;
@@ -4609,7 +4796,9 @@
         const svw = systemVel(b);
         let add;
         if (warp) {
-          add = clamp((P.topSpeed * 0.98 - svw.vx) * WARP_ACC * sub, 0, WARP_V_CAP * sub);
+          const acc = fx.accel || WARP_ACC;
+          const cap = fx.vCap || WARP_V_CAP;
+          add = clamp((P.topSpeed * 0.98 - svw.vx) * acc * sub, 0, cap * sub);
         } else {
           const grip = P.mu * P.rb.mTot * P.gravity * REAR_LOAD;
           add = clamp((P.topSpeed - svw.vx) * ABSOLUT_SERVO_ACC * sub, 0, grip * ABSOLUT_THRUST_K * sub);
@@ -4664,6 +4853,10 @@
 
   // src/physics/fuel.js
   function drainFuel(dt) {
+    if (hasInfiniteFuel()) {
+      store.phys.fuel = store.phys.fuelMax;
+      return;
+    }
     const v = VEHICLES[store.currentVehicle];
     const L = store.mode === "level" ? levelAt(store.selLevel) : null;
     const fk = L ? L.fuelK : 1;
@@ -5704,7 +5897,7 @@
     if (toKmh(Math.abs(b.speed)) >= 30)
       checkAch("fast");
     if (store.mode === "level" && !run.settling) {
-      if (!run.crashed && world.hazards.length) {
+      if (!run.crashed && world.hazards.length && !ignoresHazardLimit()) {
         const spd = Math.abs(bikeVx());
         for (const h of world.hazards) {
           if (mid >= h.x0 && mid <= h.x1 && spd > h.vmax) {
@@ -7710,6 +7903,8 @@
       if (rem < 2.5)
         return { level: "warn", text: "⏱ 限时门 " + Math.max(0, rem).toFixed(1) + "s" };
     }
+    if (ignoresHazardLimit())
+      return null;
     for (const h of world.hazards) {
       if (mx > h.x1)
         continue;
@@ -8922,6 +9117,9 @@
     showToast("\uD83C\uDF89 已购买 " + v.name + "！", 1200);
     playCoinSound();
   }
+  function fxLine(v) {
+    return v.ultra && v.ultra.fxText ? ` <b class="ultraFx">${v.ultra.fxText}</b>` : "";
+  }
   function allMaxed(id) {
     const u = store.upgrades[id];
     return !!u && u.engine >= MAX_LV && u.tire >= MAX_LV && u.frame >= MAX_LV && u.susp >= MAX_LV;
@@ -8931,11 +9129,11 @@
       return `<div class="ultraRow got">${v.ultra.icon} 特殊模式「${v.ultra.name}」已开启 · ${v.ultra.desc}</div>`;
     }
     if (!allMaxed(v.id)) {
-      return `<div class="ultraRow lock">\uD83D\uDD12 ${v.ultra.icon} ${v.ultra.name}：${v.ultra.desc}（全部升级满级 Lv${MAX_LV} 后解锁）</div>`;
+      return `<div class="ultraRow lock">\uD83D\uDD12 ${v.ultra.icon} ${v.ultra.name}：${v.ultra.desc}${fxLine(v)}（全部升级满级 Lv${MAX_LV} 后解锁）</div>`;
     }
     return `<div class="ultraRow buy">
     <button class="btn sm" data-act="buyUltra" data-veh="${i}">${v.ultra.icon} 解锁「${v.ultra.name}」 · ${v.ultra.cost.toLocaleString()} \uD83E\uDE99</button>
-    <div class="ultraDesc">${v.ultra.desc}</div>
+    <div class="ultraDesc">${v.ultra.desc}${fxLine(v)}</div>
   </div>`;
   }
   function buyUltra(i) {
@@ -9266,6 +9464,9 @@
     frame: ["抗摔", "悬挂"],
     susp: ["悬挂"]
   };
+  function fxLine2(v) {
+    return v.ultra && v.ultra.fxText ? " · " + v.ultra.fxText : "";
+  }
   function openShop() {
     store.shopOpen = true;
     renderShop();
@@ -9297,17 +9498,17 @@
       if (v.ultra) {
         if (v.ultra.builtin === true) {
           ultraEl.className = "upUltra got";
-          ultraEl.textContent = v.ultra.icon + " 「" + v.ultra.name + "」已内置生效 · " + v.ultra.desc;
+          ultraEl.textContent = v.ultra.icon + " 「" + v.ultra.name + "」已内置生效 · " + v.ultra.desc + fxLine2(v);
         } else {
           const got = store.ultra[v.id] === true;
           const full4 = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= MAX_LV);
           ultraEl.className = "upUltra" + (got ? " got" : full4 ? " canBuy" : "");
           if (got) {
-            ultraEl.textContent = v.ultra.icon + " 特殊模式「" + v.ultra.name + "」已开启 · " + v.ultra.desc;
+            ultraEl.textContent = v.ultra.icon + " 特殊模式「" + v.ultra.name + "」已开启 · " + v.ultra.desc + fxLine2(v);
           } else if (full4) {
-            ultraEl.textContent = "⭐ 已全部升满！到车库花 " + v.ultra.cost.toLocaleString() + " \uD83E\uDE99 解锁「" + v.ultra.name + "」";
+            ultraEl.textContent = "⭐ 已全部升满！到车库花 " + v.ultra.cost.toLocaleString() + " \uD83E\uDE99 解锁「" + v.ultra.name + "」" + fxLine2(v);
           } else {
-            ultraEl.textContent = "\uD83D\uDD12 全部升级升到 Lv" + MAX_LV + " 后可解锁特殊模式「" + v.ultra.name + "」：" + v.ultra.desc;
+            ultraEl.textContent = "\uD83D\uDD12 全部升级升到 Lv" + MAX_LV + " 后可解锁特殊模式「" + v.ultra.name + "」：" + v.ultra.desc + fxLine2(v);
           }
         }
       } else {

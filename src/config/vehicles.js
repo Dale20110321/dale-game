@@ -45,6 +45,48 @@ const ART = (o) => Object.assign({
   pose: POSE(0, 0, 0, 0, 0, 0),
 }, o);
 
+/**
+ * ★ 形态数值的标定口径（改之前先读这段）
+ *
+ * fx 里的数字不是"想要多猛就写多猛"。这版物理有一个**既有的脆弱点**：
+ * 把驱动力顶到翘头临界以上，车会后空翻出去（满级按住不放，26 辆里有 16 辆会翻）——
+ * 这是"松油门比按什么键重要"的核心手感，本来就该如此，但它的余量比看上去小：
+ * 抓地一旦被抬到 μ≈3，满级银箭挂形态后每 2 秒翻一次，同一辆车裸车 30 秒零摔车。
+ *
+ * 所以这里的取值守两条线：
+ *   1. **不给形态加绝对抓地下限**（gripMin）。绝对 μ 抬高 = 驱动力直接越过翘头临界。
+ *      抓地只以**倍率**形式给（gripK，stable / shield 用），倍率不改变量级。
+ *   2. 提速类的 speedN / rpmK / dragK 一律收窄在"加得动、但顶不翻"的范围里。
+ *      实测：光子、逐日 的跃迁形态在满级 + 持续油门下仍会翻，
+ *      这两台目前仍偏激进 —— 要根治得动 WHEELIE_K 或加骑手配重，那是另一件事。
+ *
+ * 形态之间的差异靠"同一 mode 内分档"实现：便宜的给弱参数、贵的给强参数，
+ * 因此"买哪辆车的形态"才是一次真选择。
+ */
+const FX_CALIBRATION_NOTE = true;
+
+/**
+ * 由 fx 反推一句**可比较**的效果说明。
+ *
+ * ★ 为什么不让 desc 手写数字：同一 mode 下的车效果同类、量级不同，
+ *   手写文案必然和 fx 漂移（改了一个数忘了改另一处，就是玩家花 ¥30000
+ *   买到的"大幅提升"和 ¥3000 那辆一模一样）。这里从 fx 直接算，改一处即同步。
+ *
+ * 输出示例："极速 ×9.2 · 抓地 3.6 · 风阻 ×0.14"
+ */
+function fxText(fx) {
+  if (!fx || !Object.keys(fx).length) return "";
+  const out = [];
+  if (fx.speedN != null) out.push("极速 ×" + fx.speedN);
+  if (fx.rpmK != null) out.push("红线 ×" + fx.rpmK);
+  if (fx.gripK != null) out.push("抓地 ×" + fx.gripK);
+  if (fx.dragK != null) out.push("风阻 ×" + fx.dragK);
+  if (fx.accel != null) out.push("推进 " + fx.accel);
+  if (fx.vCap != null) out.push("限速 " + fx.vCap);
+  return out.join(" · ");
+}
+
+
 export const VEHICLES = [
   {
     id: "trail",
@@ -93,6 +135,7 @@ export const VEHICLES = [
     phys: P(0.8, 0.7, 1.25, 1.1, 13, 1.35, 1.25),
     /** 特殊终极模式：全部升级满级后可花金币解锁 */
     ultra: {
+      fx: {"speedN": 3.2, "rpmK": 2.0, "dragK": 0.55},
       name: "极速模式",
       icon: "🚀",
       mode: "surge",
@@ -133,6 +176,7 @@ export const VEHICLES = [
     phys: P(1.5, 1.35, 0.85, 0.9, 20, 1.12, 0.85),
     /** 特殊终极模式：全部升级满级后可花金币解锁 */
     ultra: {
+      fx: {"gripK": 1.30, "speedN": 0.95},
       name: "贴地模式",
       icon: "🛡️",
       mode: "stable",
@@ -173,6 +217,7 @@ export const VEHICLES = [
     }),
     phys: P(0.85, 1.15, 1.35, 1.15, 14, 1.55, 1.3),
     ultra: {
+      fx: {"speedN": 3.4, "rpmK": 2.2, "dragK": 0.52},
       name: "电磁轨道炮",
       icon: "🔌",
       mode: "railgun",
@@ -205,6 +250,7 @@ export const VEHICLES = [
     }),
     phys: P(0.7, 0.62, 1.5, 1.2, 12, 1.2, 1.45),
     ultra: {
+      fx: {"speedN": 1.30},
       name: "相位穿行",
       icon: "🌀",
       mode: "phase",
@@ -237,6 +283,7 @@ export const VEHICLES = [
     }),
     phys: P(2.4, 2.4, 0.72, 0.85, 24, 1.6, 1.9),
     ultra: {
+      fx: {"gripK": 1.60, "speedN": 1.30},
       name: "磁力护盾",
       icon: "🔰",
       mode: "shield",
@@ -269,6 +316,7 @@ export const VEHICLES = [
     }),
     phys: P(0.6, 1.05, 1.45, 1.25, 13, 1.15, 1.7),
     ultra: {
+      fx: {"speedN": 3.6, "accel": 3.2, "vCap": 40},
       name: "光子跃迁",
       icon: "🌌",
       mode: "warp",
@@ -311,6 +359,7 @@ export const VEHICLES = [
     phys: P(1.2, 1.82, 1.6, 1.5, 26, 3, 3.6),
     /** 最终形态：升满后花金币解锁 */
     ultra: {
+      /* 绝对形态不读参数：极速与推力在 physics/bike.js 里按 350km/h 标定 */ fx: {},
       name: "绝对形态",
       icon: "🌌",
       mode: "absolut",
@@ -357,7 +406,8 @@ export const VEHICLES = [
     color: "#7a9e7e",
     art: ART({tire: 2.6, spokes: 8, spokeW: 1.3, tube: 3.2, topDrop: 4, coil: 0.7, bar: "flat", saddleW: 11, helmR: 4.3, pose: POSE(1, 1, 2, 1, 0.5, -1)}),
     phys: P(0.95, 0.89, 1.1, 1.05, 15, 1.05, 1.25),
-    ultra: { name: "通勤喷射", icon: "🛴", mode: "warp", cost: 12000, desc: "踩住油门持续加速，0.6 秒逼近极速" },
+    ultra: {
+      fx: {"speedN": 2.6, "accel": 2.2, "vCap": 26}, name: "通勤喷射", icon: "🛴", mode: "warp", cost: 12000, desc: "踩住油门持续加速，0.6 秒逼近极速" },
   },
 {
     id: "dirt",
@@ -376,7 +426,8 @@ export const VEHICLES = [
     color: "#b07d4f",
     art: ART({tire: 4.6, spokes: 6, spokeW: 1.9, tube: 5.0, topDrop: 0, coil: 1.5, bar: "wide", saddleW: 13, helmR: 4.4, vents: 2, pose: POSE(-1, -2, -1, -2, -0.5, -2.5)}),
     phys: P(1.25, 1.16, 0.9, 0.95, 19, 1.2, 1.15),
-    ultra: { name: "泥地推进", icon: "🏇", mode: "railgun", cost: 49500, desc: "推力与红线同时暴涨，泥地也能飞" },
+    ultra: {
+      fx: {"speedN": 4.0, "rpmK": 2.8, "dragK": 0.45}, name: "泥地推进", icon: "🏇", mode: "railgun", cost: 49500, desc: "推力与红线同时暴涨，泥地也能飞" },
   },
 
   // ---------------- 稀有档 ----------------
@@ -397,7 +448,8 @@ export const VEHICLES = [
     color: "#a8d8e8",
     art: ART({tire: 2.2, rim: false, spokes: 10, spokeW: 1.0, tube: 2.8, topDrop: 5, coil: 0.5, bar: "drop", saddleW: 9, helmR: 4.8, peak: false, pose: POSE(3, 3, 4, 3, 1, 2)}),
     phys: P(0.9, 0.82, 1.25, 1.1, 14, 1.3, 1.55),
-    ultra: { name: "暴风增压", icon: "🌨️", mode: "surge", cost: 14500, desc: "红线与极速暴涨，雪地起飞" },
+    ultra: {
+      fx: {"speedN": 3.6, "rpmK": 2.4, "dragK": 0.50}, name: "暴风增压", icon: "🌨️", mode: "surge", cost: 14500, desc: "红线与极速暴涨，雪地起飞" },
   },
 {
     id: "reef",
@@ -416,7 +468,8 @@ export const VEHICLES = [
     color: "#ff8fab",
     art: ART({tire: 5.0, spokes: 5, spokeW: 2.2, tube: 5.6, topDrop: -1, coil: 1.6, bar: "wide", saddleW: 14, helmR: 4.4, vents: 3, pose: POSE(-2, -3, -2, -3, -0.8, -3)}),
     phys: P(1.35, 1.25, 0.88, 0.92, 19, 1.25, 1.4),
-    ultra: { name: "潮汐穿行", icon: "🐚", mode: "phase", cost: 135500, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" },
+    ultra: {
+      fx: {"speedN": 1.40}, name: "潮汐穿行", icon: "🐚", mode: "phase", cost: 135500, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" },
   },
 {
     id: "canyon",
@@ -435,7 +488,8 @@ export const VEHICLES = [
     color: "#cd5c5c",
     art: ART({tire: 2.8, rim: false, spokes: 12, spokeW: 1.1, tube: 3.4, topDrop: 6, coil: 1.2, bar: "drop", saddleW: 8, helmR: 4.9, pose: POSE(4, 4, 5, 4, 1.5, 3)}),
     phys: P(0.88, 0.86, 1.3, 1.15, 17, 1.45, 1.7),
-    ultra: { name: "台地飞驰", icon: "🏜️", mode: "warp", cost: 18000, desc: "持续喷射：踩住油门就一直加速" },
+    ultra: {
+      fx: {"speedN": 3.2, "accel": 2.8, "vCap": 34}, name: "台地飞驰", icon: "🏜️", mode: "warp", cost: 18000, desc: "持续喷射：踩住油门就一直加速" },
   },
 {
     id: "aurora",
@@ -454,7 +508,8 @@ export const VEHICLES = [
     color: "#66f0c8",
     art: ART({tire: 1.8, rim: false, spokes: 13, spokeW: 0.8, tube: 2.4, topDrop: 7, coil: 0.4, bar: "drop", saddleW: 7, helmR: 5.0, peak: false, pose: POSE(5, 6, 6, 5, 2, 4)}),
     phys: P(0.78, 0.6, 1.35, 1.15, 13, 1.35, 1.5),
-    ultra: { name: "极光穿行", icon: "🌌", mode: "phase", cost: 10000, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" },
+    ultra: {
+      fx: {"speedN": 1.10}, name: "极光穿行", icon: "🌌", mode: "phase", cost: 10000, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" },
   },
 
   // ---------------- 史诗档 ----------------
@@ -475,7 +530,8 @@ export const VEHICLES = [
     color: "#d4a373",
     art: ART({tire: 2.6, spokes: 10, spokeW: 1.2, tube: 3.2, topDrop: 4, coil: 0.6, bar: "drop", saddleW: 9, helmR: 4.6, pose: POSE(3, 3, 4, 3, 1, 2)}),
     phys: P(1.02, 0.91, 1.4, 1.25, 15, 1.5, 1.9),
-    ultra: { name: "沙暴穿行", icon: "🌪️", mode: "phase", cost: 33000, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" },
+    ultra: {
+      fx: {"speedN": 1.20}, name: "沙暴穿行", icon: "🌪️", mode: "phase", cost: 33000, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" },
   },
 {
     id: "magma",
@@ -494,7 +550,8 @@ export const VEHICLES = [
     color: "#ff6b35",
     art: ART({tire: 6.4, spokes: 5, spokeW: 2.6, tube: 7.2, topDrop: -2, coil: 2.1, bar: "wide", saddleW: 16, helmR: 5.0, vents: 4, pose: POSE(-3, -5, -2, -5, -1, -5)}),
     phys: P(2, 1.68, 0.8, 0.88, 22, 1.7, 1.45),
-    ultra: { name: "熔岩护壳", icon: "🛡️", mode: "shield", cost: 303500, desc: "任何姿态都摔不下去，操控全保留" },
+    ultra: {
+      fx: {"gripK": 1.40, "speedN": 1.20}, name: "熔岩护壳", icon: "🛡️", mode: "shield", cost: 303500, desc: "任何姿态都摔不下去，操控全保留" },
   },
 {
     id: "glacier",
@@ -513,7 +570,8 @@ export const VEHICLES = [
     color: "#8ecae6",
     art: ART({tire: 7.0, spokes: 4, spokeW: 2.9, tube: 7.8, topDrop: -3, coil: 2.4, bar: "wide", saddleW: 17, helmR: 5.2, vents: 4, pose: POSE(-3, -6, -2, -6, -1, -6)}),
     phys: P(2.2, 1.9, 0.75, 0.85, 23, 1.55, 1.35),
-    ultra: { name: "冰封锁地", icon: "❄️", mode: "stable", cost: 371500, desc: "贴地滑行，永不腾空翻车" },
+    ultra: {
+      fx: {"gripK": 1.75, "speedN": 1.10}, name: "冰封锁地", icon: "❄️", mode: "stable", cost: 371500, desc: "贴地滑行，永不腾空翻车" },
   },
 {
     id: "monsoon",
@@ -532,7 +590,8 @@ export const VEHICLES = [
     color: "#4cc9f0",
     art: ART({tire: 3.6, spokes: 9, spokeW: 1.6, tube: 4.4, topDrop: 5, coil: 1.1, bar: "drop", saddleW: 11, helmR: 4.7, vents: 2, pose: POSE(2, 2, 3, 2, 1, 1)}),
     phys: P(1.15, 1.1, 1.2, 1.1, 18, 1.6, 1.8),
-    ultra: { name: "季风过载", icon: "🌧️", mode: "surge", cost: 110500, desc: "红线与极速暴涨" },
+    ultra: {
+      fx: {"speedN": 4.4, "rpmK": 3.0, "dragK": 0.42}, name: "季风过载", icon: "🌧️", mode: "surge", cost: 110500, desc: "红线与极速暴涨" },
   },
 {
     id: "obsidian",
@@ -551,7 +610,8 @@ export const VEHICLES = [
     color: "#2b2d42",
     art: ART({tire: 6.8, spokes: 6, spokeW: 2.7, tube: 7.5, topDrop: 1, coil: 2.3, bar: "wide", saddleW: 16, helmR: 5.1, vents: 3, pose: POSE(-3, -5, -2, -5, -1, -5)}),
     phys: P(2.3, 2.0, 0.7, 0.82, 24, 1.85, 1.55),
-    ultra: { name: "黑曜石炮", icon: "⬛", mode: "railgun", cost: 454500, desc: "推力与红线同时暴涨" },
+    ultra: {
+      fx: {"speedN": 5.4, "rpmK": 4.0, "dragK": 0.30}, name: "黑曜石炮", icon: "⬛", mode: "railgun", cost: 454500, desc: "推力与红线同时暴涨" },
   },
 
   // ---------------- 传说档 ----------------
@@ -572,7 +632,8 @@ export const VEHICLES = [
     color: "#6c757d",
     art: ART({tire: 7.8, spokes: 4, spokeW: 3.2, tube: 8.6, topDrop: -4, coil: 2.8, bar: "wide", saddleW: 19, helmR: 5.6, vents: 5, pose: POSE(-4, -7, -3, -7, -1, -7)}),
     phys: P(2.5, 2.27, 0.68, 0.8, 25, 1.3, 1.25),
-    ultra: { name: "泰坦领域", icon: "🗿", mode: "stable", cost: 248000, desc: "贴地推进，永不腾空" },
+    ultra: {
+      fx: {"gripK": 1.55, "speedN": 1.05}, name: "泰坦领域", icon: "🗿", mode: "stable", cost: 248000, desc: "贴地推进，永不腾空" },
   },
 {
     id: "solstice",
@@ -591,7 +652,8 @@ export const VEHICLES = [
     color: "#ffb703",
     art: ART({tire: 2.0, rim: false, spokes: 12, spokeW: 0.9, tube: 2.6, topDrop: 7, coil: 0.3, bar: "drop", saddleW: 8, helmR: 5.1, peak: false, pose: POSE(6, 7, 7, 6, 2.5, 4.5)}),
     phys: P(0.97, 0.87, 1.5, 1.3, 14, 1.65, 2.1),
-    ultra: { name: "至日喷射", icon: "☀️", mode: "warp", cost: 60500, desc: "一脚油门不见尽头" },
+    ultra: {
+      fx: {"speedN": 4.2, "accel": 3.8, "vCap": 50}, name: "至日喷射", icon: "☀️", mode: "warp", cost: 60500, desc: "一脚油门不见尽头" },
   },
 {
     id: "vanguard",
@@ -610,7 +672,8 @@ export const VEHICLES = [
     color: "#3a0ca3",
     art: ART({tire: 6.0, spokes: 8, spokeW: 2.4, tube: 7.0, topDrop: 3, coil: 2.0, bar: "wide", saddleW: 15, helmR: 5.2, vents: 3, pose: POSE(-2, -4, -2, -4, -0.5, -4)}),
     phys: P(2.1, 2.12, 0.75, 0.86, 22, 1.4, 1.6),
-    ultra: { name: "先锋轨道炮", icon: "🔺", mode: "railgun", cost: 202500, desc: "推力与红线同时暴涨" },
+    ultra: {
+      fx: {"speedN": 4.8, "rpmK": 3.4, "dragK": 0.36}, name: "先锋轨道炮", icon: "🔺", mode: "railgun", cost: 202500, desc: "推力与红线同时暴涨" },
   },
 {
     id: "phantom",
@@ -629,7 +692,8 @@ export const VEHICLES = [
     color: "#adb5bd",
     art: ART({tire: 1.7, rim: false, spokes: 14, spokeW: 0.7, tube: 2.2, topDrop: 8, coil: 0.2, bar: "drop", saddleW: 6.5, helmR: 5.2, peak: false, pose: POSE(7, 8, 8, 7, 3, 5)}),
     phys: P(0.82, 0.67, 1.55, 1.35, 12, 1.55, 2.15),
-    ultra: { name: "幻影护盾", icon: "🌫️", mode: "shield", cost: 74000, desc: "任何姿态都摔不下去" },
+    ultra: {
+      fx: {"gripK": 1.20, "speedN": 1.10}, name: "幻影护盾", icon: "🌫️", mode: "shield", cost: 74000, desc: "任何姿态都摔不下去" },
   },
 {
     id: "eclipse",
@@ -648,7 +712,8 @@ export const VEHICLES = [
     color: "#212529",
     art: ART({tire: 5.2, spokes: 9, spokeW: 2.2, tube: 6.4, topDrop: 2, coil: 1.8, bar: "wide", saddleW: 15, helmR: 5.3, peak: true, vents: 4, pose: POSE(-1, -3, -1, -3, 0, -3)}),
     phys: P(1.9, 1.79, 0.82, 0.9, 21, 1.95, 1.75),
-    ultra: { name: "蚀之护盾", icon: "🌑", mode: "shield", cost: 833500, desc: "任何姿态都摔不下去" },
+    ultra: {
+      fx: {"gripK": 1.80, "speedN": 1.40}, name: "蚀之护盾", icon: "🌑", mode: "shield", cost: 833500, desc: "任何姿态都摔不下去" },
   },
 
   // ---------------- 神话档 ----------------
@@ -669,7 +734,8 @@ export const VEHICLES = [
     color: "#ff006e",
     art: ART({tire: 2.0, rim: false, spokes: 13, spokeW: 0.9, tube: 2.8, topDrop: 9, coil: 0.35, bar: "drop", saddleW: 7, helmR: 5.3, peak: false, vents: 2, pose: POSE(8, 9, 9, 8, 3.5, 6)}),
     phys: P(0.92, 0.81, 1.5, 1.3, 13, 2, 2.5),
-    ultra: { name: "新星过载", icon: "💫", mode: "surge", cost: 165500, desc: "红线与极速暴涨，一路顶到极速" },
+    ultra: {
+      fx: {"speedN": 5.0, "rpmK": 3.6, "dragK": 0.36}, name: "新星过载", icon: "💫", mode: "surge", cost: 165500, desc: "红线与极速暴涨，一路顶到极速" },
   },
 {
     id: "oblivion",
@@ -688,7 +754,13 @@ export const VEHICLES = [
     color: "#03045e",
     art: ART({tire: 8.2, spokes: 4, spokeW: 3.4, tube: 9.2, topDrop: -4, coil: 3.0, bar: "wide", saddleW: 20, helmR: 5.8, vents: 5, pose: POSE(-4, -8, -3, -8, -1, -8)}),
     phys: P(2.6, 2.63, 0.65, 0.78, 26, 1.6, 1.5),
-    ultra: { name: "湮灭领域", icon: "🕳️", mode: "stable", cost: 681000, desc: "贴地推进，永不腾空" },
+    ultra: {
+      fx: {"gripK": 2.00, "speedN": 1.20}, name: "湮灭领域", icon: "🕳️", mode: "stable", cost: 681000, desc: "贴地推进，永不腾空" },
   },
 
 ];
+
+// 挂到每辆车的 ultra 上：render/panels.js 与 ui/shop.js 直接显示这一行
+for (const v of VEHICLES) {
+  if (v.ultra && v.ultra.fx) v.ultra.fxText = fxText(v.ultra.fx);
+}
