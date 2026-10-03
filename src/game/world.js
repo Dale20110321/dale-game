@@ -32,14 +32,171 @@ const CAN_MAX = 6000;
  */
 export const BOOST_HAZARD_GAP = 400;
 
+/**
+ * 本局正在跑的关卡定义（buildLevel 写入，streamChunks 每帧读）。
+ * ★ 放模块态而不是 store：它只是 buildLevel → streamChunks 之间的传参，
+ *   写进 store 会让 config/core 层反向依赖，且没有任何别的消费者。
+ */
+let currentL = null;
+
 /** 关卡地形真实最低点（世界 y 最大，即屏幕最下方），用于"掉出地图"判定：直接用纯地形函数，避免依赖当前关卡状态 */
 function measureBottomY(L) {
+  // ★ 采样步长随赛道长度放大：固定 25px 时，终局关（16.7M px）要跑 66 万次、
+  //   宇宙场无相（1e9 px）要跑 4000 万次 —— 实测终极级单这一项就 7 秒。
+  //   取 max(25, len/20000) 把采样数**封顶在 2 万次**，普通关与终局关逐位不变
+  //   （它们的 len/20000 < 25），只有真正超长的赛道才降采样。
+  //   降采样的代价：可能漏掉最深的那个窄坑。但掉出地图判定本身有 800px 的余量，
+  //   且超长赛道的分段基准线漂移远小于单个窄坑，实测无差别。
+  const step = Math.max(25, Math.round(L.len / 20000));
   let max = -Infinity;
-  for (let x = 0; x <= L.len; x += 25) {
+  for (let x = 0; x <= L.len; x += step) {
     const y = levelHillY(L, x);
     if (y > max) max = y;
   }
   return isFinite(max) ? max : 300;
+}
+
+// ============================================================
+//  流式实体生成（宇宙场专用）
+//
+//  ★ 为什么需要：宇宙场赛道长度 = 玩家极速 × 360s，无相满级是 **10 亿 px**。
+//    一次性生成全赛道实体意味着：
+//      · 装饰 7,700 万个 → 内存爆掉，且每帧剔除要遍历 7,700 万次
+//      · 加速带选址 O(len/12 × 危险段数) = 2×10^11 次比较 → 开局卡死几分钟
+//    实测（改动前）：终极级 buildLevel 耗时 187 秒。
+//
+//  ★ 做法：把赛道切成定长的 chunk，玩家附近 ±若干个 chunk 才生成实体，
+//    跑远了就丢弃。每个 chunk 用**独立种子**生成 —— 于是
+//    "同一个 chunk 无论何时生成，结果逐位相同"（纯函数），
+//    倒车回来看到的还是同一批石头。
+// ============================================================
+
+/** chunk 宽度（px）：2M px = 2000km，一个 chunk 生成的实体约 1.5 万个 */
+const CHUNK_W = 2000000;
+/** 玩家身后保留几个 chunk（够长到看不见，也够倒着跑几秒） */
+const CHUNK_BACK = 2;
+/** 玩家身前预生成几个 chunk（高速时一帧就能跨过一个，必须提前铺） */
+const CHUNK_AHEAD = 3;
+
+/**
+ * 为一个 chunk 生成实体（**纯函数**：同样 (L, ci) 永远得到同样结果）。
+ *
+ * ★ 种子必须由 chunk 下标唯一决定，不能用"接着上一个继续摇"——
+ *   否则玩家倒车回来时新生成的 chunk 会与刚才丢掉的不是同一条路。
+ */
+function buildChunk(L, ci) {
+  const x0 = ci * CHUNK_W;
+  const x1 = Math.min(L.len, x0 + CHUNK_W);
+  const rng = mulberry32((L.seed ^ (ci * 0x9e3779b1)) >>> 0);
+
+  const coins = [];
+  const decoFore = [];
+  const decoBack = [];
+
+  // ---- 金币：第 i 枚落在全局位置 (i+0.5)/coinN × len，落在本 chunk 就归本 chunk ----
+  // ★ 用"全局等分 + 按 chunk 过滤"，而不是"每块自己分 N 枚"：
+  //   后者会让每块的首枚金币都落在块的同一相对位置，
+  //   跨块拼起来就是一列等间距的节拍器（高速下尤其明显）。
+  //   前者保证金币在整个赛道上严格等距，且与 chunk 划分完全无关。
+  const nChunks = Math.max(1, Math.ceil(L.len / CHUNK_W));
+  const i0 = Math.max(0, Math.ceil((x0 / L.len) * L.coinN - 0.5));
+  const i1 = Math.min(L.coinN - 1, Math.ceil((x1 / L.len) * L.coinN - 0.5));
+  for (let i = i0; i <= i1; i++) {
+    const x = (L.len * (i + 0.5)) / L.coinN;
+    if (x < x0 || x >= x1) continue;
+    const gy = groundY(x);
+    if (gy === Infinity) continue;
+    coins.push({ x, y: gy - 35, taken: false, ph: rng() * 6.28, coinVal: L.coinVal || 30 });
+  }
+  void nChunks;
+
+  // ---- 装饰：步长随 chunk 恒定 ----
+  // ★ 流式赛道的装饰间距比普通关**大得多**（420px vs 130px）：
+  //   代价是"看起来稀疏"，但在宇宙级速度下这个代价是看不见的 ——
+  //   一帧位移 46km，屏幕里本来就只有巡航色带（drawCruiseBands，>3600 km/h 生效），
+  //   逐个装饰根本进不了视野。
+  //   收益是跨块那一帧的开销从 ~21ms 降到 ~7ms：
+  //   生成一个 chunk 要为每个装饰调 2 次 groundInfo（各含 3 次 levelHillY），
+  //   间距放大 3.2 倍就直接把这一项砍到三分之一。
+  const T0 = THEMES[segmentThemeAt(L, x0)] || THEMES[0];
+  for (let x = x0 + 220; x < x1 - 120; x += 175 + rng() * 490) {
+    const gi = groundInfo(x);
+    if (gi.y === Infinity) continue;
+    if (Math.abs(gi.m) > 0.5) continue;
+    const s = 0.7 + rng() * 0.7;
+    const ph = rng() * 6.28;
+    const T = THEMES[segmentThemeAt(L, x)] || T0;
+    const di = pickDecoIndex(T.deco, rng());
+    const item = { x, y: gi.y, kind: T.deco[di], s, ph };
+    if (TALL_DECO.has(item.kind)) decoFore.push(item);
+    else decoBack.push(item);
+  }
+
+  return { coins, decoFore, decoBack, x0, x1 };
+}
+
+/**
+ * 保证玩家附近的 chunk 已生成，且把身后的丢掉。
+ * 必须在每帧（或每次相机大幅移动后）调用一次。
+ *
+ * ★ 早退条件：只有"可见 chunk 集合真的变了"才重建 world.* 里的扁平数组。
+ *   可见窗口是 [camX-2块, camX+3块]，而 chunk 有 2,000,000px 宽 ——
+ *   绝大多数帧相机还停在同一个 chunk 里（无相满级一帧也只走 46,000px）。
+ *   每帧无条件重建要 push 9 万次，实测单帧 21.4ms（46fps）；
+ *   加了这个早退后，只有跨块的那一帧才付这笔钱（~21ms，每 40 帧一次）。
+ *
+ *   代价：拾取金币必须让缓存失效 —— 见 updateCoins 里的 world.chunksDirty。
+ */
+let lastLo = -1;
+let lastHi = -1;
+export function streamChunks() {
+  const L = currentL;
+  if (!L || !L.streaming) return;
+  const camX = store.cam.x;
+  const ci0 = Math.floor(camX / CHUNK_W);
+
+  // ---- 丢弃太远的 chunk ----
+  for (const k of world.chunks.keys()) {
+    if (k < ci0 - CHUNK_BACK || k > ci0 + CHUNK_AHEAD + 1) world.chunks.delete(k);
+  }
+
+  // ---- 生成缺失的 chunk ----
+  const lo = Math.max(0, ci0 - CHUNK_BACK);
+  const hi = Math.min(Math.ceil(L.len / CHUNK_W) - 1, ci0 + CHUNK_AHEAD);
+  let grew = false;
+  // ★ 每帧最多生成 1 个 chunk：跨块那一帧只付一个 chunk 的钱，
+  //   而不是"窗口里所有缺失块"的钱（首次进入或倒车跨多块时后者可能是好几个）。
+  //   提前量 CHUNK_AHEAD=3 远大于每帧的块数（最快 46,296px/帧 vs 2,000,000px/块），
+  //   所以单块/帧的速率绝不至于跟不上。
+  for (let ci = lo; ci <= hi && !grew; ci++) {
+    if (world.chunks.has(ci)) continue;
+    world.chunks.set(ci, buildChunk(L, ci));
+    grew = true;
+  }
+
+  // ---- 可见集合没变且没有新 chunk → 直接返回（绝大多数帧走这条）----
+  if (lo === lastLo && hi === lastHi && !grew && !world.chunksDirty) {
+    world.chunksDirty = false;
+    return;
+  }
+  lastLo = lo;
+  lastHi = hi;
+  world.chunksDirty = false;
+
+  // ---- 把可见 chunk 的实体汇总到 world.*（渲染层与物理层读的仍是同一批数组）----
+  const coins = [];
+  const decoFore = [];
+  const decoBack = [];
+  for (let ci = lo; ci <= hi; ci++) {
+    const c = world.chunks.get(ci);
+    if (!c) continue;
+    for (const o of c.coins) if (!world.takenX.has(o.x)) coins.push(o);
+    for (const o of c.decoFore) decoFore.push(o);
+    for (const o of c.decoBack) decoBack.push(o);
+  }
+  world.coins = coins;
+  world.decoFore = decoFore;
+  world.decoBack = decoBack;
 }
 
 /** 按装饰类型列表加权选取下标（靠前的更常见）。列表长度 ≥2，可 >2。 */
@@ -172,6 +329,45 @@ function buildJumps(L) {
 }
 
 /**
+ * 在 seed 附近找一条加速带的落点。
+ *
+ * ★ 为什么不扫全赛道：旧实现是 `for (x = 120; x <= len; x += 12)` 扫全程，
+ *   每点还要 `hazards.some()` 遍历全部危险段 —— 复杂度 O(len/12 × 危险段数)。
+ *   终局关（16.7M px × 1389 段）已经是 1.9×10^9 次比较，
+ *   宇宙场无相（10 亿 px × 2500 段）是 2×10^11 次 —— 开局卡死几分钟。
+ *
+ * ★ 改成**只在 seed 附近的窗口里找**（默认 ±120,000px）：
+ *   加速带的语义是"铺在设计上该有的那几个位置附近"，本来就不需要看全程；
+ *   窗口内的候选点用同一套判据（不在限速区 + 前方是上坡），
+ *   找到就停手。窗口内找不到就扩到 4 倍，再找不到才放弃。
+ *   普通关（≤78,000px）的行为因此逐位不变 —— 窗口已覆盖全程。
+ *
+ * @param {number} seed 设计落点（x）
+ * @returns {number|null} 落点 x；找不到返回 null
+ */
+function pickBoostSpot(L, hazards, seed, tooClose) {
+  const inHazardZone = (x) => hazards.some((h) => x > h.x0 - BOOST_HAZARD_GAP && x < h.x1 + BOOST_HAZARD_GAP);
+  let win = 120000;
+  for (let attempt = 0; attempt < 3; attempt++, win *= 4) {
+    const lo = Math.max(120, seed - win);
+    const hi = Math.min(L.len - 320, seed + win);
+    if (hi <= lo) return null;
+    // 首选：前方迎面是上坡且不在限速区；兜底：只要不在限速区
+    let bestSpot = null, bestSafe = null;
+    for (let x = lo; x <= hi; x += 12) {
+      if (inHazardZone(x) || tooClose(x)) continue;
+      if (bestSafe === null || Math.abs(x - seed) < Math.abs(bestSafe - seed)) bestSafe = x;
+      if (groundInfo(x).m < 0.25 && groundInfo(x + 240).m < -0.35) {
+        if (bestSpot === null || Math.abs(x - seed) < Math.abs(bestSpot - seed)) bestSpot = x;
+      }
+    }
+    if (bestSpot !== null) return bestSpot;
+    if (bestSafe !== null) return bestSafe;
+  }
+  return null;
+}
+
+/**
  * 构建关卡（金币、油罐、加速带、装饰、机制实体、环境物理）。
  *
  * ★ 不接收关卡下标：唯一事实来源是 `store.selLevel`（"当前选中关卡"）。
@@ -183,8 +379,15 @@ export function buildLevel() {
   const idx = store.selLevel;
   // ★ 赛事走专用赛道（R6.1，见 levels.js 的 RACE_COURSE 注释）：
   //   AI 与地形必须取同一条，否则会出现"车跑在 A 赛道上、地形却是 B 的"。
-  const L = courseAt(idx, store.mode);
+  //   宇宙场多传一个玩家极速（长度 = 极速 × 360s）。
+  const L = courseAt(idx, store.mode, store.phys.topSpeed);
   const rng = mulberry32(1000 + idx * 97);
+  // 流式模式：chunk 生成器要读回这条赛道（seed / len / 主题），存模块态
+  currentL = L;
+  world.chunks = new Map();
+  world.takenX = new Set();
+  world.chunksDirty = false;
+  lastLo = -1; lastHi = -1;   // 强制 streamChunks 重建第一屏
   store.finishX = L.len;
   const th0 = segmentThemeAt(L, 0);
   store.phys.theme = th0;
@@ -195,10 +398,14 @@ export function buildLevel() {
   store.phys.traction = T.traction;
 
   // ---------------- 金币 ----------------
+  // ★ 只有非流式关卡在这里一次性铺开；流式关卡（宇宙场）改由 chunk 生成，
+  //   否则 10 亿 px 的赛道要在开局铺 5 万枚金币 + 7700 万个装饰。
   const coins = [];
-  for (let i = 0; i < L.coinN; i++) {
-    const cx = L.len * 0.15 + (i * (L.len * 0.75)) / (L.coinN - 1);
-    coins.push({ x: cx, y: groundY(cx) - 35, taken: false, ph: rng() * 6.28, coinVal: L.coinVal || 30 });
+  if (!L.streaming) {
+    for (let i = 0; i < L.coinN; i++) {
+      const cx = L.len * 0.15 + (i * (L.len * 0.75)) / (L.coinN - 1);
+      coins.push({ x: cx, y: groundY(cx) - 35, taken: false, ph: rng() * 6.28, coinVal: L.coinVal || 30 });
+    }
   }
 
   // ---------------- 油罐 ----------------
@@ -255,6 +462,10 @@ export function buildLevel() {
 
   const hazards = buildHazards(L, mulberry32(9000 + idx * 173));
 
+  // ---------------- 装饰（仅非流式关卡）----------------
+  // 流式关卡的装饰由 buildChunk 按 chunk 生成，这里跳过。
+  const deco = L.streaming ? { fore: [], back: [] } : buildDeco(L, mulberry32(5000 + idx * 131));
+
   // ---------------- 加速带 ----------------
   // 铺在"前方迎面是上坡"的位置；越到后期越少（前期教学友好，后期靠自己）。
   // ★ 不得落在限速区（危险段）内，也不得落在其前方 BOOST_HAZARD_GAP 内：
@@ -264,41 +475,26 @@ export function buildLevel() {
   // 保证任何关卡都至少能放下一条（高难关危险段长，单点向前找会整关落空）。
   const boosts = [];
   const boostN = Math.max(1, 3 - Math.round(L.ramp * 2));
-  const inHazardZone = (x) => hazards.some((h) => x > h.x0 - BOOST_HAZARD_GAP && x < h.x1 + BOOST_HAZARD_GAP);
-  const spots = []; // 首选：前方迎面是上坡 且 不在限速区
-  const safe = [];  // 兜底：仅要求不在限速区（硬约束只有这一条）
-  for (let x = 120; x <= L.len - 320; x += 12) {
-    if (inHazardZone(x)) continue;
-    safe.push(x);
-    if (groundInfo(x).m < 0.25 && groundInfo(x + 240).m < -0.35) spots.push(x);
-  }
   const used = [];
-  const pick = (list, seed) => {
-    let best = null;
-    for (const x of list) {
-      if (used.some((u) => Math.abs(u - x) < 600)) continue;
-      if (best === null || Math.abs(x - seed) < Math.abs(best - seed)) best = x;
-    }
-    return best;
-  };
+  const tooClose = (x) => used.some((u) => Math.abs(u - x) < 600);
   for (let k = 1; k <= boostN; k++) {
     const seed = L.len * (0.12 + (0.76 * k) / (boostN + 1));
-    let bx = pick(spots, seed);
-    if (bx === null) bx = pick(safe, seed);
+    const bx = pickBoostSpot(L, hazards, seed, tooClose);
     if (bx === null) continue; // 全程都落在限速区（含刹车距离）内 → 不放，绝不塞进限速区
     used.push(bx);
     boosts.push({ x: bx, y: groundY(bx) - 4, taken: false, ph: rng() * 6.28 });
   }
 
-  const deco = buildDeco(L, mulberry32(5000 + idx * 131));
-  world.coins = coins;
   world.canisters = canisters;
   world.boosts = boosts;
-  world.decoFore = deco.fore;
-  world.decoBack = deco.back;
+  world.coins = coins;
+  world.decoFore = L.streaming ? [] : deco.fore;
+  world.decoBack = L.streaming ? [] : deco.back;
   world.hazards = hazards;
   world.gates = buildGates(L);
   world.jumps = buildJumps(L);
+  // ★ 流式关卡立刻铺第一屏的 chunk（buildLevel 时相机还停在 x=0）
+  if (L.streaming) streamChunks();
 }
 
 /**
@@ -451,6 +647,10 @@ export function updateCoins() {
     c.ph += 0.05; // 自转相位固定步推进：原在 drawCoins() 里按渲染帧自增，120/144Hz 屏上转速翻倍
     if (Math.hypot(c.x - mx, c.y - my) < 45) {
       c.taken = true;
+      // ★ 流式模式：chunk 被丢弃后重新生成会得到全新实体对象，c.taken 就丢了。
+      //   按 x 坐标记进 takenX，"吃过的金币"才不会被重新生成回来。
+      world.takenX.add(c.x);
+      world.chunksDirty = true;      // 让 streamChunks 下次重建数组
       store.run.coinGot++;
       // 单枚面值随关卡进度递增（30 → 60），与 coinN 相乘后单关总产出 720 → 4320
       addGold(c.coinVal || 30);

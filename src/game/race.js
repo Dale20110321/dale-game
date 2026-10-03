@@ -12,7 +12,7 @@
 //  · 排位赛（ranked）：基准 rankedAIScale(rating, advanced)×den3，不带追赶——
 //    段位赛是纯粹的配速检验，段位越高越接近、乃至超过三星节奏。
 import { START_X, RATING_PEAK, RATING_TOP, RACE_FORMATS, PLAYER_TEAM, RIVAL_TEAM, racePlaceOf, buildRacers } from "../config/constants.js";
-import { courseAt } from "../config/levels.js";
+import { courseAt, spaceAIScale, SPACE_TIERS, spaceTierOf } from "../config/levels.js";
 import { store, bike } from "../core/store.js";
 import { groundInfo } from "../physics/terrain.js";
 import { emitParticles } from "../render/particles.js";
@@ -104,9 +104,19 @@ export function racePlace(list, playerX) {
   return racePlaceOf(list, playerX, raceFormat());
 }
 
-export function raceInit(format) {
-  store.raceFormat = format && RACE_FORMATS[format] ? format : "duel";
-  const built = buildRacers(store.raceFormat);
+/**
+ * 建立本场的 AI 阵容。
+ *
+ * @param {string} format 赛制 id
+ * @param {boolean} [keepFormat=false] 只借这个赛制生成阵容，**不改** store.raceFormat。
+ *   ★ 宇宙场传 true：它固定用 5 人阵容（melee）来营造"同场多人"的观感，
+ *   但那是宇宙场的内部实现细节 —— 写进 store.raceFormat 会把玩家在比赛面板
+ *   选的赛制（1V1 / 团队接力）悄悄改成多人竞技，下次进比赛就变样了。
+ */
+export function raceInit(format, keepFormat) {
+  const f = format && RACE_FORMATS[format] ? format : "duel";
+  if (!keepFormat) store.raceFormat = f;
+  const built = buildRacers(f);
   store.racers = built.r;
   store.raceAI = raceDecider(store.racers);
 }
@@ -146,5 +156,34 @@ export function raceUpdate(dt) {
   }
 
   // 下游（HUD 差距显示、胜负判定）只认一个"决定性对手"，这里每帧刷新
+  store.raceAI = raceDecider(list);
+}
+
+/**
+ * 宇宙场 AI（R3.3 / R3.4）。
+ *
+ * ★ 与普通比赛的关键差别：配速由 `spaceAIScale(玩家实际极速, 分级)` 解算，
+ *   **不看 den3**（den3 在宇宙场等于该分级的基准速度，是"赛道长度"的定义，
+ *   不是"对手该多快"的定义）。Lv0 玩家看到的是几百 km/h 量级的 AI，
+ *   Lv500 玩家看到的是接近 50,000 km/h 的 AI。
+ * ★ 无追赶修正：宇宙场是配速检验，追赶会让"分级"失去意义。
+ */
+export function spaceUpdate(dt) {
+  const list = store.racers;
+  if (!list || !list.length) return;
+  const target = spaceAIScale(store.phys.topSpeed, SPACE_TIERS[spaceTierOf()] || SPACE_TIERS[0]);
+  for (const ai of list) {
+    if (ai.finish) continue;
+    if (groundInfo(ai.x).y === Infinity) continue;
+    ai.spd += (target * ai.bias - ai.spd) * Math.min(1, dt * 3);
+    ai.x += ai.spd * dt;
+    if (store.finishX !== Infinity && ai.x >= store.finishX) {
+      ai.finish = true;
+      const gy = groundInfo(store.finishX);
+      if (gy !== Infinity) {
+        emitParticles(store.finishX, gy.y - 20, 16, { color: token("danger"), spd: 3, life: 30, size: 4, grav: 0.03 });
+      }
+    }
+  }
   store.raceAI = raceDecider(list);
 }

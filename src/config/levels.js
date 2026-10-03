@@ -1050,6 +1050,145 @@ export const RACE_COURSE = (() => {
 /** 最终任务的全局索引（= LEVELS.length）：LEVELS 之后的一个逻辑关卡 */
 export const FINALE_INDEX = LEVELS.length;
 
+// ---------------- 宇宙场（R3） ----------------
+/** 宇宙场模式标识（store.mode 的第 5 个取值） */
+export const MODE_SPACE = "space";
+
+/**
+ * 5 个难度分级的定义表（R3.2）。
+ *
+ * | 分级 | 难度取向 | 关卡时长 |
+ * |---|---|---|
+ * | 易   | 长直坡、地形平缓 | 6 分钟 |
+ * | 中   | 中等起伏 | 6 分钟 |
+ * | 难   | 起伏加剧 | 6 分钟 |
+ * | 极难 | 陡坡密布 | 6 分钟 |
+ * | 终极 | 全地形 | 6 分钟 |
+ *
+ * ★ **长度按玩家实际极速缩放**（实施时修订，原 R3.2 写的是固定 10/50/100/250/500 Mpx）：
+ *   `len = 玩家极速 × 360s`，于是**任何车进任何分级都刚好跑满 6 分钟**。
+ *
+ *   为什么必须改：AI 配速早就改成"玩家极速 ×0.9"了（见 spaceAIScale），
+ *   长度却还钉在"某台参考车 × 6 分钟"上，两者直接打架 ——
+ *   实测归墟（1000 km/h）跑终极级需要 **5 小时**，面板却写着"6 分钟"。
+ *   玩家看到的是"6 分钟"，实际要开一整天。
+ *   另一条路是给分级加车辆门槛，但那样归墟只能进「易」级，
+ *   宇宙场对它几乎没用武之地（而它恰恰是任务换来的第一台车）。
+ *
+ *   分级的难度改由**地形**承担：segs（分段数）与 slopeDeg（坡度上限）逐级递增，
+ *   越高的分级坡越陡、段落切换越频繁 —— 这才是"难"的正确载体。
+ *
+ * ★ 可用的太空场景下标：themes.js 里 `bg.space === true` 的 4 个
+ *   （3 月面 / 11 极夜星空 / 24 冰晶湖 / 34 观星台），
+ *   它们都自带视差天体（earth / moon / ringed），R3.1 不需要新写渲染代码。
+ * ★ kmh 只用于**面板上的对照文案**（"参考配速"），不参与长度与 AI 计算。
+ */
+export const SPACE_TIERS = [
+  { id: "easy", name: "易", icon: "🌑", kmh: 1000, segs: 12, slopeDeg: 26, gold: 4e10, themes: [3, 11, 24, 34] },
+  { id: "mid", name: "中", icon: "🪐", kmh: 5000, segs: 18, slopeDeg: 22, gold: 2.4e13, themes: [24, 34, 3, 11] },
+  { id: "hard", name: "难", icon: "🌌", kmh: 10000, segs: 24, slopeDeg: 18, gold: 1.08e17, themes: [34, 3, 24, 11] },
+  { id: "brutal", name: "极难", icon: "⚫", kmh: 25000, segs: 30, slopeDeg: 14, gold: 5.184e21, themes: [3, 34, 11, 24] },
+  { id: "final", name: "终极", icon: "🌠", kmh: 50000, segs: 36, slopeDeg: 10, gold: 1.5552e24, themes: [11, 24, 34, 3] },
+];
+
+/** 宇宙场的目标时长（秒）：任何车、任何分级都跑满这么久 */
+export const SPACE_TARGET_SEC = 360;
+
+/**
+ * 该分级的赛道长度（px）= 玩家实际极速 × SPACE_TARGET_SEC。
+ *
+ * @param {object} tier SPACE_TIERS 的一项
+ * @param {number} playerTop 玩家当前实际极速（px/s）
+ */
+export const spaceLenOf = (tier, playerTop) =>
+  Math.round(Math.max(1, playerTop || 1) * SPACE_TARGET_SEC);
+
+/**
+ * 宇宙场赛道（惰性构建 + 按长度缓存）。
+ *
+ * ★ 缓存键必须**含长度**：同一分级下不同车速得到不同长度的赛道，
+ *   只按 tier.id 缓存会让第二台车拿到第一台车的赛道。
+ *   键用"长度分桶"（按 4096px 向上取整）而不是精确长度 ——
+ *   否则每帧极速的微小抖动都会生成一条新赛道。
+ */
+const spaceCache = new Map();
+export function spaceCourse(tierIdx, playerTop) {
+  const t = SPACE_TIERS[tierIdx];
+  if (!t) return null;
+  const len = spaceLenOf(t, playerTop);
+  const key = t.id + ":" + Math.ceil(len / 4096);
+  if (spaceCache.has(key)) return spaceCache.get(key);
+  const base = buildLongCourse({
+    name: `宇宙场 · ${t.name}`,
+    len,
+    segs: t.segs,
+    slopeDeg: t.slopeDeg,
+    seed: 0x5ace00 + tierIdx * 7919,
+    themes: t.themes,
+  });
+  const L = {
+    ...base,
+    // ★ 实体密度按"每秒几个"给，而不是按每 px 几个：
+    //   长度已经随车速缩放，用 px 密度会让无相的赛道（= 极速×360s）实体数暴涨。
+    coinN: 0,          // 由下面按 playerTop 算
+    ramp: 0.5,
+    den3: Math.max(1, playerTop || 1),   // AI 与三星节奏共用玩家极速基准
+    // ★ fuelK = 0：需求 need = len/range，而 range = vAvg/kAvg，kAvg ∝ fuelK →
+    //   fuelK = 0 时 kAvg = 0 → range = ∞ → need = 0，一箱都不用加。
+    //   这正是宇宙场该有的手感（omega 形态本来就 noFuel，其余车等效）。
+    fuelK: 0,
+    mech: 1.3,
+    hazardN: 0,        // 同上
+    gateN: 0,
+    variant: "normal",
+    theme: t.themes[0],
+    mood: "gauntlet",
+    spaceTier: t.id,
+    // 宇宙场专用：赛道极长，实体必须**流式生成**（见 world.js 的 CHUNK_*）
+    streaming: true,
+  };
+  // ★ 密度按"每几秒一个"给，与车速无关 —— 长度已经随车速缩放，
+  //   用 px 密度会让无相的赛道（= 极速×360s）实体数暴涨。
+  //   每 3 秒一枚金币：6 分钟共 120 枚，沿途始终有东西可捡，
+  //   但对 10 亿 px 的赛道也只占 120 个对象（可忽略）。
+  L.coinN = Math.max(8, Math.round(SPACE_TARGET_SEC / 3));
+  L.hazardN = Math.max(2, Math.round(SPACE_TARGET_SEC / 90));
+  L.coinVal = Math.max(1, Math.round(t.gold / (L.coinN * 20)));   // 赛道金币合计 ≈ 分级奖金的 5%
+  fitSlope(L, t.slopeDeg);
+  spaceCache.set(key, L);
+  // 缓存只留最近 6 条：玩家换车 / 换分级会不断产生新长度的赛道，
+  // 无上限地留着会让地形数组（每条几万个 steps/feats）持续堆积。
+  if (spaceCache.size > 6) spaceCache.delete(spaceCache.keys().next().value);
+  return L;
+}
+
+/**
+ * 宇宙场的 AI 配速（R3.3 / R3.4）。
+ *
+ * ★ 核心口径：AI 取玩家**当前车辆实际极速**的 0.9 倍，而不是全局固定值。
+ *   Lv0 归墟（~90 km/h）→ AI 81 km/h，慢于玩家 → 玩家能赢；
+ *   满级归墟（1000 km/h）→ AI 900 km/h，明显更快；
+ *   无相（100,000 km/h）→ 90,000 被 cap 钳到 50,000 → 玩家稳赢。
+ *
+ * ★ tier.kmh **完全不参与**配速：它只是面板上的"参考配速"文案。
+ *   早先把它当"AI 该多快"的下限，结果 Lv0 玩家参赛时 AI 反而快 1.3~67 倍，
+ *   "AI 不会因为玩家车弱而必胜"整条落空。
+ *
+ * @param {number} playerTop 玩家当前实际极速（px/s）
+ * @param {object} tier      SPACE_TIERS 的一项（保留参数，签名与调用方一致）
+ * @returns {number} AI 配速（px/s），已钳在 50000 km/h
+ */
+export function spaceAIScale(playerTop, tier) {
+  void tier;
+  const KM = (v) => (v / 3.6) * 100; // px/s → km/h
+  const cap = KM(50000);
+  const player = Math.max(1, playerTop || 0);
+  // ★ 单一公式：恒为玩家的 0.9 倍，再钳在 50000 km/h。
+  //   长度、配速、金币三者现在都以玩家极速为基准，口径统一，
+  //   "6 分钟 / AI 90% / 稳赢或可赢"三条验收在任何车上都自洽。
+  return Math.min(player * 0.9, cap);
+}
+
 // ---------------- 关卡访问（含最终任务） ----------------
 
 /** 按全局索引取关卡定义：0~431 为支线关，FINALE_INDEX 为最终任务 */
@@ -1069,10 +1208,49 @@ export function levelAt(idx) {
  * 注意：**物理层与渲染层也必须走这里**，不能只让 world.js 换赛道 ——
  *   physics/terrain.js 的 hillY 直接读 levelAt(store.selLevel)，
  *   若只改 world.js，AI 会跑在 A 赛道上而地形仍是 B 的。
+ *
+ * ★ 宇宙场多一个参数：赛道长度 = 玩家极速 × 360s，所以必须传极速。
+ *   缺省回落到 27778 px/s（= 1000 km/h，归墟标称），
+ *   保证任何忘了传参的调用方都能拿到一条长度合理的赛道而不是长度 0。
  */
-export function courseAt(idx, mode) {
+export function courseAt(idx, mode, playerTop) {
+  // 宇宙场：优先用 startGame 钉好的那条赛道（见 spaceCourseOf）
+  if (mode === MODE_SPACE) return spacePinned || spaceCourse(spaceTier, playerTop || 27778) || RACE_COURSE;
   return mode === "race" || mode === "ranked" ? RACE_COURSE : levelAt(idx);
 }
+
+/**
+ * 宇宙场当前分级的下标。
+ * ★ 放在 config 层而不是 store：courseAt 被 physics/terrain.js 的**热路径**
+ *   （每帧每子步）调用，而 config ← core 是单向依赖的既定分层 ——
+ *   若 levels.js 去 import store.js 就构成了反向依赖。
+ *   用一个模块级变量 + setter 保持单向，写入方仍是 game 层。
+ */
+let spaceTier = 0;
+export function setSpaceTier(i) {
+  spaceTier = Math.max(0, Math.min(SPACE_TIERS.length - 1, i | 0));
+}
+/** 读当前分级下标（供 game/race.js 结算与 AI 配速取用） */
+export const spaceTierOf = () => spaceTier;
+
+/**
+ * 宇宙场本局钉住的赛道（startGame 时算一次，之后所有 courseAt 调用都返回它）。
+ *
+ * ★ 为什么必须"钉住"而不是每次重算：courseAt 有 6 个调用点，
+ *   其中 physics/terrain.js 那个在**每个物理子步**上。赛道长度依赖玩家极速，
+ *   而极速在一局之内会变（升级、形态、上下坡）——
+ *   若每次都重算，terrain 用的赛道和 world.js 建实体的赛道就会**不是同一条**，
+ *   症状是"车飘在半空 / 掉出地图 / AI 跑在另一张图上"。
+ *   这正是本函数注释里"AI 与地形必须取同一条，否则会出现车跑在 A 赛道上、
+ *   地形却是 B 的"那条老 bug 的宇宙场版本。
+ *
+ *   钉住之后，一局之内长度恒定 —— 这也是"6 分钟"成立的前提。
+ */
+let spacePinned = null;
+export function pinSpaceCourse(L) {
+  spacePinned = L || null;
+}
+export const spaceCourseOf = () => spacePinned;
 
 /** 该关卡是否定义了"场景分段"（最终任务多场景串联用） */
 export function hasSegments(L) {

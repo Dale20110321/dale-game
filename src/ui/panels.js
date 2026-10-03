@@ -1,4 +1,4 @@
-// 面板：支线任务 / 比赛 / 最终任务 / 排位赛 / 无限模式 / 车库 / 成就 / 存档
+﻿// 面板：支线任务 / 比赛 / 最终任务 / 排位赛 / 无限模式 / 车库 / 成就 / 存档
 //  · 支线面板：12 张支线卡片（场景主题 / 完成度 / 总星）→ 点开才渲染该支线 6 个关卡格
 //  · 全部面板交互走 #modePanel 上的事件委托（面板 HTML 重绘不会丢监听）
 //  · 本模块只 import 其它层，绝不反向被 import
@@ -10,11 +10,13 @@ import {
 } from "../config/constants.js";
 import { THEMES } from "../config/themes.js";
 import {
-  LEVELS, BRANCHES, LEVELS_PER_BRANCH, N_BRANCHES, FINALE, FINALE_INDEX,
+  LEVELS, BRANCHES, LEVELS_PER_BRANCH, N_BRANCHES, FINALE, FINALE_INDEX, FINALE_SEGS,
   branchLevel, globalIndexOf, branchOfGlobal, branchProgress, starTime, VARIANT_INFO,
+  SPACE_TIERS, spaceLenOf, spaceAIScale, SPACE_TARGET_SEC,
 } from "../config/levels.js";
 import { VEHICLES } from "../config/vehicles.js";
 import { store, uiHooks } from "../core/store.js";
+import { abbrevNum } from "../core/utils.js";
 import {
   save, downloadSave, parseSave, importSave, resetSave,
   isStorageAvailable, availableFreeThemes, isAdvancedUnlocked,
@@ -23,11 +25,12 @@ import {
 import { showToast } from "../core/toast.js";
 import { initAudio, playCoinSound } from "../core/audio.js";
 import { hasAch, clearedCount } from "../game/progress.js";
+import { spaceQuestState, claimSpaceQuest } from "../game/game.js";
 import { rankedAIScale } from "../game/race.js";
 import { getQuality, setQuality, QUALITY, QUALITY_LABEL } from "../render/postfx.js";
 import { getRenderScale, setRenderScalePersisted, RENDER_SCALES, RENDER_SCALE_LABEL } from "../render/postfx.js";
 import { showPanel, hidePanel, showMenu, refreshMenuButtons } from "./menu.js";
-import { card, chip, badge, statRow, emptyState, themeVars } from "./components.js";
+import { card, chip, badge, statRow, emptyState, themeVars, progress } from "./components.js";
 
 let api = {};
 /** 支线墙面板：当前展开的支线下标（-1 = 全部收起）与面板种类（level | race） */
@@ -86,14 +89,14 @@ export function initPanels(a) {
 
 /** 玩法 tab 切换：闯关/比赛渲染关卡地图；排位/无限走全屏面板 */
 export function selectMode(mode) {
-  const m = mode === "race" || mode === "ranked" || mode === "free" ? mode : "level";
+  const m = mode === "race" || mode === "ranked" || mode === "free" || mode === "space" ? mode : "level";
   for (const b of document.querySelectorAll("#modeTabs .mtab")) {
     const on = b.dataset.mode === m;
     b.classList.toggle("is-on", on);
     b.setAttribute("aria-selected", on ? "true" : "false");
   }
   if (m === "level" || m === "race") {
-    // 从"排位/无限"切回地图时，上一个面板还开着，必须先收起来，
+    // 从"排位/无限/宇宙"切回地图时，上一个面板还开着，必须先收起来，
     // 否则 modePanel 会盖住刚渲染好的关卡地图。
     hidePanel();
     if (homeView) homeView.style.display = "";
@@ -101,6 +104,7 @@ export function selectMode(mode) {
   } else {
     if (homeView) homeView.style.display = "none";
     if (m === "ranked") renderRankedPanel();
+    else if (m === "space") renderSpacePanel();
     else renderFreePanel();
   }
 }
@@ -171,14 +175,23 @@ function finaleTile() {
   const total = LEVELS.length;
   const unlocked = done >= total;
   const cleared = store.progress.finaleDone === true;
+  // ★ 断点续玩进度（R1.3）：finaleSeg = 已通过的段数，0 = 从头开始。
+  //   终局关是 167km / 36 段的超长赛道，进度必须以"段"为单位可见 ——
+  //   右侧那个 done/total 是 432 关主线的通关数，与终局关自身进度无关。
+  const seg = Math.max(0, Math.min(FINALE_SEGS, store.progress.finaleSeg || 0));
+  const segTxt = cleared
+    ? "36/36 段 ✅"
+    : seg > 0 ? `⏩ 从第 ${seg + 1} / ${FINALE_SEGS} 段继续` : `0 / ${FINALE_SEGS} 段`;
   return card({
     cls: "vehCard finaleTile",
     icon: unlocked ? "🎯" : "🔒",
+    // ★ 「依次穿越 6 个场景」是 Task 8 之前的旧文案（那时 FINALE 只有 6 段）。
+    //   FINALE_SEGS 早已改成 THEMES.length = 36，文案却没跟着改 —— 面板在骗人。
     title: FINALE.name,
-    sub: `${Math.round(toM(FINALE.len))}m · 依次穿越 6 个场景 · 坡度 ${Math.round(FINALE.maxSlope)}°`,
-    meta: cleared ? "✅ 已通关，可重复挑战"
-      : unlocked ? "已解锁 · 点击开始"
-        : `通关全部 ${total} 关后解锁`,
+    sub: `${Math.round(toM(FINALE.len))}m · 依次穿越 ${FINALE_SEGS} 个场景 · ${FINALE.gateN} 个计时门 · 坡度 ${Math.round(FINALE.maxSlope)}°`,
+    meta: (cleared ? "✅ 已通关，可重复挑战" : unlocked ? "已解锁 · 点击开始" : `通关全部 ${total} 关后解锁`)
+      + " · " + segTxt,
+    body: progress((seg / FINALE_SEGS) * 100, { label: "环大陆进度" }),
     right: unlocked ? "▶" : `${done}/${total}`,
     interactive: unlocked,
     locked: !unlocked,
@@ -254,6 +267,17 @@ function onPanelClick(e) {
       return;
     case "free":
       api.startGame("free", undefined, { theme: +el.dataset.theme });
+      return;
+    case "spaceStart":
+      api.startGame("space", undefined, { tier: +el.dataset.tier });
+      return;
+    case "spaceClaim":
+      if (claimSpaceQuest()) {
+        showToast("☄️ 已获得「归墟」！宇宙场向你开放", 2000, "success");
+        renderSpacePanel();
+      } else {
+        showToast("金币任务还没完成", 1200);
+      }
       return;
     case "quality":
       setQuality(el.dataset.q);
@@ -585,8 +609,8 @@ export function renderRankedPanel() {
     <div class="rankBar" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"
          aria-label="${rankName(rating)} 段内进度"><i style="width:${pct.toFixed(1)}%"></i></div>
     ${next
-      ? `<div class="rankSub">下一段「${next.name}」还差 <b>${next.min - rating}</b> 分 · 升段奖励 🪙 ${next.reward.toLocaleString()}</div>`
-      : `<div class="rankSub">段位表已刷满 · 累计升段奖励 🪙 ${RANKS.reduce((a, r) => a + r.reward, 0).toLocaleString()}</div>`}
+      ? `<div class="rankSub">下一段「${next.name}」还差 <b>${next.min - rating}</b> 分 · 升段奖励 🪙 ${abbrevNum(next.reward)}</div>`
+      : `<div class="rankSub">段位表已刷满 · 累计升段奖励 🪙 ${abbrevNum(RANKS.reduce((a, r) => a + r.reward, 0))}</div>`}
   </div>
   ${invited ? "" : `<div class="panelNote">🔒 尚未收到排位赛邀请：通关「最终任务」后解锁</div>`}
   ${rankedTier(false, "普通排位赛", `AI 配速随段位分提升（三星节奏的 ${paceRange(false)}）`,
@@ -603,7 +627,7 @@ export function renderRankedPanel() {
         <span class="rkMin">${r.min}</span>
         <span class="rkName">${r.name}</span>
         <span class="rkStar" aria-label="${got} 星">${i === 0 ? "" : "★".repeat(got) + "☆".repeat(3 - got)}</span>
-        <span class="rkRew">${r.reward ? "🪙 " + r.reward.toLocaleString() : "—"}</span>
+        <span class="rkRew">${r.reward ? "🪙 " + abbrevNum(r.reward) : "—"}</span>
       </li>`;
     }).join("")}</ol>
     <div class="panelNote">升段奖励只在首次跨过该段门槛时发一次（掉段再升回来不补发）；
@@ -651,6 +675,82 @@ export function renderFreePanel() {
   <button class="btn backBtn" data-act="back">返回</button>`);
 }
 
+// ---------------- 宇宙场 ----------------
+/**
+ * 距离的紧凑写法（宇宙场面板用）。
+ *
+ * ★ 为什么不能直接 `abbrevNum`：赛道长度按玩家极速缩放，无相满级是
+ *   **10 亿 px = 10 万 km**，走"万/亿"档会显示成"1万万千公里"这种没人读的串。
+ *   距离的单位天然是 km，量级也天然跨越很宽，所以单列一套：
+ *   <1000 km 直接写，<1e6 km 用「万 km」，再往上用科学计数。
+ */
+function abbrevLen(px) {
+  const km = px / 1e5;              // 100px = 1m → 100,000px = 1km
+  if (km < 1000) return Math.round(km) + " km";
+  if (km < 1e6) return Math.round(km / 1e4) + " 万 km";
+  return abbrevNum(km) + " km";
+}
+
+/**
+ * 宇宙场面板（R3.1~R3.6）。
+ *
+ * 无宇宙级车时先弹金币任务说明（R3.5）：不提供"直接开跑"的入口，
+ * 因为宇宙场是本作的中长期目标，白嫖会跳过整个经济曲线。
+ */
+export function renderSpacePanel() {
+  const q = spaceQuestState();
+  const pending = store.pendingSpace;
+  store.pendingSpace = false;
+
+  if (q.hasQuest) {
+    showPanel(`<div class="modeTitle">🌌 宇宙场 · 金币任务</div>
+      ${pending ? `<div class="panelNote">完成下面的任务即可获得基础宇宙车「归墟」</div>` : ""}
+      ${card({
+        cls: "vehCard",
+        icon: "☄️",
+        title: "累计赚取 " + abbrevNum(q.need, { yuan: true }),
+        sub: "完成后可获得基础宇宙车「归墟」（¥8亿 · 极速 1000 km/h）",
+        meta: `进度 ${abbrevNum(q.got)} / ${abbrevNum(q.need)}（${Math.round(q.progress * 100)}%）`,
+        body: progress(q.progress * 100, { label: "金币任务" }),
+        interactive: q.got >= q.need,
+        locked: q.got < q.need,
+        attrs: q.got >= q.need ? 'data-act="spaceClaim"' : "",
+      })}
+      ${q.got < q.need
+        ? `<div class="panelNote">金币来自通关、赛道拾取、比赛名次与段位奖励。${pending ? "点击下方返回可稍后再来。" : ""}</div>`
+        : `<div class="panelNote">✅ 条件已达成，点击上方卡片领取归墟</div>`}
+      <button class="btn backBtn" data-act="back">返回</button>`);
+    return;
+  }
+
+  const cur = VEHICLES[store.currentVehicle];
+  // ★ 必须用**实车**极速（store.phys.topSpeed，已含升级与形态），
+  //   不能用 nominalKmh（形态标称）：Lv0 归墟实车只有约 90 km/h，
+  //   拿标称 1000 去算会显示"对手 ≈900 km/h"，与真实开局差一个数量级。
+  //   实车极速由 applyUpgrades 维护，进入菜单时已算好。
+  const topPx = store.phys.topSpeed > 1 ? store.phys.topSpeed : (cur ? (cur.nominalKmh || 60) * (100 / 3.6) : 1667);
+  const topKmh = Math.round(toKmh(topPx));
+  showPanel(`<div class="modeTitle">🌌 宇宙场</div>
+    <div class="panelNote">太空背景 · 5 个难度分级 · <b>每个分级都按你的车速跑满 6 分钟</b>（换车后面板上的距离会跟着变）。AI 按你的实际极速配速。</div>
+    ${SPACE_TIERS.map((t, i) => {
+      const len = spaceLenOf(t, topPx);
+      const ai = spaceAIScale(topPx, t);
+      return card({
+        cls: "vehCard",
+        icon: t.icon,
+        title: `宇宙场 · ${t.name}`,
+        sub: `${abbrevLen(len)} · ${SPACE_TARGET_SEC / 60} 分钟 · ${t.segs} 段地形`,
+        meta: `对手配速 ≈ ${abbrevNum(Math.round(toKmh(ai)))} km/h（你的 ${Math.round((ai / topPx) * 100)}%）· 通关 🪙${abbrevNum(t.gold)}`,
+        interactive: true,
+        attrs: `data-act="spaceStart" data-tier="${i}"`,
+      });
+    }).join("")}
+    <div class="panelNote">当前车辆：${cur ? cur.name : "—"}（${abbrevNum(topKmh)} km/h）。
+      AI 恒为你的 90%，上限 50,000 km/h —— 你永远跑得过他们，但磨蹭仍会输。
+      越高难的分级坡越陡、段落切换越频繁。</div>
+    <button class="btn backBtn" data-act="back">返回</button>`);
+}
+
 // ---------------- 车库 ----------------
 
 /**
@@ -695,9 +795,14 @@ function vehStatGrid(v) {
   </div>`;
 }
 
-/** 档位徽标：价格阶梯之外的第二层信息（同名档位一眼可辨） */
+/**
+ * 档位徽标：价格阶梯之外的第二层信息（同名档位一眼可辨）。
+ * ★ 必须覆盖 vehicles.js 里**全部** tier 取值，缺一个那组就退化成无 class
+ *   （灰底白字，与其它组视觉上无差别）。宇宙档是 Task 7 新增的，
+ *   加了 6 台车却忘了加 tier5 —— 那 6 台能列出来但整组没有专属配色。
+ */
 const TIER_CLS = {
-  普通: "tier0", 稀有: "tier1", 史诗: "tier2", 传说: "tier3", 神话: "tier4",
+  普通: "tier0", 稀有: "tier1", 史诗: "tier2", 传说: "tier3", 神话: "tier4", 宇宙: "tier5",
 };
 
 /**
@@ -722,7 +827,7 @@ export function renderGaragePanel() {
     const lo = prices.length ? Math.min(...prices) : 0;
     const hi = prices.length ? Math.max(...prices) : 0;
     const owned = g.items.filter((x) => store.ownedVehicles.includes(x.i)).length;
-    const range = lo === hi ? lo.toLocaleString() : lo.toLocaleString() + " → " + hi.toLocaleString();
+    const range = lo === hi ? abbrevNum(lo) : abbrevNum(lo) + " → " + abbrevNum(hi);
     return `<section class="vehGroup">
       <h3 class="vehGroupHead ${TIER_CLS[g.tier] || ""}">
         <b>${g.tier}</b>
@@ -737,7 +842,7 @@ export function renderGaragePanel() {
           title: v.name + `<span class="vehTier ${TIER_CLS[v.tier] || ""}">${v.tier}</span>`,
           sub: v.desc,
           body: vehStatGrid(v),
-          right: sel ? "✅<br>使用中" : own ? "已<br>拥有" : "🪙<br>" + v.price.toLocaleString(),
+          right: sel ? "✅<br>使用中" : own ? "已<br>拥有" : "🪙<br>" + abbrevNum(v.price),
           interactive: true,
           selected: sel,
           attrs: `data-act="veh" data-veh="${i}"`,
@@ -762,9 +867,9 @@ function buyBlock(v, i) {
   return `<div class="buyRow">
     <button class="btn buyNow${afford ? "" : " ghost"}" data-act="buyVeh" data-veh="${i}"
       ${afford ? "" : 'aria-disabled="true"'}>
-      🪙 立即购买并使用 · ${v.price.toLocaleString()}
+      🪙 立即购买并使用 · ${abbrevNum(v.price)}
     </button>
-    <div class="buyHint">${afford ? "点击即可购买并切换到这台车" : "还差 " + lack.toLocaleString() + " 金币"}</div>
+    <div class="buyHint">${afford ? "点击即可购买并切换到这台车" : "还差 " + abbrevNum(lack) + " 金币"}</div>
   </div>`;
 }
 
@@ -787,8 +892,8 @@ function buyVehicleNow(i) {
   const lack = Math.max(0, v.price - store.gold);
   if (lack > 0) {
     const n = note();
-    if (n) n.textContent = "金币不足，还差 " + lack.toLocaleString() + " 🪙（需要 " + v.price.toLocaleString() + "）";
-    showToast("🪙 还差 " + lack.toLocaleString() + " 金币", 1100);
+    if (n) n.textContent = "金币不足，还差 " + abbrevNum(lack) + " 🪙（需要 " + abbrevNum(v.price) + "）";
+    showToast("🪙 还差 " + abbrevNum(lack) + " 金币", 1100);
     return;
   }
   store.gold -= v.price;
@@ -831,7 +936,7 @@ function ultraBlock(v, i) {
     return `<div class="ultraRow lock">🔒 ${v.ultra.icon} ${v.ultra.name}：${v.ultra.desc}${fxLine(v)}（全部升级满级 Lv${maxLvOf(v)} 后解锁）</div>`;
   }
   return `<div class="ultraRow buy">
-    <button class="btn sm" data-act="buyUltra" data-veh="${i}">${v.ultra.icon} 解锁「${v.ultra.name}」 · ${v.ultra.cost.toLocaleString()} 🪙</button>
+    <button class="btn sm" data-act="buyUltra" data-veh="${i}">${v.ultra.icon} 解锁「${v.ultra.name}」 · ${abbrevNum(v.ultra.cost)} 🪙</button>
     <div class="ultraDesc">${v.ultra.desc}${fxLine(v)}</div>
   </div>`;
 }
@@ -848,7 +953,7 @@ function buyUltra(i) {
     return;
   }
   if (store.gold < v.ultra.cost) {
-    showToast("🪙 金币不足，需要 " + v.ultra.cost.toLocaleString(), 900);
+    showToast("🪙 金币不足，需要 " + abbrevNum(v.ultra.cost), 900);
     return;
   }
   store.gold -= v.ultra.cost;
@@ -964,7 +1069,7 @@ export function renderSavePanel() {
     { label: "总星数", value: `${cur.stars}/${LEVELS.length * 3}` },
     { label: "段位分", value: `${rating} · ${rankName(rating)}` },
     { label: "成就", value: `${store.achGot.length}/${ACHS.length}` },
-    { label: "金币", value: `🪙 ${store.gold}` },
+    { label: "金币", value: `🪙 ${abbrevNum(store.gold)}` },
     { label: "累计里程", value: fmtKm(st.totalMeters) },
     { label: "累计时长", value: fmtHours(st.totalSeconds) },
     { label: "最后游玩", value: fmtDate(st.lastPlayed) },

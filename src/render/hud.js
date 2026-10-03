@@ -7,8 +7,9 @@
 //  · 其下：燃料条（无底板，数值右对齐）；右上：速度仪表（弧形量表 + 区间着色 + 数字）
 //  · 底部居中：按键指示；顶部居中：机制警告（危险段超速 / 限时门紧张）——有警告时左列整体下移，绝不遮挡
 import { ctx, view } from "../core/canvas.js";
-import { toKmh, toM, SPEEDLINE_V, SPEEDLINE_REF, RACE_FORMATS, racePlaceOf } from "../config/constants.js";
+import { toKmh, toM, SPEEDLINE_V, SPEEDLINE_REF, SPEEDLINE_WARP_V, SPEEDLINE_WARP_REF, RACE_FORMATS, racePlaceOf } from "../config/constants.js";
 import { LEVELS, VARIANT_INFO, levelAt, courseAt, FINALE_INDEX } from "../config/levels.js";
+import { abbrevNum } from "../core/utils.js";
 import { store, bike, world } from "../core/store.js";
 import { touchActive } from "../core/input.js";
 import { clamp } from "../core/utils.js";
@@ -25,8 +26,15 @@ import { getQuality } from "./postfx.js";
  * 1V1 / 排位赛返回空串 —— 那两种只有两个人的对决，名次没有信息量。
  */
 function placeTag() {
-  if (store.mode !== "race") return "";
-  const f = RACE_FORMATS[store.raceFormat] || RACE_FORMATS.duel;
+  // ★ 宇宙场也要名次：它固定 5 人阵容，"第 N / 6 名"是玩家唯一能看到的
+  //   与对手的差距反馈（spaceUpdate 里 AI 已按 90% 玩家极速推进）。
+  //   但它**不能读 store.raceFormat** —— 那是玩家在比赛面板选的赛制，
+  //   宇宙场是借 melee 阵容（见 race.js 的 raceInit 第二参数）。
+  const isSpace = store.mode === "space";
+  if (store.mode !== "race" && !isSpace) return "";
+  const f = isSpace
+    ? RACE_FORMATS.melee
+    : (RACE_FORMATS[store.raceFormat] || RACE_FORMATS.duel);
   if (f.riders < 2) return "";
   const p = racePlaceOf(store.racers || [], (bike.rear.x + bike.front.x) / 2, f);
   if (f.team) {
@@ -183,7 +191,7 @@ export function drawHud() {
 
   drawInfoCard(L.info);
   drawFuelGauge(L.fuel);
-  if (store.mode === "race" || store.mode === "ranked") drawRaceBar(L.race);
+  if (store.mode === "race" || store.mode === "ranked" || store.mode === "space") drawRaceBar(L.race);
   drawSpeedGauge(L.speed);
   if (L.drive) drawDriveIndicator(L.drive);
   if (L.quit) drawQuitButton(L.quit);
@@ -231,13 +239,18 @@ function drawInfoCard(r) {
   // ★ 终局关的下标是 FINALE_INDEX = LEVELS.length = 432，直接 +1 会显示成"第 433 关"。
   //   它不属于 432 关主线，而是主线之外的任务，按它自己的名字显示。
   const isFinale = store.mode === "level" && store.selLevel === FINALE_INDEX;
+  // ★ 宇宙场有自己的标题：L.name 已经是"宇宙场 · 易"，
+  //   旧代码落到最后的 else 分支会显示成"关卡 37 · 宇宙场 · 易" ——
+  //   宇宙场不属于 432 关主线，"关卡 N"是错的（selLevel 此时是上次玩别的模式留下的值）。
   const title = store.mode === "free"
     ? "♾ 自由模式"
     : isFinale
       ? "🎯 " + L.name
-      : store.mode === "race" || store.mode === "ranked"
-        ? "🏆 " + (store.mode === "ranked" ? "排位赛" : "比赛") + " 第" + (store.selLevel + 1) + "关"
-        : "关卡 " + (store.selLevel + 1) + (compact ? "" : " · " + L.name);
+      : store.mode === "space"
+        ? "🌌 " + L.name
+        : store.mode === "race" || store.mode === "ranked"
+          ? "🏆 " + (store.mode === "ranked" ? "排位赛" : "比赛") + " 第" + (store.selLevel + 1) + "关"
+          : "关卡 " + (store.selLevel + 1) + (compact ? "" : " · " + L.name);
 
   // 无底板：文字靠投影保证在任意天空/地表上可读。
   // 实测 4px + shadow-text(黑 0.6) 在绿野的近白天空上压不住次要行（"破纪录 9.5s"发灰），
@@ -253,7 +266,7 @@ function drawInfoCard(r) {
     const vi = VARIANT_INFO[L.variant];
     if (vi) bx += badgeText(vi.icon + vi.name, bx, r.y + 1, token("glass-fill-strong"), token("info")) + 4;
   }
-  if ((store.mode === "race" || store.mode === "ranked") && store.raceAI) {
+  if ((store.mode === "race" || store.mode === "ranked" || store.mode === "space") && store.raceAI) {
     const lead = (bike.rear.x + bike.front.x) / 2 - store.raceAI.x;
     const txt = lead >= 0
       ? "领先 " + Math.round(toM(lead)) + "m"
@@ -269,11 +282,17 @@ function drawInfoCard(r) {
   if (store.mode === "free") {
     info.push("里程 " + Math.round(toM((bike.rear.x + bike.front.x) / 2)) + "m" + (store.best > 0 ? " · 最佳 " + store.best + "m" : ""));
   } else {
-    const g = store.mode === "level" ? world.gates[store.run.gateIdx] : null;
+    const g = store.mode === "level" || store.mode === "space" ? world.gates[store.run.gateIdx] : null;
     if (g) {
       const ride = store.time - store.run.levelStartTime - store.run.crashStall;
       const rem = Math.max(0, g.limit - ride);
-      info.push("⏱ 第" + (store.run.gateIdx + 1) + "门 " + rem.toFixed(1) + "s");
+      // ★ 门总数只在门够多时才显示：普通关 3~5 个门，"第2门/5" 是噪音；
+      //   终局关 360 个门则是必需的进度感（否则玩家不知道还剩多少）。
+      const total = world.gates.length;
+      const idxLabel = total > 20
+        ? `${store.run.gateIdx + 1}/${total}`
+        : String(store.run.gateIdx + 1);
+      info.push("⏱ 第" + idxLabel + "门 " + rem.toFixed(1) + "s");
     }
     if (!info.length) info.push("缩放 " + Math.round(store.cam.zoomBase * 100) + "% · R 重启 · +/- 缩放");
   }
@@ -385,7 +404,11 @@ function drawSpeedGauge(r) {
   ctx.lineWidth = 7;
   ctx.stroke();
 
-  label(String(Math.round(kmh)), cx, cy + 4, "display", token("text-hi"), "center");
+  // ★ 数字用缩写：满级无相 771,605 km/h 直接铺开是 7 个字符，
+  //   44px 的 display 字体塞进 100px 的圆里必然溢出（表盘数字画到圆外）。
+  //   ≥1e4 时改成 "77.2万" 这类 4~6 字符的缩写，与 UI 其余处同一口径。
+  const kmhText = kmh >= 1e4 ? abbrevNum(kmh) : String(Math.round(kmh));
+  label(kmhText, cx, cy + 4, "display", token("text-hi"), "center");
   label("km/h", cx, cy + 18, "micro", token("text-lo"), "center");
 }
 
@@ -444,25 +467,60 @@ function drawWarning(r, w) {
   label(w.text, r.x + r.w / 2, r.y + r.h - 8, "caption", bg, "center");
 }
 
-/** 高速速度线（阈值用真实标度；高画质下更密集更明显，营造速度感） */
+/**
+ * 高速速度线（阈值用真实标度；高画质下更密集更明显，营造速度感）。
+ *
+ * ★ 两档（R10 / Task 12.1.3）：
+ *   · 普通档（SPEEDLINE_V ~ SPEEDLINE_WARP_V）：原有观感，逐位不变。
+ *   · 高速档（> SPEEDLINE_WARP_V = 3600 km/h）：强度 / 线数 / 线长同时放大，
+ *     归一化用**对数**（见 constants.js 的 SPEEDLINE_WARP_* 注释）。
+ *   原来只有普通档，而它的强度在 20 km/h 就已满档 —— 10 万 km/h 与 100 km/h
+ *   画出来一模一样，宇宙级速度下完全没有速度感。
+ *
+ * ★ 线的 y 分布刻意偏上（只取屏高的 62%）：HUD 的速度表与信息卡都在下半屏，
+ *   线若铺满全屏会盖住仪表读数。
+ * ★ 用 Math.random() 逐帧重掷是刻意的：线是"掠过视野的瞬态"，固定位置会
+ *   变成钉在屏幕上的一道道横杠，反而更像故障。相机的抖屏则相反（那里要连续相位），
+ *   两者不能混为一谈。
+ */
 export function drawSpeedLines() {
   const spd = Math.abs(bike.speed);
   if (spd < SPEEDLINE_V || store.run.crashed) return;
   const q = getQuality();
-  const intensBase = q === "high" ? 0.42 : 0.3;
-  const intens = clamp(spd / SPEEDLINE_REF, 0, 1) * intensBase;
-  const n = q === "high" ? 16 : 12;
+  const isHi = q === "high";
+
+  // 普通档强度：20 km/h 满档（保持原样）
+  let intens = clamp(spd / SPEEDLINE_REF, 0, 1) * (isHi ? 0.42 : 0.3);
+  let n = isHi ? 16 : 12;
+  let lMax = isHi ? 34 : 25;
+  let lMin = 10;
+  let lw = isHi ? 1.7 : 1.5;
+
+  // 高速档：log10 归一，跨 6 个数量级全程单调
+  if (spd > SPEEDLINE_WARP_V) {
+    const k = clamp(
+      Math.log10(spd / SPEEDLINE_WARP_V) / Math.log10(SPEEDLINE_WARP_REF / SPEEDLINE_WARP_V),
+      0, 1
+    );
+    intens = clamp(intens + k * (isHi ? 0.43 : 0.35), 0, 0.85);
+    n = Math.round(n + k * (isHi ? 68 : 52));
+    lMax = isHi ? 34 + k * 300 : 25 + k * 240;
+    lMin = 10 + k * 40;
+    lw = isHi ? 1.7 + k * 1.6 : 1.5 + k * 1.2;
+  }
+
+  const dir = Math.sign(bike.speed || 1);
   ctx.strokeStyle = token("obj-glass-mid");
   ctx.globalAlpha = intens;
-  ctx.lineWidth = q === "high" ? 1.7 : 1.5;
+  ctx.lineWidth = lw;
+  ctx.beginPath();   // 一次 beginPath 画完全部线：旧实现每条线 begin+stroke，84 条 = 168 次状态切换
   for (let i = 0; i < n; i++) {
     const x = Math.random() * view.W;
     const y = Math.random() * view.H * 0.62;
-    const l = 10 + Math.random() * (q === "high" ? 34 : 25);
-    ctx.beginPath();
+    const l = lMin + Math.random() * (lMax - lMin);
     ctx.moveTo(x, y);
-    ctx.lineTo(x - l * Math.sign(bike.speed || 1), y);
-    ctx.stroke();
+    ctx.lineTo(x - l * dir, y);
   }
+  ctx.stroke();
   ctx.globalAlpha = 1;
 }

@@ -472,6 +472,8 @@ export function loadStat() {
   store.stat.totalMeters = Math.max(0, Number(o.totalMeters !== undefined ? o.totalMeters : o.dist) || 0);
   store.stat.totalSeconds = Math.max(0, Number(o.totalSeconds !== undefined ? o.totalSeconds : o.time) || 0);
   store.stat.lastPlayed = typeof o.lastPlayed === "string" ? o.lastPlayed : "";
+  // 累计收入（宇宙场金币任务的进度判据）：只增不减，老存档缺该键 → 0
+  store.stat.earnedGold = Math.max(0, Number(o.earnedGold) || 0);
   return store.stat;
 }
 

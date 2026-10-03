@@ -63,6 +63,59 @@ export function fromPlainDecimal(s) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// ============================================================
+//  数字缩写（R11.3）
+//
+//  ★ 为什么需要：宇宙级资产合计 2.43e22，车价 1.5552e17，
+//    一项 Lv500 升级费 ~6e15。`toLocaleString()` 会把它们铺成
+//    16~23 位整数，卡片宽度根本放不下（升级车间与车库都会溢出）。
+//    HUD 的速度表同样：满级无相 771,605 km/h 塞进 100px 的圆里会糊掉。
+//
+//  ★ 口径：< 1e4 用千分位（¥28,240 好读）；1e4~1e8 用「万/亿」
+//    （中文语境下这两个单位最自然）；≥1e8 用科学计数（"3.4e18"）——
+//    「万亿」在中文里是 1e12，而玩家要面对的是 1e24，再堆中文单位
+//    会变成"24亿亿亿"，反而更读不懂。
+// ============================================================
+
+/**
+ * 把大数缩写成可读形式。
+ * @param {number} n 数值（非有限值原样返回）
+ * @param {object} [o]
+ * @param {boolean} [o.yuan] 前缀加 ¥
+ * @returns {string}
+ */
+export function abbrevNum(n, o) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return String(n);
+  const sign = v < 0 ? "-" : "";
+  const a = Math.abs(v);
+  const pre = o && o.yuan ? "¥" : "";
+  const fixed = (x, d) => {
+    const s = x.toFixed(d);
+    // 去掉尾部无意义的 0（3.40 → 3.4）
+    return s.indexOf(".") >= 0 ? s.replace(/\.?0+$/, "") : s;
+  };
+  if (a < 1e4) return pre + sign + Math.round(a).toLocaleString("en-US");
+  // 万/亿两档：**先选单位，再按该单位取整**，避免四舍五入跨过档位。
+  //   99999999 直接 /1e4 得 9999.9999 → 取整成 10000，读起来像整整 1 亿（实际差一档）。
+  //   所以 ≥1e7 换用「亿」，≥1e3 用「万」，只在不会跨档时才进位。
+  if (a < 1e8) {
+    const wan = a / 1e4;
+    // wan < 9999.95 时取整仍是 4 位数，不会变成 10000
+    return pre + sign + (wan < 10 ? fixed(wan, 2) : wan < 1000 ? fixed(wan, 1) : String(Math.floor(wan))) + "万";
+  }
+  if (a < 1e12) {
+    const yi = a / 1e8;
+    return pre + sign + (yi < 10 ? fixed(yi, 2) : yi < 1000 ? fixed(yi, 1) : String(Math.floor(yi))) + "亿";
+  }
+  // ≥1e12：科学计数，保留 3 位有效数字（3.4e18 而不是 3.42e18 —— 卡片里够读即可）
+  let e = Math.floor(Math.log10(a));
+  // 精度守卫：log10 在 1e12 附近可能算出 11.999…，导致 e 取小一档
+  const mant = a / Math.pow(10, e);
+  if (mant >= 9.9995) { e += 1; }
+  return pre + sign + fixed(mant, 2) + "e" + e;
+}
+
 /**
  * 水平循环包裹：把世界 x 映射到 [0, m)。
  *

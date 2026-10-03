@@ -5,8 +5,9 @@ import {
   RATING_MIN, RANK_GAIN_BASE, RANK_GAIN_BASE_ADV, RATING_LOSS, RATING_LOSS_ADVANCED,
   rankName, rankStars, rankPromoReward, rankDelta, rankGold,
   RACE_FORMATS, RACE_PLACE_GOLD } from "../config/constants.js";
-import { LEVELS, levelAt, courseAt, segmentThemeAt, variantRule, FINALE_INDEX, FINALE, FINALE_SEGS } from "../config/levels.js";
+import { LEVELS, levelAt, courseAt, segmentThemeAt, variantRule, FINALE_INDEX, FINALE, FINALE_SEGS, MODE_SPACE, SPACE_TIERS, setSpaceTier, spaceTierOf, spaceCourse, pinSpaceCourse } from "../config/levels.js";
 import { THEMES } from "../config/themes.js";
+import { VEHICLES } from "../config/vehicles.js";
 import { store, bike, world } from "../core/store.js";
 import { key } from "../core/input.js";
 import { view } from "../core/canvas.js";
@@ -24,10 +25,10 @@ import { addShake } from "../render/camera.js";
 import { updateStats, settleLanding } from "./stats.js";
 import { addGold, checkAch } from "./progress.js";
 import {
-  buildLevel, freeInit, freeFill, syncSegmentTheme,
+  buildLevel, freeInit, freeFill, syncSegmentTheme, streamChunks,
   updateBoosts, updateCanisters, updateCoins, emitRideDust, updateJumps,
 } from "./world.js";
-import { raceInit, raceUpdate, raceFormat, racePlace } from "./race.js";
+import { raceInit, raceUpdate, spaceUpdate, raceFormat, racePlace } from "./race.js";
 
 let presenter = { hideOverlay() {}, toMenu() {} };
 
@@ -71,6 +72,64 @@ export function runGuard(fn) {
     if (g !== store.run.gen) return;
     fn();
   };
+}
+
+// ---------------- 宇宙场准入与金币任务（R3.5） ----------------
+/** 宇宙级车的判据：tier === "宇宙"（6 台，maxLv 500，vehicles.js 里的宇宙分组） */
+export function hasUniverseVehicle() {
+  const owned = store.ownedVehicles || [];
+  for (const i of owned) {
+    const v = VEHICLES[i];
+    if (v && v.tier === "宇宙") return true;
+  }
+  return false;
+}
+
+/** 金币任务的目标：基础宇宙车「归墟」的车下标（未拥有时有效） */
+const QUEST_VEHICLE = "omega";
+
+/**
+ * 宇宙场金币任务的状态（R3.5）。
+ * 纯读取，便于 UI 直接展示与断言。
+ * @returns {{done:boolean, hasQuest:boolean, need:number, got:number, progress:number}}
+ */
+export function spaceQuestState() {
+  const idx = VEHICLES.findIndex((v) => v.id === QUEST_VEHICLE);
+  const owned = (store.ownedVehicles || []).includes(idx);
+  // 任务条件：累计金币收入达到 ¥8e8（= 归墟车价的 2 倍）
+  // —— 起步车四项升满是 ¥28,240，全通 432 关约 ¥213 万，
+  //    所以 ¥8e8 是一个"认真玩几十关才能达成、但不需要刷到吐"的门槛。
+  const need = 8e8;
+  const got = (store.stat && store.stat.earnedGold) || 0;
+  return {
+    done: owned,
+    hasQuest: !owned,
+    need,
+    got: Math.min(got, need),
+    progress: Math.max(0, Math.min(1, got / need)),
+  };
+}
+
+/** 完成任务 → 发放归墟（幂等：已拥有则直接返回 false） */
+export function claimSpaceQuest() {
+  const st = spaceQuestState();
+  if (!st.hasQuest) return false;
+  if (st.got < st.need) return false;
+  const idx = VEHICLES.findIndex((v) => v.id === QUEST_VEHICLE);
+  if (!(idx >= 0) || (store.ownedVehicles || []).includes(idx)) return false;
+  if (!Array.isArray(store.ownedVehicles)) store.ownedVehicles = [0];
+  store.ownedVehicles.push(idx);
+  // ★ **不**改 store.currentVehicle：玩家可能正开着攒了满级的另一台车点"领取"，
+  //   静默切车会把"当前车 + 全部升级档位"一起顶掉（免费发放 ≠ 可以替玩家做决定）。
+  //   面板在领取后会提示"已获得归墟"，由玩家自己在车库切换。
+  //
+  // ★ 升级容器按**车 id** 键（storage.js 的 getUp 读 store.upgrades[veh.id]，
+  //   sanitizeUpgrades 也只保留 u[veh.id]）。旧代码用下标 idx 写，
+  //   写进去的是一个永远读不到的孤儿键，下次 save→load 直接被丢弃。
+  //   这里其实不必写：getUp() 对缺失键会惰性补默认值，
+  //   写了反而多一处与 sanitizeUpgrades 打架的地方。故不写。
+  save();
+  return true;
 }
 
 /** 关卡开始时重置与上一关相关的全部状态（否则会出现"重生到上一关坐标"等串档问题） */
@@ -127,6 +186,9 @@ function beginRun() {
   // 排位赛永远是单挑；普通比赛按玩家在面板上选的赛制（1V1 / 多人 / 团赛）
   if (store.mode === "ranked") raceInit("duel");
   else if (store.mode === "race") raceInit(store.raceFormat);
+  // 宇宙场：5 位对手同场（多人竞技的阵容），配速另算（见 race.js 的 spaceUpdate）。
+  // 第二个参数 true = 借阵容但不改玩家在比赛面板选的赛制。
+  else if (store.mode === MODE_SPACE) raceInit("melee", true);
   resumeFinaleCheckpoint();
   store.state = "play";
   presenter.hideOverlay();
@@ -232,6 +294,13 @@ export function startGame(m, lv, opt) {
       showToast("🔒 尚未收到排位赛邀请（通关最终任务后解锁）", 1500);
       return;
     }
+    // 宇宙场准入（R3.5）：没有任何宇宙级车时不许白嫖赛道 ——
+    // 必须先接受金币任务换一台基础款（归墟）。已在任务里拿过车的直接放行。
+    if (mode === MODE_SPACE && !hasUniverseVehicle()) {
+      store.pendingSpace = true; // 由 ui 层弹出金币任务说明
+      showToast("🔒 需要先完成宇宙场金币任务", 1500);
+      return;
+    }
     store.lastMode = mode;
     store.mode = mode;
     // 高级赛请求：显式传入 opt.advanced 时以它为准（rating 未达标则降级为普通）；
@@ -244,8 +313,23 @@ export function startGame(m, lv, opt) {
       store.raceFormat = opt.format;
     }
     if (store.mode === "free") freeInit(opt && opt.theme);
-    else buildLevel();
-    applyUpgrades();
+    else {
+      if (store.mode === MODE_SPACE) {
+        // ★ 顺序：定分级 → **重算极速** → 钉住赛道 → buildLevel。
+        //
+        //   1) 分级不传时**沿用本局的上次选择**，而不是回落 0 ——
+        //      旧代码写 setSpaceTier((opt && opt.tier) || 0)，
+        //      而 restart() 不传 opt，于是"在终极级跑到一半按 R"会被重置成
+        //      「易」级的另一条赛道（10M px），进度与分级双双错位且无任何提示。
+        //   2) applyUpgrades() 必须在算长度**之前**跑：赛道长度 = 玩家极速 × 360s，
+        //      而极速由车辆 / 升级 / 形态决定。顺序反了会拿旧极速算长度。
+        setSpaceTier(opt && opt.tier !== undefined ? opt.tier : spaceTierOf());
+        applyUpgrades();
+        pinSpaceCourse(spaceCourse(spaceTierOf(), store.phys.topSpeed));
+      }
+      buildLevel();
+    }
+    if (store.mode !== MODE_SPACE) applyUpgrades();
     beginRun();
   } catch (err) {
     console.error("startGame 错误:", err);
@@ -422,6 +506,15 @@ function finishLevel() {
     result.rating = after;
     showToast((won ? "🏆 排位胜利 🪙+" : "🏳 排位失利 🪙+") + gain, 900, won ? "success" : "warn");
     result.nextLabel = "继续 →";
+  } else if (store.mode === MODE_SPACE) {
+    // 宇宙场结算（R3.6）：收益随分级递增，不受名次影响（本地 AI 模拟，无联网对抗）
+    const tier = SPACE_TIERS[spaceTierOf()] || SPACE_TIERS[0];
+    const gold = tier.gold;
+    addGold(gold);
+    result.goldGain = gold;
+    result.title = `${tier.icon} 宇宙场 · ${tier.name}`;
+    result.nextLabel = "继续 →";
+    showToast(`🌌 宇宙场「${tier.name}」完成 · 🪙+${gold}`, 1400, "success");
   } else if (store.mode === "level") {
     // 计时惩罚（摔车）计入本关用时，直接影响三星时限
     const elapsed = store.time - run.levelStartTime + run.penaltyTime;
@@ -529,9 +622,12 @@ export function update(dt) {
   //   绝不触碰 bike.rear / bike.front / bike.head 的 x / y / px / py；重力与抓地是按分段
   //   取值的常量，切换只改变"后续子步的加速度"，已经积分的当前帧状态不受影响。
   //   因此跨越分界点绝不会出现位置瞬移、速度突变或 NaN。
-  if (store.mode === "level" || store.mode === "race" || store.mode === "ranked") {
+  if (store.mode === "level" || store.mode === "race" || store.mode === "ranked" || store.mode === MODE_SPACE) {
     syncSegmentTheme(courseAt(store.selLevel, store.mode), (b.rear.x + b.front.x) / 2);
   }
+  // 流式实体（宇宙场）：按相机位置铺/丢 chunk。放在物理之后，
+  // 于是本帧的相机已经是物理推进后的真实位置，剔除窗口不会落后一帧。
+  streamChunks();
   updateParticles();
   emitRideDust();
   updateStats(dt);
@@ -565,7 +661,10 @@ export function update(dt) {
   if (toKmh(Math.abs(b.speed)) >= 30) checkAch("fast");
 
   // ---- 机制判定：危险段超速必摔 / 限时门准时通过 ----
-  if (store.mode === "level" && !run.settling) {
+  // ★ 宇宙场也走危险段判定：world.hazards 在 space 下照样生成、scene.js 也照样画，
+  //   若这里不判，玩家会看到 2500 条限速警示带却毫无后果 —— 纯装饰性机制。
+  //   （限时门 gateN=0，world.gates 为空，第二个分支自然不进。）
+  if ((store.mode === "level" || store.mode === MODE_SPACE) && !run.settling) {
     if (!run.crashed && world.hazards.length && !ignoresHazardLimit()) {
       const spd = Math.abs(bikeVx());
       for (const h of world.hazards) {
@@ -595,7 +694,10 @@ export function update(dt) {
     }
   }
 
-  if (store.mode === "race" || store.mode === "ranked") {
+  if (store.mode === MODE_SPACE) {
+    // 宇宙场：AI 先到终点不判负（本地模拟，奖励只看是否完赛，见 finishLevel）
+    spaceUpdate(dt);
+  } else if (store.mode === "race" || store.mode === "ranked") {
     raceUpdate(dt);
     if (store.raceAI && store.raceAI.finish && !run.settling) {
       run.settling = true;
