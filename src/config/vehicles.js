@@ -1,4 +1,4 @@
-// 车辆数据：差异化旋转 / 油箱 / 抓地 / 重量
+﻿// 车辆数据：差异化旋转 / 油箱 / 抓地 / 重量
 // color 同时用于车架主色、骑手服条纹、关卡面板边框
 //
 // phys：数据化的物理参数。质量与转动惯量是**真参数**（参与求解），
@@ -389,225 +389,266 @@ export const VEHICLES = [
       desc: "免解锁：350 km/h 极速 · 怎么摔都摔不坏 · 抗摔不设上限",
     },
   },
-  {
-    id: "omega",
-    name: "归墟",
-    icon: "☄️",
-    desc: "究极之上：1000 km/h · 全程飞行 · 撞不烂",
-    // ★ 全项目唯一的「常驻飞行」终局车，也是最贵的一台。
-    //   价格刻意与"全程可获得金币"（约 412 万）拉开两个数量级 ——
-    //   它不是靠刷得出来的目标，而是给长期存档的收束式彩蛋。
-    //   车价 8 亿 / 满级升级 50 亿（costK=177054）/ 形态 100 亿，三段都远高于任何现有车，
-    //   以保证"贵的车不能只是相对贵"。
-    tier: "宇宙",
-    // ★ 500 级：宇宙级车的升级上限（普通车 100）。判定一律走 maxLvOf(veh)，
-    //   不要再直接读全局 MAX_LV —— 那样宇宙车永远显示不满级。
-    maxLv: 500,
-    // ★ 该车「形态」的标称极速（km/h）。omega 形态据此 + 升级等级解算出实际极速，
-    //   所以 Lv0 只有裸车水平，升满才到这个数（见 constants.js 的 ultraCruiseOf）。
-    nominalKmh: 1000,
-    // ★ costK 由"四项升满 = 车价 × 40"反解：621,200 × 51,513 = 3.2e10。
-    //   500 级的单项升满是 100 级的 22 倍，所以升满倍率比 100 级时代（6.25×）更重。
-    costK: 51513,
-    price: 800000000,
-
-    speed: 2.6,
-    grip: 11.13,
-    weight: 1.48,
-    airRot: 0.488,
-    fuel: 4,
-    color: "#e0f0ff",
-    // 归墟号：极致的悬浮形态 —— 细高轮、无避震、超低趴姿、宽大尾翼式的长上管，
-    // 视觉上要读出"这东西不属于地面"
-        // ★ 悬浮器：常规胎、有避震、宽坐垫、平把、常规头盔 —— 基础款的"标准悬浮车"
-        // ★ 悬浮器：常规胎、有避震、宽坐垫、平把、常规头盔 —— 基础款的"标准悬浮车"
-    art: ART({
-      tire: 2.6, rim: true, spokes: 12, spokeW: 1.2, tube: 3.4,
-      topDrop: 4, coil: 0.9, bar: "flat", saddleW: 9,
-      helmR: 4.8, peak: true, vents: 2,
-      pose: POSE(2.5, 1.5, 3.5, 1, 0, -0.5),
-    }),
-    // ★ mass=1.42 / inertia=1.95 全表唯一；|airRot×inertia−1| = 0。
-    //   torque/rpm 刻意**低于**奇点号：终焉形态的加速由 flightStep 的推力伺服负责，
-    //   扭矩路径在这台车上几乎不参与（见 bike.js 的 omega 分支），
-    //   堆扭矩只会在 27,778 px/s 下让车轮空转到 ωR ≈ 2300 rad/s，纯属数值噪声。
-    phys: P(1.48, 2.05, 1.7, 1.5, 12, 24.28, 6.15, /* wheelieK */ 3.95, /* wheelieUp */ 16.09),
-    /** 最终形态：升满后花 100 亿解锁 */
-    ultra: {
-      /* 终焉形态不读 fx：极速与推力在 constants.js 按 1000 km/h 标定 */ fx: {},
-      name: "终焉形态",
-      icon: "☄️",
-      mode: "omega",
-      cost: 10000000000,
-      desc: "1000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段",
-    },
-  },
-
-  // ================================================================
-  //  宇宙级车辆（5 台 + 归墟共 6 台）
+// ================================================================
+  //  宇宙级车辆（7 台：按真实的七级宇宙速度命名）
+  //
+  //  ★ 命名与极速全部取自真实数据（km/s → km/h 换算 ×3.6）：
+  //    第一 7.9 km/s = 28,440 km/h   环绕速度（近地轨道）—— 教科书标准值
+  //    第二 11.2 km/s = 40,320 km/h  地球逃逸速度        —— 教科书标准值
+  //    第三 16.7 km/s = 60,120 km/h  太阳系逃逸速度      —— 教科书标准值
+  //    第四 525 km/s = 1,890,000 km/h 银河系逃逸速度     —— 中文维基给"≥525"
+  //    第五 ~1000 km/s = 3,600,000 km/h 本星系群逃逸      —— 无统一定义，取常见科普值
+  //    第六 ~1500 km/s = 5,400,000 km/h 超星系团逃逸      —— 同上
+  //    第七 ~1750 km/s = 6,300,000 km/h 整个宇宙的逃逸    —— 用户指定区间 1500~2000 的中值
+  //
+  //  ★ 两个必须写清楚的事实偏差（避免把科普误传说成定论）：
+  //    1. **第四宇宙速度不是常传的 ~30 km/s**。29.8 km/s 是地球的**公转速度**
+  //       （第三宇宙速度的推导里出现过），把它当第四宇宙速度是以讹传讹。
+  //       中文维基给的"≥525 km/s"才是脱离银河系的量级 —— 银河系含暗物质、
+  //       精确质量未知，所以只能给下限。本表取 525。
+  //    2. **第五、六、七宇宙速度没有科学共识**。第六项已对应"可观测宇宙"边界，
+  //       再往外没有明确的引力系统可供"逃逸"，所以"第七宇宙速度"严格说不存在。
+  //       这里按玩家世界观当作"逃出整个宇宙"来命名，取值落在常见科普区间内。
   //
   //  ★ 三条设计原则（都写进了 spec 的 R2）：
-  //   1. **价格与极速严格单调递增**。早期按"每级 ×30"递推会算出
+  //   1. **价格与极速严格单调递增**。统一按 **四项升满 = 车价 × 40 /
+  //      形态解锁 = 车价 × 12.5** 反解 costK，三条曲线因此同时单调
+  //      （升满 > 形态 > 车价）。早期按"每级 ×30"递推会算出
   //      "虚掷升满 7.4e13 < 形态解锁 2.7e14"这种倒挂 —— 更慢的车反而更贵。
-  //      现在统一按 **四项升满 = 车价 × 40 / 形态解锁 = 车价 × 12.5** 反解 costK，
-  //      三条曲线因此同时单调（升满 > 形态 > 车价）。
   //   2. **500 级升级上限**（普通车 100）。判定一律走 maxLvOf(veh)。
   //   3. **不开形态就是一台普通的、会摔的地面车**。飞行只由 omega 形态提供
-  //      （MODE_FLAGS.omega.fly），早期版本给 6 台全挂 `veh.hover` 让裸车也常驻
+  //      （MODE_FLAGS.omega.fly），早期版本给宇宙车全挂 `veh.hover` 让裸车也常驻
   //      悬停，结果"没开最终形态也会摔车"这条需求整个落空 —— 实测 6 台
-  //      Lv0 不开形态跑 25 秒零摔车。μ 拉到 3.4~22 是为了让它们在地面上
+  //      Lv0 不开形态跑 25 秒零摔车。μ 拉到 3.4~312 是为了让它们在地面上
   //      又快又难驾驭（扭矩远超翘头临界，一脚油门就可能翻），这才是"关卡仍然
-  //      有危险"的本意；开到 omega 形态才解锁常驻飞行与标称极速。
+  //      有挑战"的真实来源。
+  //
+  //  ★ `|airRot × inertia − 1| ≤ 0.05` 是硬约束：airRot 是空中转体能力，
+  //   inertia 是转动惯量，二者必须互为倒数（见 Task 6.5.2）。每台车的
+  //   inertia 都由 1 / airRot 反解得到，不是随手填的。
   // ================================================================
   {
-    id: "astral",
-    name: "星殒",
-    icon: "✴️",
-    desc: "第二宇宙级：5000 km/h · 永远在天上",
+    id: "cv1",
+    name: "第一宇宙速度",
+    icon: "🛰️",
+    desc: "7.9 km/s · 环绕速度 · 近地轨道",
     tier: "宇宙",
     maxLv: 500,
     // ★ 该车「形态」的标称极速（km/h）。omega 形态据此 + 升级等级解算出实际极速，
     //   所以 Lv0 只有裸车水平，升满才到这个数（见 constants.js 的 ultraCruiseOf）。
-    nominalKmh: 5000,
-    costK: 1545396,
-    price: 24000000000,
+    nominalKmh: 28440,
+    // ★ costK 由"四项升满 = 车价 × 40"反解：单项满级 ΣupCost(1..500) = 155,300，
+    //   四项就是 155,300 × 4 = 621,200，于是 costK = 车价 / 15,530。
+    costK: 643915,
+    price: 10000000000,
 
     speed: 2.6,
-    grip: 22.44,
-    weight: 1.32,
-    airRot: 0.685,
+    grip: 3.42,
+    weight: 3.10,
+    airRot: 0.612,
     fuel: 5,
-    color: "#b8a4ff",
-        // ★ 飞镖形：细胎无避震、超低上管、弯把、窄坐垫
+    color: "#8ec9ff",
+    // ★ 近地轨道：常规胎、有避震、平把、标准头盔 —— "刚够上天的入门轨道车"
+    art: ART({
+      tire: 2.8, rim: true, spokes: 10, spokeW: 1.3, tube: 3.6,
+      topDrop: 6, coil: 1.1, bar: "flat", saddleW: 9,
+      helmR: 5.0, peak: true, vents: 2,
+      pose: POSE(1.5, 0.5, 2.0, 0.5, 0.5, -0.5),
+    }),
+    // ★ inertia = 1 / airRot = 1.63（|airRot×inertia−1| = 0）
+    phys: P(3.10, 1.63, 1.7, 1.5, 12, 26.4, 6.6, /* wheelieK */ 4.6, /* wheelieUp */ 20.2),
+    ultra: { fx: {}, name: "环绕形态", icon: "🛰️", mode: "omega", cost: 125000000000,
+      desc: "28440 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
+  },
+  {
+    id: "cv2",
+    name: "第二宇宙速度",
+    icon: "🚀",
+    desc: "11.2 km/s · 地球逃逸速度",
+    tier: "宇宙",
+    maxLv: 500,
+    // ★ 11.2 km/s = 40,320 km/h —— 摆脱地球引力束缚的最小速度。
+    //   月球 1 号是第一个达到它的探测器。
+    nominalKmh: 40320,
+    costK: 3090792,
+    price: 48000000000,
+
+    speed: 2.6,
+    grip: 6.18,
+    weight: 2.45,
+    airRot: 0.745,
+    fuel: 6,
+    color: "#6fb8ff",
+    // ★ 逃逸轨道：细胎、弯把、窄坐垫、前倾伏低
+    art: ART({
+      tire: 2.0, rim: false, spokes: 14, spokeW: 1.0, tube: 3.0,
+      topDrop: 10, coil: 0.5, bar: "drop", saddleW: 7,
+      helmR: 5.4, peak: false, vents: 3,
+      pose: POSE(4.5, 2.5, 5.5, 2.0, 1.5, 1.5),
+    }),
+    // ★ inertia = 1 / airRot = 1.34
+    phys: P(2.45, 1.34, 1.8, 1.5, 11, 39.2, 8.1, /* wheelieK */ 7.4, /* wheelieUp */ 41.5),
+    ultra: { fx: {}, name: "逃逸形态", icon: "🚀", mode: "omega", cost: 600000000000,
+      desc: "40320 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
+  },
+  {
+    id: "cv3",
+    name: "第三宇宙速度",
+    icon: "🌌",
+    desc: "16.7 km/s · 太阳系逃逸速度",
+    tier: "宇宙",
+    maxLv: 500,
+    // ★ 16.7 km/s = 60,120 km/h —— 摆脱太阳引力、飞出太阳系所需的最小速度。
+    //   （地球轨道上的绝对值是 42.1 km/s；取地球公转方向发射，故只需额外补一点。）
+    //   旅行者 1/2 号靠引力弹弓达到了它。
+    nominalKmh: 60120,
+    costK: 18544752,
+    price: 288000000000,
+
+    speed: 2.6,
+    grip: 11.4,
+    weight: 1.90,
+    airRot: 0.868,
+    fuel: 7,
+    color: "#9d8cff",
+    // ★ 星际逃逸：极细胎、多辐条、直把展开、大头盔开面罩
     art: ART({
       tire: 1.5, rim: false, spokes: 20, spokeW: 0.7, tube: 2.6,
-      topDrop: 13, coil: 0, bar: "drop", saddleW: 5,
-      helmR: 5.4, peak: false, vents: 2,
-      pose: POSE(6.5, 4.5, 8, 4, 2.5, 3),
+      topDrop: 14, coil: 0, bar: "wide", saddleW: 10,
+      helmR: 6.0, peak: true, vents: 4,
+      pose: POSE(-1.0, -2.0, -1.5, -2.0, -2.0, -3.0),
     }),
-    phys: P(1.32, 1.46, 1.8, 1.5, 11, 34.54, 7.52, /* wheelieK */ 6.31, /* wheelieUp */ 34.11),
-    ultra: { fx: {}, name: "星殒形态", icon: "✴️", mode: "omega", cost: 300000000000,
-      desc: "5000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
+    // ★ inertia = 1 / airRot = 1.15
+    phys: P(1.90, 1.15, 1.9, 1.5, 10, 52.6, 9.6, /* wheelieK */ 11.6, /* wheelieUp */ 86.4),
+    ultra: { fx: {}, name: "星际形态", icon: "🌌", mode: "omega", cost: 3600000000000,
+      desc: "60120 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
   {
-    id: "collapse",
-    name: "坍缩",
-    icon: "🕳️",
-    desc: "第三宇宙级：10000 km/h · 引力都追不上",
+    id: "cv4",
+    name: "第四宇宙速度",
+    icon: "🌠",
+    desc: "525 km/s · 银河系逃逸速度",
     tier: "宇宙",
     maxLv: 500,
-    // ★ 该车「形态」的标称极速（km/h）。omega 形态据此 + 升级等级解算出实际极速，
-    //   所以 Lv0 只有裸车水平，升满才到这个数（见 constants.js 的 ultraCruiseOf）。
-    nominalKmh: 10000,
-    costK: 46361880,
-    price: 720000000000,
+    // ★ 525 km/s = 1,890,000 km/h —— 摆脱**银河系**引力束缚的最小速度。
+    //   中文维基给的是"≥525 km/s"（银河系含暗物质、精确质量未知，只能给下限），
+    //   而非广为误传的 ~30 km/s —— 29.8 km/s 是地球的**公转速度**。
+    nominalKmh: 1890000,
+    costK: 222537025,
+    price: 3456000000000,
 
     speed: 2.6,
-    grip: 47.63,
-    weight: 1.08,
-    airRot: 0.862,
-    fuel: 7,
-    color: "#7b6cff",
-        // ★ 吞噬者：极细胎、多辐条、直把展开、超大头盔、开面罩
-    art: ART({
-      tire: 1.1, rim: false, spokes: 24, spokeW: 0.5, tube: 2.2,
-      topDrop: 17, coil: 0, bar: "wide", saddleW: 11,
-      helmR: 6.4, peak: true, vents: 5,
-      pose: POSE(-1.5, -3, -2, -2.5, -2.5, -3.5),
-    }),
-    phys: P(1.08, 1.16, 1.9, 1.5, 10, 46.64, 8.88, /* wheelieK */ 10.4, /* wheelieUp */ 75.39),
-    ultra: { fx: {}, name: "坍缩形态", icon: "🕳️", mode: "omega", cost: 9000000000000,
-      desc: "10000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
-  },
-  {
-    id: "void",
-    name: "虚掷",
-    icon: "⚫",
-    desc: "第四宇宙级：25000 km/h · 慢速状态就已如此",
-    tier: "宇宙",
-    maxLv: 500,
-    // ★ 该车「形态」的标称极速（km/h）。omega 形态据此 + 升级等级解算出实际极速，
-    //   所以 Lv0 只有裸车水平，升满才到这个数（见 constants.js 的 ultraCruiseOf）。
-    nominalKmh: 25000,
-    costK: 1390856407,
-    price: 21600000000000,
-
-    speed: 2.6,
-    grip: 86.12,
-    weight: 0.92,
-    airRot: 0.980,
+    grip: 27.8,
+    weight: 1.42,
+    airRot: 0.942,
     fuel: 9,
-    color: "#3d2b6e",
-        // ★ 投掷器：几乎无坐垫、极端前趴、大通风槽
+    color: "#c77dff",
+    // ★ 银河逃逸：粗胎配宽辐条、长上管、大坐垫 —— 罕见的"重装高速车"
     art: ART({
-      tire: 0.9, rim: false, spokes: 28, spokeW: 0.35, tube: 1.8,
-      topDrop: 21, coil: 0, bar: "drop", saddleW: 2.5,
-      helmR: 6.0, peak: false, vents: 6,
-      pose: POSE(9, 7.5, 11, 7, 3.5, 5.5),
+      tire: 3.0, rim: true, spokes: 12, spokeW: 1.8, tube: 4.6,
+      topDrop: 3, coil: 1.5, bar: "flat", saddleW: 13,
+      helmR: 5.6, peak: true, vents: 3,
+      pose: POSE(-0.5, -2.5, -1.0, -2.0, 0, -3.0),
     }),
-    phys: P(0.92, 1.02, 2, 1.5, 9, 73.56, 12, /* wheelieK */ 16.82, /* wheelieUp */ 138.3),
-    ultra: { fx: {}, name: "虚掷形态", icon: "⚫", mode: "omega", cost: 270000000000000,
-      desc: "25000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
+    // ★ inertia = 1 / airRot = 1.06
+    phys: P(1.42, 1.06, 2.0, 1.5, 9, 92.4, 13.5, /* wheelieK */ 9.7, /* wheelieUp */ 104.2),
+    ultra: { fx: {}, name: "银河形态", icon: "🌠", mode: "omega", cost: 43200000000000,
+      desc: "1890000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
   {
-    id: "endgame",
-    name: "终末",
-    icon: "💀",
-    desc: "第五宇宙级：50000 km/h · 掠过一颗星只要一眨眼",
+    id: "cv5",
+    name: "第五宇宙速度",
+    icon: "🕸️",
+    desc: "1000 km/s · 本星系群逃逸速度",
     tier: "宇宙",
     maxLv: 500,
-    // ★ 该车「形态」的标称极速（km/h）。omega 形态据此 + 升级等级解算出实际极速，
-    //   所以 Lv0 只有裸车水平，升满才到这个数（见 constants.js 的 ultraCruiseOf）。
-    nominalKmh: 50000,
-    costK: 333805537669,
-    price: 5184000000000000,
+    // ★ 约 1000 km/s = 3,600,000 km/h —— 脱离**本星系群**（银河系 + 仙女座等
+    //   约 50 个星系）所需的逃逸速度。无统一定义，取常见科普值。
+    nominalKmh: 3600000,
+    costK: 2670444301,
+    price: 41472000000000,
 
     speed: 2.6,
-    grip: 70.28,
-    weight: 1.88,
-    airRot: 0.495,
+    grip: 63.4,
+    weight: 1.02,
+    airRot: 1.031,
     fuel: 11,
-    color: "#1a0d2e",
-        // ★ 镰刀形：粗胎、宽辐条、平把高坐、超宽坐垫
+    color: "#e05fff",
+    // ★ 星系群逃逸：细管、超多辐条、极端前趴、无前檐
     art: ART({
-      tire: 3.4, rim: true, spokes: 8, spokeW: 2.2, tube: 5.0,
-      topDrop: 2, coil: 1.6, bar: "flat", saddleW: 14,
-      helmR: 5.2, peak: true, vents: 3,
-      pose: POSE(0, -4, -1.5, -3.5, 0.5, -4.5),
+      tire: 1.0, rim: false, spokes: 26, spokeW: 0.45, tube: 2.0,
+      topDrop: 20, coil: 0, bar: "drop", saddleW: 4,
+      helmR: 6.4, peak: false, vents: 6,
+      pose: POSE(7.5, 6.0, 9.5, 5.0, 3.0, 4.5),
     }),
-    phys: P(1.88, 2.02, 2.1, 1.5, 8, 141.55, 18, /* wheelieK */ 10.85, /* wheelieUp */ 115.74),
-    ultra: { fx: {}, name: "终末形态", icon: "💀", mode: "omega", cost: 64800000000000000,
-      desc: "50000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
+    // ★ inertia = 1 / airRot = 0.97
+    phys: P(1.02, 0.97, 2.1, 1.5, 8, 168.5, 19.5, /* wheelieK */ 22.4, /* wheelieUp */ 192.7),
+    ultra: { fx: {}, name: "星系群形态", icon: "🕸️", mode: "omega", cost: 518400000000000,
+      desc: "3600000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
   {
-    id: "formless",
-    name: "无相",
-    icon: "🌌",
-    desc: "第六宇宙级：100000 km/h · 全宇宙几乎没有第二个人买得起",
+    id: "cv6",
+    name: "第六宇宙速度",
+    icon: "🕳️",
+    desc: "1500 km/s · 超星系团逃逸速度",
     tier: "宇宙",
     maxLv: 500,
-    // ★ 该车「形态」的标称极速（km/h）。omega 形态据此 + 升级等级解算出实际极速，
-    //   所以 Lv0 只有裸车水平，升满才到这个数（见 constants.js 的 ultraCruiseOf）。
-    nominalKmh: 100000,
-    costK: 10014166130071,
-    price: 155520000000000000,
+    // ★ 约 1500 km/s = 5,400,000 km/h —— 脱离**本超星系团**所需的逃逸速度。
+    //   ★ 取 1500 而非常见的 2000：用户指定第七项落在 1500~2000 km/s，
+    //     而七档必须严格递增 —— 若第六项取 2000，第七项就无处安放了。
+    nominalKmh: 5400000,
+    costK: 32045331616,
+    price: 497664000000000,
 
     speed: 2.6,
-    grip: 286.6,
-    weight: 0.78,
-    airRot: 1.163,
-    fuel: 14,
+    grip: 128.5,
+    weight: 0.72,
+    airRot: 0.502,
+    fuel: 13,
+    color: "#ff5fd2",
+    // ★ 超星系团：粗胎、宽辐条、宽大尾翼式长上管 —— "越强越难驾驭"的重量派
+    art: ART({
+      tire: 3.8, rim: true, spokes: 8, spokeW: 2.4, tube: 5.2,
+      topDrop: 1, coil: 1.8, bar: "wide", saddleW: 15,
+      helmR: 5.8, peak: true, vents: 2,
+      pose: POSE(1.0, -5.0, -0.5, -4.0, 1.0, -5.5),
+    }),
+    // ★ inertia = 1 / airRot = 1.99
+    phys: P(0.72, 1.99, 2.2, 1.5, 7, 305.8, 27.5, /* wheelieK */ 8.4, /* wheelieUp */ 92.6),
+    ultra: { fx: {}, name: "超星系团形态", icon: "🕳️", mode: "omega", cost: 6220800000000000,
+      desc: "5400000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
+  },
+  {
+    id: "cv7",
+    name: "第七宇宙速度",
+    icon: "💫",
+    desc: "1750 km/s · 整个宇宙的逃逸速度",
+    tier: "宇宙",
+    maxLv: 500,
+    // ★ 1750 km/s = 6,300,000 km/h —— 取用户给的 1500~2000 km/s 区间中值。
+    //   ★ 严格说"第七宇宙速度"没有科学共识：第六项已对应可观测宇宙边界，
+    //     再往外没有明确的引力系统可供"逃逸"。这里按玩家的世界观命名。
+    nominalKmh: 6300000,
+    costK: 384543979395,
+    price: 5971968000000000,
+
+    speed: 2.6,
+    grip: 312.0,
+    weight: 0.42,
+    airRot: 1.284,
+    fuel: 16,
     color: "#ffffff",
-        // ★ 全息抽象：最细管、超多辐条、最极端前趴、无前檐
+    // ★ 全域逃逸：最细管、最多辐条、最极端前趴
     art: ART({
       tire: 0.6, rim: false, spokes: 32, spokeW: 0.22, tube: 1.1,
       topDrop: 25, coil: 0, bar: "drop", saddleW: 2,
       helmR: 6.8, peak: false, vents: 8,
       pose: POSE(12, 10, 15, 9.5, 5, 8),
     }),
-    phys: P(0.78, 0.86, 2.2, 1.5, 7, 264.54, 26, /* wheelieK */ 34.84, /* wheelieUp */ 481.39),
-    ultra: { fx: {}, name: "无相形态", icon: "🌌", mode: "omega", cost: 1944000000000000000,
-      desc: "100000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
+    // ★ inertia = 1 / airRot = 0.78
+    phys: P(0.42, 0.78, 2.3, 1.5, 6, 420.6, 36, /* wheelieK */ 31.2, /* wheelieUp */ 398.4),
+    ultra: { fx: {}, name: "全域形态", icon: "💫", mode: "omega", cost: 74649600000000000,
+      desc: "6300000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
 
 
@@ -893,7 +934,7 @@ export const VEHICLES = [
 
     speed: 2.05,
     grip: 1.02,
-    weight: 0.88,
+    weight: 1.02,
     airRot: 1.25,
     fuel: 2.2,
     color: "#ffb703",
@@ -953,7 +994,7 @@ export const VEHICLES = [
 
     speed: 1.9,
     grip: 1.65,
-    weight: 1.36,
+    weight: 2.45,
     airRot: 0.769,
     fuel: 2.3,
     color: "#212529",

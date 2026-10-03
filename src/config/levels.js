@@ -1,4 +1,4 @@
-// 关卡数据与地形数学（纯函数，不依赖任何运行时状态）
+﻿// 关卡数据与地形数学（纯函数，不依赖任何运行时状态）
 //  · 36 条支线 × 12 关 = 432 关（扁平数组，索引 = 全局索引，与旧代码路径兼容）
 //  · 难度沿"全局进度 gi"单调递增（坡度 / 落差 / 颠簸 / 燃料 / 三星时限）
 //  · 地形 = 主坡(大起伏) + 中波(连续坡) + 颠簸(细碎) + 下坡断层
@@ -347,7 +347,30 @@ function finishAnchor(L) {
 //   而 feats/step 的影响范围（420~980px / STEP_W=150px）远小于桶宽，一个元素
 //   通常只落在一个桶里。桶数 = len/2048，167km 的终局关约 8100 个桶 —— 可接受。
 // ============================================================
-const BUCKET_W = 2048;
+const BUCKET_W_MIN = 2048;
+const BUCKET_MAX = 20000;
+
+/**
+ * 该关卡的桶宽：下界 2048px，并保证**桶数不超过 BUCKET_MAX**。
+ *
+ * ★ 为什么不能固定 2048：宇宙场第七宇宙速度满级是 6,325,178 km/h = 1.76e8 px/s，
+ *   "跑满 6 分钟"的赛道就是 6.3e10 px（630 亿）。固定桶宽会开出 **3000 万个桶**
+ *   × 3 个数组 = 9200 万个元素，光建索引就要十几秒、吃掉几百 MB。
+ *   按桶数封顶反解桶宽即可。代价只是超长赛道的桶更宽（每桶多扫几个
+ *   step/feat）—— 而那些赛道上一帧就走 300 万 px，单个 step（影响 150px）
+ *   根本不可能被逐个看到，所以这个代价在玩法上不可观测。
+ */
+const bucketWidthOf = (len) => Math.max(BUCKET_W_MIN, Math.ceil(len / BUCKET_MAX));
+
+/**
+ * 每段最多放多少条断层（超长赛道的封顶）。
+ *
+ * ★ 普通关与终局关都远够不到这个上限：第 432 关（78,000px）整关约 50 条，
+ *   终局关（16.7M px）每段约 1.4 万条 —— 所以封顶只对宇宙场生效，
+ *   **既有关卡的断层密度逐位不变**。
+ *   2000 × 36 段 = 7.2 万条，与终局关同量级，内存与建索引耗时都可接受。
+ */
+const STEPS_PER_SEG_MAX = 2000;
 
 /**
  * 为关卡建立分桶索引（幂等：重复调用直接返回已建好的）。
@@ -358,7 +381,8 @@ const BUCKET_W = 2048;
 function buildIndex(L) {
   if (L._idx) return L._idx;
   const n = L.len;
-  const nBuckets = Math.max(1, Math.ceil(n / BUCKET_W) + 2);
+  const bw = bucketWidthOf(n);
+  const nBuckets = Math.max(1, Math.ceil(n / bw) + 2);
   /** 每个桶影响到的 waves 下标区间（升序，闭开区间） */
   const waveB = new Array(nBuckets);
   /** 每个桶影响到的 steps 下标区间（steps 按 cx 升序） */
@@ -377,8 +401,8 @@ function buildIndex(L) {
   // ---- steps：影响范围 = [cx, cx + STEP_W] ----
   let sLo = 0;
   for (let b = 0; b < nBuckets; b++) {
-    const bx0 = b * BUCKET_W;
-    const bx1 = bx0 + BUCKET_W;
+    const bx0 = b * bw;
+    const bx1 = bx0 + bw;
     // 起点：第一个 cx + STEP_W > bx0 的元素
     while (sLo < L.steps.length && L.steps[sLo].cx + STEP_W <= bx0) sLo++;
     let sHi = sLo;
@@ -389,8 +413,8 @@ function buildIndex(L) {
   // ---- feats：影响范围 = [x0, x1] ----
   let fLo = 0;
   for (let b = 0; b < nBuckets; b++) {
-    const bx0 = b * BUCKET_W;
-    const bx1 = bx0 + BUCKET_W;
+    const bx0 = b * bw;
+    const bx1 = bx0 + bw;
     // feats 按 x0 升序：x1 > bx0 的第一个元素即为起点
     while (fLo < L.feats.length && L.feats[fLo].x1 <= bx0) fLo++;
     let fHi = fLo;
@@ -398,7 +422,8 @@ function buildIndex(L) {
     featB[b] = [fLo, fHi];
   }
 
-  L._idx = { nBuckets, waveB, stepB, featB, wLen };
+  // ★ bw 必须存进索引：hillRaw 取桶下标要用它，不能再拿模块常量当桶宽
+  L._idx = { nBuckets, bw, waveB, stepB, featB, wLen };
   return L._idx;
 }
 
@@ -413,7 +438,7 @@ function hillRaw(L, x) {
     relief += w.amp * Math.sin(x * w.f + w.ph);
   }
   // ---- steps：按桶取下标区间，不再从 0 扫全表 ----
-  const b = (x / BUCKET_W) | 0;
+  const b = (x / idx.bw) | 0;
   const steps = L.steps;
   if (b >= 0 && b < idx.nBuckets) {
     const r = idx.stepB[b];
@@ -957,7 +982,13 @@ function buildLongCourse(o) {
     }
     // 断层按段铺开：每段固定条数，保证全长密度均匀
     // （旧实现只按全长放 7 条，167km 上最后一条会落在 40km 之外）
-    const sp = buildSteps(mood, 1, 1, segLen, rng, Math.max(1, Math.round(segLen / mood.stepGap)));
+    // ★ 条数必须封顶：宇宙场第七宇宙速度满级一局是 6.3e10 px，36 段各 1.75e9 px，
+    //   按 stepGap(~1800) 反解就是每段 100 万条、全场 **3600 万条** —— 光生成就
+    //   要十几秒，索引与内存跟着一起爆。封顶后每段最多 STEPS_PER_SEG_MAX 条，
+    //   代价只是超长赛道的断层间距变大（每段 1.75e9/2000 ≈ 87 万 px 一条），
+    //   而那些赛道上一帧就走 300 万 px，玩家根本看不到单个断层。
+    const sp = buildSteps(mood, 1, 1, segLen, rng,
+      Math.max(1, Math.min(STEPS_PER_SEG_MAX, Math.round(segLen / mood.stepGap))));
     for (const st of sp) steps.push({ cx: Math.round(st.cx + s * segLen), drop: st.drop });
   }
   feats.sort((a, b) => a.x0 - b.x0);
@@ -1070,9 +1101,9 @@ export const MODE_SPACE = "space";
  *
  *   为什么必须改：AI 配速早就改成"玩家极速 ×0.9"了（见 spaceAIScale），
  *   长度却还钉在"某台参考车 × 6 分钟"上，两者直接打架 ——
- *   实测归墟（1000 km/h）跑终极级需要 **5 小时**，面板却写着"6 分钟"。
+ *   实测入门宇宙车跑终极级需要数小时，面板却写着"6 分钟"。
  *   玩家看到的是"6 分钟"，实际要开一整天。
- *   另一条路是给分级加车辆门槛，但那样归墟只能进「易」级，
+ *   另一条路是给分级加车辆门槛，但那样入门车只能进「易」级，
  *   宇宙场对它几乎没用武之地（而它恰恰是任务换来的第一台车）。
  *
  *   分级的难度改由**地形**承担：segs（分段数）与 slopeDeg（坡度上限）逐级递增，
@@ -1084,11 +1115,11 @@ export const MODE_SPACE = "space";
  * ★ kmh 只用于**面板上的对照文案**（"参考配速"），不参与长度与 AI 计算。
  */
 export const SPACE_TIERS = [
-  { id: "easy", name: "易", icon: "🌑", kmh: 1000, segs: 12, slopeDeg: 26, gold: 4e10, themes: [3, 11, 24, 34] },
-  { id: "mid", name: "中", icon: "🪐", kmh: 5000, segs: 18, slopeDeg: 22, gold: 2.4e13, themes: [24, 34, 3, 11] },
-  { id: "hard", name: "难", icon: "🌌", kmh: 10000, segs: 24, slopeDeg: 18, gold: 1.08e17, themes: [34, 3, 24, 11] },
-  { id: "brutal", name: "极难", icon: "⚫", kmh: 25000, segs: 30, slopeDeg: 14, gold: 5.184e21, themes: [3, 34, 11, 24] },
-  { id: "final", name: "终极", icon: "🌠", kmh: 50000, segs: 36, slopeDeg: 10, gold: 1.5552e24, themes: [11, 24, 34, 3] },
+  { id: "easy", name: "易", icon: "🌑", kmh: 28440, segs: 12, slopeDeg: 26, gold: 4e10, themes: [3, 11, 24, 34] },
+  { id: "mid", name: "中", icon: "🪐", kmh: 40320, segs: 18, slopeDeg: 22, gold: 2.4e13, themes: [24, 34, 3, 11] },
+  { id: "hard", name: "难", icon: "🌌", kmh: 60120, segs: 24, slopeDeg: 18, gold: 1.08e17, themes: [34, 3, 24, 11] },
+  { id: "brutal", name: "极难", icon: "⚫", kmh: 3600000, segs: 30, slopeDeg: 14, gold: 5.184e21, themes: [3, 34, 11, 24] },
+  { id: "final", name: "终极", icon: "🌠", kmh: 6300000, segs: 36, slopeDeg: 10, gold: 1.5552e24, themes: [11, 24, 34, 3] },
 ];
 
 /** 宇宙场的目标时长（秒）：任何车、任何分级都跑满这么久 */
@@ -1166,9 +1197,9 @@ export function spaceCourse(tierIdx, playerTop) {
  * 宇宙场的 AI 配速（R3.3 / R3.4）。
  *
  * ★ 核心口径：AI 取玩家**当前车辆实际极速**的 0.9 倍，而不是全局固定值。
- *   Lv0 归墟（~90 km/h）→ AI 81 km/h，慢于玩家 → 玩家能赢；
- *   满级归墟（1000 km/h）→ AI 900 km/h，明显更快；
- *   无相（100,000 km/h）→ 90,000 被 cap 钳到 50,000 → 玩家稳赢。
+ *   Lv0 的入门宇宙车实车远低于标称 → AI 更慢，慢于玩家 → 玩家能赢；
+ *   满级入门宇宙车（28,440 km/h）→ AI 25,596 km/h，明显更快；
+ *   第七宇宙速度（6,300,000 km/h）→ 被 cap 钳到 50,000 → 玩家稳赢。
  *
  * ★ tier.kmh **完全不参与**配速：它只是面板上的"参考配速"文案。
  *   早先把它当"AI 该多快"的下限，结果 Lv0 玩家参赛时 AI 反而快 1.3~67 倍，
@@ -1210,7 +1241,7 @@ export function levelAt(idx) {
  *   若只改 world.js，AI 会跑在 A 赛道上而地形仍是 B 的。
  *
  * ★ 宇宙场多一个参数：赛道长度 = 玩家极速 × 360s，所以必须传极速。
- *   缺省回落到 27778 px/s（= 1000 km/h，归墟标称），
+ *   缺省回落到 7900 px/s（= 28,440 km/h，第一宇宙速度标称），
  *   保证任何忘了传参的调用方都能拿到一条长度合理的赛道而不是长度 0。
  */
 export function courseAt(idx, mode, playerTop) {

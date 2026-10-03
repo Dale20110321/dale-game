@@ -85,8 +85,15 @@ export function hasUniverseVehicle() {
   return false;
 }
 
-/** 金币任务的目标：基础宇宙车「归墟」的车下标（未拥有时有效） */
-const QUEST_VEHICLE = "omega";
+/**
+ * 金币任务的目标车（未拥有时有效）：基础宇宙车「第一宇宙速度」。
+ *
+ * ★ 原为「归墟」（id=omega）。宇宙级车按真实宇宙速度重做后 omega 已不存在，
+ *   任务目标顺延到新的入门档 cv1（7.9 km/s = 28,440 km/h）。
+ *   门槛仍为累计赚取 ¥8e8：相对新的入门车价 ¥1e10 是"认真玩几十关能达成"，
+ *   相对形态解锁价 ¥1.25e11 则是明确的早期目标。
+ */
+const QUEST_VEHICLE = "cv1";
 
 /**
  * 宇宙场金币任务的状态（R3.5）。
@@ -96,9 +103,10 @@ const QUEST_VEHICLE = "omega";
 export function spaceQuestState() {
   const idx = VEHICLES.findIndex((v) => v.id === QUEST_VEHICLE);
   const owned = (store.ownedVehicles || []).includes(idx);
-  // 任务条件：累计金币收入达到 ¥8e8（= 归墟车价的 2 倍）
-  // —— 起步车四项升满是 ¥28,240，全通 432 关约 ¥213 万，
-  //    所以 ¥8e8 是一个"认真玩几十关才能达成、但不需要刷到吐"的门槛。
+  // 任务条件：累计金币收入达到 ¥8e8
+  // —— 起步车（驮马）四项升满是 ¥28,240，全通 432 关约 ¥213 万，
+  //    所以 ¥8e8 是一个"认真玩几十关才能达成、但不需要刷到吐"的门槛，
+  //    相对新的入门宇宙车价 ¥1e10 只占 8%，仍是最早期目标。
   const need = 8e8;
   const got = (store.stat && store.stat.earnedGold) || 0;
   return {
