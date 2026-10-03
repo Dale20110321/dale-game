@@ -5,7 +5,7 @@ import {
   RATING_MIN, RANK_GAIN_BASE, RANK_GAIN_BASE_ADV, RATING_LOSS, RATING_LOSS_ADVANCED,
   rankName, rankStars, rankPromoReward, rankDelta, rankGold,
   RACE_FORMATS, RACE_PLACE_GOLD } from "../config/constants.js";
-import { LEVELS, levelAt, segmentThemeAt, variantRule, FINALE_INDEX } from "../config/levels.js";
+import { LEVELS, levelAt, courseAt, segmentThemeAt, variantRule, FINALE_INDEX, FINALE, FINALE_SEGS } from "../config/levels.js";
 import { THEMES } from "../config/themes.js";
 import { store, bike, world } from "../core/store.js";
 import { key } from "../core/input.js";
@@ -127,8 +127,56 @@ function beginRun() {
   // 排位赛永远是单挑；普通比赛按玩家在面板上选的赛制（1V1 / 多人 / 团赛）
   if (store.mode === "ranked") raceInit("duel");
   else if (store.mode === "race") raceInit(store.raceFormat);
+  resumeFinaleCheckpoint();
   store.state = "play";
   presenter.hideOverlay();
+}
+
+/**
+ * 终局关断点续玩（R1.3）。
+ *
+ * 进度语义：`progress.finaleSeg` = **已通过的段数**，断点 x = `FINALE.segments[finaleSeg].x`。
+ *  · 从断点段首开始，因此该段内的门必须**预先标记为已通过** ——
+ *    否则第 1 个门的 `limit` 是"从关卡起点累计到该门"的时间，
+ *    而计时从断点才起算，会立刻超时判负。
+ *    做法：把断点之前（含当前段）的门全部置 passed，并让 run.gateIdx 对齐到断点，
+ *    于是"门计时"从下一个未过的门开始算，与从断点起跑的实际用时自洽。
+ *  · 其它模式与 finaleSeg=0 时行为完全不变（回到起点，起点之前没有门）。
+ */
+function resumeFinaleCheckpoint() {
+  if (store.mode !== "level" || store.selLevel !== FINALE_INDEX) return;
+  const seg = store.progress.finaleSeg || 0;
+  if (!(seg > 0)) return;
+  const L = FINALE;
+  const segs = L.segments;
+  const clamped = Math.min(seg, segs.length);
+  const x = clamped < segs.length ? segs[clamped].x : L.len;
+  resetBike(x); // resetBike 内部会把 spawnX 也置为 x
+  // 跳过已通过的门：标记 passed 并把游标推到断点之后第一个未过的门
+  let idx = 0;
+  for (const g of world.gates) {
+    if (g.x <= x) { g.passed = true; idx++; } else break;
+  }
+  store.run.gateIdx = idx;
+  store.cam.x = x;
+  store.phys.theme = segmentThemeAt(L, x);
+  const T = THEMES[store.phys.theme] || THEMES[0];
+  store.phys.gravity = T.g;
+  store.phys.traction = T.traction;
+  showToast(`⏩ 从第 ${clamped + 1} / ${segs.length} 段继续（断点已恢复）`, 1800);
+}
+
+/**
+ * 通过一个地形段的最后一个计时门时落盘断点（R1.3）。
+ * @param {{seg:number}} g 刚通过的计时门
+ */
+function checkpointFinale(g) {
+  if (store.mode !== "level" || store.selLevel !== FINALE_INDEX) return;
+  if (g.seg == null) return;
+  const done = g.seg + 1;              // 已通过的段数
+  if (done <= (store.progress.finaleSeg || 0)) return; // 只前进，不回退
+  store.progress.finaleSeg = Math.min(done, FINALE_SEGS);
+  settleProgress();                     // 立即写盘
 }
 
 /**
@@ -328,7 +376,7 @@ export function quitFreeRun() {
 /** 到达终点结算 */
 function finishLevel() {
   const run = store.run;
-  const L = levelAt(store.selLevel);
+  const L = courseAt(store.selLevel, store.mode);
   run.settling = true;
   // 结算结果卡：由 presenter 注入到 ui 层渲染（game 不 import ui）
   const result = {
@@ -481,8 +529,8 @@ export function update(dt) {
   //   绝不触碰 bike.rear / bike.front / bike.head 的 x / y / px / py；重力与抓地是按分段
   //   取值的常量，切换只改变"后续子步的加速度"，已经积分的当前帧状态不受影响。
   //   因此跨越分界点绝不会出现位置瞬移、速度突变或 NaN。
-  if (store.mode === "level") {
-    syncSegmentTheme(levelAt(store.selLevel), (b.rear.x + b.front.x) / 2);
+  if (store.mode === "level" || store.mode === "race" || store.mode === "ranked") {
+    syncSegmentTheme(courseAt(store.selLevel, store.mode), (b.rear.x + b.front.x) / 2);
   }
   updateParticles();
   emitRideDust();
@@ -538,6 +586,10 @@ export function update(dt) {
           g.passed = true;
           run.gateIdx++;
           showToast("⏱ 计时门 " + run.gateIdx + "/" + world.gates.length + " 通过", 600);
+          // ★ 终局关断点续玩（R1.3）：每通过一个地形段的**最后一个门**就落盘。
+          //   判据用 g.seg（buildGates 按段布门时写入），且只在段号前进时落盘，
+          //   所以 360 个门不会触发 360 次写盘 —— 每段恰好一次。
+          checkpointFinale(g);
         }
       }
     }

@@ -1,6 +1,6 @@
 // 地形访问层：把"纯地形数学"（config/levels.js）与"当前关卡/模式状态"桥接起来
 import { store } from "../core/store.js";
-import { levelAt, levelHillY, levelGroundInfo, freeHill as freeHillPure } from "../config/levels.js";
+import { courseAt, levelHillY, levelGroundInfo, freeHill as freeHillPure } from "../config/levels.js";
 import { clamp } from "../core/utils.js";
 
 /** 无限模式地形 */
@@ -9,7 +9,7 @@ export const freeHill = freeHillPure;
 /** 当前地形高度 */
 export function hillY(x) {
   if (store.mode === "free") return freeHillPure(x);
-  return levelHillY(levelAt(store.selLevel), x);
+  return levelHillY(courseAt(store.selLevel, store.mode), x);
 }
 
 export function groundY(x) {

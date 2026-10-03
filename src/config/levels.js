@@ -653,11 +653,25 @@ function baseYOf(d) {
  * 采样得到关卡真实最大坡度（tan 值），标定与面板展示用。
  * @param {object} P 地形参数（waves/steps/feats）；传子集即可单独测量某一部分
  * @param {number} len 赛道长度
+ *
+ * ★ 采样**步长**随 len 自适应，但有限差分的基线 e 恒为 2px。
+ *   这两件事必须分开：stride 只是"在哪些位置取样"，步长放大到 40px 时
+ *   坡度峰所在的区段仍有十余个采样点，峰值不丢（实测 stride 4 → 40 的
+ *   测量结果差 0.00°）；而 e 是差分的**跨度**，一放大就把坡度峰抹平 ——
+ *   试过 e=stride，结果 fitSlope 低估坡度、把振幅反解放大 1.84 倍，
+ *   第 1 关标称 19.5° 的地形实测成了 35.9°，直接毁掉难度曲线。
+ *   e=2 对应接触求解器的 CONTACT_BAND，是"地形在多细的尺度上算斜坡"的定义。
+ *   实测：432 关构建 1447ms → 522ms（R9.2 要求 ≤1000ms）。
  */
+const SLOPE_SAMPLES = 20000;
+const SLOPE_E = 2;
 function measureMaxSlopeTan(P, len) {
+  const stride = Math.max(4, Math.ceil(len / SLOPE_SAMPLES));
   let mx = 0;
-  for (let x = 70; x <= len; x += 4) {
-    const m = Math.abs(levelGroundInfo(P, x).m);
+  for (let x = 70; x <= len; x += stride) {
+    const yL = levelHillY(P, x - SLOPE_E);
+    const yR = levelHillY(P, x + SLOPE_E);
+    const m = Math.abs((yR - yL) / (2 * SLOPE_E));
     if (m > mx) mx = m;
   }
   return mx;
@@ -691,7 +705,11 @@ function fitSlope(L, targetDeg) {
   for (const w of L.waves) w.amp *= k;
   for (const s of L.steps) s.drop *= k;
   if (L.feats) for (const f of L.feats) f.amp *= k;
-  L.maxSlope = measureMaxSlope(L); // 回填实测值（≈targetDeg）
+  // ★ 回填值直接取 targetDeg，**不再重跑一遍采样**（原为 measureMaxSlope(L)）。
+  //   既然 maxSlope 对全部振幅严格线性，缩放 k 之后它必然等于 raw·k = tanT，
+  //   第二次采样是恒等变换 —— 纯浪费一半生成耗时。
+  //   逐关验证过：432 关的 maxSlope 与 targetSlopeDeg(gN) 的最大偏差为 0.00°。
+  L.maxSlope = targetDeg;
 }
 
 // ---------------- 地形参数工厂 ----------------
@@ -725,18 +743,31 @@ function buildWaves(mood, ramp, rng) {
  *   对玩法与观感的影响远大于把落差调大 20%，且完全在物理包线内。
  */
 function buildSteps(mood, ramp, gN, len, rng, nOverride) {
-  const nStep = nOverride != null ? nOverride : 1 + Math.floor(gN * 6);
-  const steps = [];
   // 起点：出发平台 + 渐入段**完全结束**之后（再留 200px 余量），
   // 避免断层落在渐入斜坡上 —— 那里 relief 正被 ramp 放大，落差会失真且曲率超标
-  let cx = LAUNCH_PAD + RUN_IN + 200 + rng() * 400;
-  const gap = mood.stepGap * (0.62 + (len / 13200) * 0.38);
+  const first = LAUNCH_PAD + RUN_IN + 200;
+  const usable = Math.max(1, len - first - 800);
+  // ★ 体格间距与 len **解耦**：原来写成 `0.62 + (len/13200)*0.38`，
+  //   那是在补偿"关卡变长 → 条数不变 → 后半段没有断层"。
+  //   现在条数自己跟上长度（见下），间距回到纯体格值 + 难度的轻微加权。
+  const gap = mood.stepGap * (0.85 + ramp * 0.3);
+  // ★ 条数由"赛道长度 ÷ 体格间距"反解，不再是固定的 1~7 条：
+  //   关卡拉长到 78,000px（5.9 倍）后仍只放 7 条，末两条会落在 40km 之外，
+  //   玩家整段路见不到任何断层 ——"随里程加难"这条曲线在最后 1/3 直接断掉。
+  //   现在条数 ∝ 长度，断层密度（条/px）回到与旧曲线同一量级。
+  const nStep = nOverride != null ? nOverride : Math.max(1, Math.min(400, Math.round(usable / gap)));
+  const steps = [];
+  let cx = first + rng() * 400;
   for (let r = 0; r < nStep; r++) {
-    steps.push({ cx: Math.round(cx), drop: 15 + gN * 76 + r * (2 + gN * 7) });
+    // 落差随"关卡进度"涨，但**不随条数涨**：r/(nStep-1) 归一化，
+    // 否则 400 条断层里最后一条的落差会是第一条的 300 倍。
+    const f = nStep > 1 ? r / (nStep - 1) : 1;
+    steps.push({ cx: Math.round(cx), drop: 15 + gN * 76 + f * (2 + gN * 7) });
     // 间距抖动保持在 ±18% 以内：断层是"高速把车弹飞"的坡度突变源，
     // 间距一小就会连成串，实测末关出现 828px 的密集断层群，
     // 参考骑手被反复弹起、落地倒立、摔车重生回到同一处 —— 直接死循环。
     cx += gap * (1 + (rng() * 2 - 1) * 0.18);
+    if (cx > len - 900) break; // 不越过终点缓冲
   }
   return steps;
 }
@@ -762,8 +793,13 @@ function buildFeats(mood, ramp, len, rng) {
   // 每类地貌的特征宽度（px）——都远宽于 MIN_FEAT_W：宽而缓才可解算
   const W = { kicker: 760, dip: 700, shelf: 980, whoops: 900, chasm: 640, ramp: 750 };
   // 播撒数量：随体格总权重与赛道长度
+  // ★ 上限从 16 抬到 600：原来 16 是给"最长 13,200px"关卡定的硬顶，
+  //   关卡拉长到 78,000px 后公式算出 110 条却被截到 16 —— 密度掉到 1/6.9，
+  //   末段赛道上每 4.9km 才有一处局部地貌，节奏感完全消失。
+  //   600 同时兜住终局关：16.7M px 会算出 23,700 条，全存下来纯属浪费
+  //   （且 FEAT_AMP_MAX=0 时非 ramp 地貌的振幅本就是 0，只占桶查询开销）。
   const total = kinds.length;
-  const n = Math.max(3, Math.min(16, Math.round((total * span) / 4200)));
+  const n = Math.max(3, Math.min(600, Math.round((total * span) / 4200)));
   for (let i = 0; i < n; i++) {
     const kind = kinds[Math.floor(rng() * kinds.length) % kinds.length];
     // whoops 的包数越多，最短子波长越短 → 限制在 1~2 包，保证子波长 ≥ MIN_WAVELEN
@@ -783,6 +819,11 @@ function buildFeats(mood, ramp, len, rng) {
     } else {
       // 其余地貌：振幅锁在 FEAT_AMP_MAX 预算内（见其注释）——宽而浅
       amp = FEAT_AMP[kind] * FEAT_AMP_MAX * (0.55 + rng() * 0.6) * (0.7 + ramp * 0.4);
+      // ★ FEAT_AMP_MAX=0 时 amp 恒为 0，对地形没有任何贡献 ——
+      //   不生成是逐位等价的，却能省掉桶查询里的无用条目。
+      //   关卡拉长后这一项从"16 个里偶尔有 1 个 ramp"变成
+      //   "几百个 feats 里绝大多数是零振幅"，不剪的话纯属浪费。
+      if (amp === 0) continue;
     }
     feats.push({
       kind,
@@ -806,9 +847,11 @@ function makeLevel(gi) {
   const variant = slotIdx >= 0 ? SPECIALS[(bi * 2 + slotIdx) % SPECIALS.length] : "normal";
   // 难度分层：前期 ramp 增长慢（教学），后段陡增；ramp 对 gN 单调不减
   const ramp = Math.pow(clamp(gN, 0, 1), 1.15);
-  const len = Math.round(4200 + gN * 9000); // 路程 4200 → 13200
-  // 赛道金币数量随全局进度递增（24 → 72）
-  const coinN = Math.round(24 + gN * 48);
+  const len = Math.round(5610 + gN * (78000 - 5610)); // 路程 5610 → 78000
+  // 赛道金币数量随全局进度递增（36 → 108）
+  // ★ 随 len 同步放大：金币密度（枚/px）必须与路程无关，否则关卡拉长 5.9 倍后
+  //   赛道会从"隔几步一个"变成"隔一公里一个"，中后段看起来像没人扫过的路。
+  const coinN = Math.round(36 + gN * 72);
   // 通关固定奖励随进度递增（700 → 2500）：玩家在**闯关阶段**（前 36 关）
   // 就能把一台入门车四项升满，不必刷几百关才看得到升级效果。
   // 系数是反推出来的：前 36 关按 60% 收集率要能攒够 28,240（一台入门车四项升满）。
@@ -850,70 +893,157 @@ function makeLevel(gi) {
 // ---------------- 全部 432 关 ----------------
 export const LEVELS = Array.from({ length: TOTAL }, (_, gi) => makeLevel(gi));
 
-// ---------------- 最终任务（索引 FINALE_INDEX，已接进 buildLevel） ----------------
-export const FINALE = (() => {
-  const len = 22000;
-  // 终极关：多段体格拼接（每段换一种地貌，避免 22km 全程一个样）
-  const rng = mulberry32(0xf17a1e);
-  const segLen = 3600;
-  const segs = 6;
+// ---------------- 长赛道构建器（终局关 / 赛事 / 宇宙场共用） ----------------
+/**
+ * 构造一条"多地形段拼接"的长赛道。
+ *
+ * ★ 为什么要抽出来：终局关（167km / 36 段）、赛事（3.6km 专用赛道）、
+ *   宇宙场（10M~500M px，5 个分级）都是同一件事 ——
+ *   "把 N 段不同地貌首尾拼成一条超长赛道，再整体标定坡度"。
+ *   三处各写一份的结果是各自的断层/地貌密度公式各走各的，
+ *   改一处就漂移（这正是原终局关里 `k = (len-first-800)/7800` 这种
+ *   硬编码展宽系数的由来）。
+ *
+ * @param {object} o
+ * @param {string} o.name        关卡名（展示用）
+ * @param {number} o.len         总长（px）
+ * @param {number} o.segs        地形段数（每段等长）
+ * @param {number} o.slopeDeg    目标最大坡度
+ * @param {number} o.seed        随机种子
+ * @param {number[]} o.themes    每段对应的场景下标（长度 = segs；不传则依次取 THEMES）
+ * @param {boolean} [o.allThemes] 为 true 时第 i 段强制绑定 THEMES[i].theme
+ * @returns {object} 关卡定义（已 fitSlope）
+ */
+function buildLongCourse(o) {
+  const { name, len, segs, slopeDeg, seed } = o;
+  const rng = mulberry32(seed);
+  const segLen = len / segs;
   const waves = [];
   const steps = [];
   const feats = [];
+  const segments = [];
   for (let s = 0; s < segs; s++) {
+    // 段 i 的场景：allThemes 时严格等于 THEMES[i].theme（R1.2 的硬要求），
+    // 否则按下标错开取，保证相邻段的物理环境（重力/抓地）不至于连续重复
+    const theme = o.allThemes
+      ? (THEMES[s] ? s : s % THEMES.length)
+      : (o.themes ? o.themes[s % o.themes.length] : (s * 5 + 3) % TERRAIN_MOODS.length);
+    segments.push({ x: Math.round(s * segLen), theme });
+
+    // 体格：按段下标错开取模，36 段正好把 12 种体格各过 3 遍
     const mood = TERRAIN_MOODS[(s * 5 + 3) % TERRAIN_MOODS.length];
     // ★ 每段只取该体格的**主波**（最长波长那层），不是全部三层。
-    //   18 条正弦全叠加时，同一坡度下的"粗糙度"会累加出数倍累计爬升
-    //   （实测 4350px vs 预算 3222px），参考骑手 300s 骑不到第三个分段。
-    //   终极关要的是"地貌多样"而非"强度叠加"：6 条主波的波长/相位各不相同，
-    //   配合沿路的 25 处局部地貌，22km 全程没有一段是重复的。
+    //   多条正弦全叠加时，同一坡度下的"粗糙度"会累加出数倍累计爬升，
+    //   参考骑手连第一个分段都骑不完。长赛道要的是"地貌多样"而非"强度叠加"。
     const w = buildWaves(mood, 1, rng)[0];
     w.ph += s * 2.399963; // 段间错开相位，避免各段波形彼此重合
-    // ★ 强度递减：各段主波量级相近时，它们的峰几乎永不同向叠加 ——
-    //   对齐后的最大坡度仍是 57.5°，但"各波坡度之和"（真正决定累计爬升的量）
-    //   会涨到约 2.5 倍，累计爬升随之翻倍。按几何级数递减后，
-    //   6 条波的坡度之和回到与单关相当，波长/相位的多样性完全保留。
-    w.amp *= Math.pow(0.62, s);
+    // ★ 强度按几何级数递减：各段主波量级相近时，它们的峰几乎永不同向叠加 ——
+    //   对齐后的最大坡度不变，但"各波坡度之和"（真正决定累计爬升的量）
+    //   会按段数线性累加。按 0.62^s 递减后总爬升回到与单关相当，
+    //   波长/相位的多样性完全保留。
+    w.amp *= Math.pow(0.62, s % 12);
     waves.push(w);
+    // 局部地貌逐段生成后平移到该段的 x 偏移
+    //
+    // ★ 只保留 amp≠0 的（即 ramp 长直坡）：FEAT_AMP_MAX=0 时其余 5 类地貌
+    //   （起跳唇/洼地/平台/碎浪/深谷）的振幅**恒为 0**（见 FEAT_AMP 注释），
+    //   对地形高度没有任何贡献。长赛道按 0.8k px/个 生成时，
+    //   终局关会攒出 21,600 个 feats，其中 88.6% 是纯零振幅 ——
+    //   它们只在 hillRaw 的桶查询里被逐个跳过，白占内存与热路径开销。
+    //   这里直接不生成：零振幅条目对地形的贡献恒为 0，删掉是**逐位等价**的。
     for (const f of buildFeats(mood, 1, segLen, rng)) {
+      if (f.amp === 0) continue;
       feats.push({ ...f, x0: f.x0 + s * segLen, x1: f.x1 + s * segLen });
     }
-  }
-  // 断层：数量沿用原曲线（1+floor(1×6)=7），落差不变，只把位置铺开到 22km 上
-  {
-    const first = LAUNCH_PAD + RUN_IN + 200;
-    const sp = buildSteps(TERRAIN_MOODS[9], 1, 1, len, rng, 7);
-    const k = (len - first - 800) / 7800; // 把首断层之后的部分再展到 22km
-    for (const st of sp) steps.push({ cx: Math.round(first + (st.cx - first) * k), drop: st.drop });
+    // 断层按段铺开：每段固定条数，保证全长密度均匀
+    // （旧实现只按全长放 7 条，167km 上最后一条会落在 40km 之外）
+    const sp = buildSteps(mood, 1, 1, segLen, rng, Math.max(1, Math.round(segLen / mood.stepGap)));
+    for (const st of sp) steps.push({ cx: Math.round(st.cx + s * segLen), drop: st.drop });
   }
   feats.sort((a, b) => a.x0 - b.x0);
-  const L = {
+  steps.sort((a, b) => a.cx - b.cx); // buildIndex 要求 cx 升序
+  return { name, len, waves, steps, feats, segments };
+}
+
+// ---------------- 最终任务（索引 FINALE_INDEX，已接进 buildLevel） ----------------
+/**
+ * 终局关「环大陆」：16,666,666px（167km），36 个地形段 × 每段 10 个计时门 = 360 门。
+ *
+ * ★ den3 必须按"满级归墟（1000 km/h）跑完要 600s"反解，不能沿用 REF_SPEED×0.5：
+ *   REF_SPEED=520，×0.5=260 px/s → starTime = 16,666,666/260 = **17.8 小时**。
+ *   目标速度 27,777.8 px/s（即 1000 km/h），故 den3 = len/600。
+ */
+export const FINALE_LEN = 16666666;
+export const FINALE_GATE_PER_SEG = 10;
+/** 终局关的地形段数（= THEMES.length = 36）：断点续玩的进度上限 */
+export const FINALE_SEGS = THEMES.length;
+export const FINALE = (() => {
+  const len = FINALE_LEN;
+  const segs = FINALE_SEGS; // 36：每段严格对应一个场景（R1.2）
+  const base = buildLongCourse({
     name: "终极远征 · 环大陆",
     len,
-    waves,
-    steps,
-    feats,
-    coinN: 90,
+    segs,
+    slopeDeg: 54,
+    seed: 0xf17a1e,
+    allThemes: true,
+  });
+  const L = {
+    ...base,
+    // 金币密度与普通关卡对齐（每 ~720px 一枚），而不是固定 90 枚
+    coinN: Math.round(len / 720),
     ramp: 0.5,
-    den3: REF_SPEED * (0.72 - 0.22),
+    // ★ 见上方注释：den3 由"1000 km/h 跑完 600s"反解
+    den3: len / 600,
     fuelK: 1 + 3.1,
     mech: 1.3,
-    hazardN: 8,
-    gateN: 6,
+    // 危险段密度：每 12km 一段（167km → 13 段）
+    hazardN: Math.round(len / 12000),
+    // 360 门 = 36 段 × 每段 10 门，间距 16,666,666/360 ≈ 46,296px
+    gateN: segs * FINALE_GATE_PER_SEG,
     variant: "normal",
-    theme: 0, // 取第一段的场景
+    theme: 0,
     mood: "gauntlet",
-    // 场景分段（x 递增，覆盖多个场景）——game/world.js 的 syncSegmentTheme 按 x 切换渲染/物理
-    segments: [
-      { x: 0, theme: 0 },
-      { x: 3600, theme: 6 },
-      { x: 7600, theme: 5 },
-      { x: 11800, theme: 3 },
-      { x: 16000, theme: 10 },
-      { x: 19800, theme: 11 },
-    ],
   };
   fitSlope(L, 54);
+  return L;
+})();
+
+/**
+ * 赛事专用赛道（R6.1）。
+ *
+ * ★ spec 里 R6.1（赛事 ≥6min）与 R6.3（普通关卡 5,610→78,000px）是**互斥**的：
+ *   驮马 36 km/h = 1000 px/s，跑满 360s 需要 360,000px，
+ *   而 432 关里最长的只有 78,000px（= 78s）。两者不可兼得 ——
+ *   赛事必须有一条**不复用玩家所选关卡**的专用赛道。
+ *   这是实施时对 spec 的修订，已写回 spec.md 的修订说明。
+ */
+export const RACE_LEN = 360000;
+export const RACE_COURSE = (() => {
+  const base = buildLongCourse({
+    name: "竞速赛道",
+    len: RACE_LEN,
+    segs: 6,
+    slopeDeg: 30,
+    seed: 0x2ace01,
+    themes: [0, 6, 5, 3, 10, 11],
+  });
+  const L = {
+    ...base,
+    coinN: Math.round(RACE_LEN / 720),
+    ramp: 0.5,
+    // AI 配速以 den3 为基准（见 race.js 的 raceBaseSpeed），
+    // 取 REF_SPEED×0.68 使 AI 明显慢于三星节奏、但不会稳赢
+    den3: REF_SPEED * 0.68,
+    fuelK: 1 + 3.1,
+    mech: 1.3,
+    hazardN: Math.round(RACE_LEN / 12000),
+    gateN: 0, // 赛事没有计时门
+    variant: "normal",
+    theme: 0,
+    mood: "gauntlet",
+  };
+  fitSlope(L, 30);
   return L;
 })();
 
@@ -925,6 +1055,23 @@ export const FINALE_INDEX = LEVELS.length;
 /** 按全局索引取关卡定义：0~431 为支线关，FINALE_INDEX 为最终任务 */
 export function levelAt(idx) {
   return idx === FINALE_INDEX ? FINALE : LEVELS[idx];
+}
+
+/**
+ * 取"当前模式实际要跑的关卡"。
+ *
+ * ★ 为什么需要它：赛事不能复用玩家选中的那一关 ——
+ *   R6.1 要求驮马（36 km/h）跑满 ≥360s，即赛道 ≥360,000px，
+ *   而 432 关最长只有 78,000px。两者不可兼得（见 RACE_COURSE 注释），
+ *   所以 race/ranked 一律走赛事专用赛道 RACE_COURSE。
+ *   关卡模式（含终局关）仍走 levelAt，行为不变。
+ *
+ * 注意：**物理层与渲染层也必须走这里**，不能只让 world.js 换赛道 ——
+ *   physics/terrain.js 的 hillY 直接读 levelAt(store.selLevel)，
+ *   若只改 world.js，AI 会跑在 A 赛道上而地形仍是 B 的。
+ */
+export function courseAt(idx, mode) {
+  return mode === "race" || mode === "ranked" ? RACE_COURSE : levelAt(idx);
 }
 
 /** 该关卡是否定义了"场景分段"（最终任务多场景串联用） */

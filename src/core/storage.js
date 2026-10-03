@@ -10,7 +10,7 @@ import {
   safeGold,
 } from "../config/constants.js";
 import { VEHICLES } from "../config/vehicles.js";
-import { LEVELS, BRANCHES, LEVELS_PER_BRANCH } from "../config/levels.js";
+import { LEVELS, BRANCHES, LEVELS_PER_BRANCH, FINALE_SEGS } from "../config/levels.js";
 import { store } from "./store.js";
 import { toPlainDecimal, fromPlainDecimal } from "./utils.js";
 
@@ -505,6 +505,9 @@ export function loadProgress() {
   const o = prog && typeof prog === "object" && !Array.isArray(prog) ? prog : {};
 
   P.finaleDone = o.finaleDone === true;
+  // 终局关断点（R1.3）：老存档没有这个字段 → 0 = 从第一段开始，行为与旧版一致。
+  // 夹到 [0, 段数]：手工改档 / 导入的脏数据不能让断点指到不存在的段。
+  P.finaleSeg = Math.max(0, Math.min(FINALE_SEGS, intOr(o.finaleSeg)));
   P.invited = o.invited === true;
   P.wins = Math.max(0, intOr(o.wins));
   P.losses = Math.max(0, intOr(o.losses));
@@ -913,6 +916,7 @@ export function resetSave() {
   store.progress = {
     branchCleared: [],
     finaleDone: false,
+    finaleSeg: 0,
     invited: false,
     rating: 0,
     wins: 0,
