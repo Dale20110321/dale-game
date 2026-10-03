@@ -19,3 +19,10 @@ desktop.ini
 npm-debug.log*
 .cache/
 tmp/
+# 根目录的一次性校验脚本：本来就该进 tmp/，之前因为没这条规则
+# 混进了版本库（11 个 tmp_*.mjs 被跟踪），在 .gitignore 补上之前已经
+# 用 git rm --cached 移出索引（文件与提交历史都还在，随时可取回）。
+tmp_*.mjs
+tmp_*.js
+tmp_*.txt
+tmp_*.png

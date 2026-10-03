@@ -25,7 +25,7 @@ import {
 import { showToast } from "../core/toast.js";
 import { initAudio, playCoinSound } from "../core/audio.js";
 import { hasAch, clearedCount } from "../game/progress.js";
-import { spaceQuestState, claimSpaceQuest } from "../game/game.js";
+import { spaceQuestState, claimSpaceQuest, rankedCleared } from "../game/game.js";
 import { rankedAIScale } from "../game/race.js";
 import { getQuality, setQuality, QUALITY, QUALITY_LABEL } from "../render/postfx.js";
 import { getRenderScale, setRenderScalePersisted, RENDER_SCALES, RENDER_SCALE_LABEL } from "../render/postfx.js";
@@ -702,6 +702,24 @@ export function renderSpacePanel() {
   const pending = store.pendingSpace;
   store.pendingSpace = false;
 
+  // ★ 第一道门：排位赛没赢过就只看得到锁（用户要求"跑完排位赛才有"）。
+  //   放在最前面，金币任务面板排在它后面 —— 没打过排位的人不该先看到赚钱任务。
+  if (!rankedCleared()) {
+    showPanel(`<div class="modeTitle">🌌 宇宙场</div>
+      ${card({
+        cls: "vehCard",
+        icon: "🔒",
+        title: "先赢下一场排位赛",
+        sub: "宇宙场是 5 个难度分级的长程竞速，需要你先熟悉竞速玩法",
+        meta: `排位战绩 ${store.progress.wins} 胜 ${store.progress.losses} 负`,
+        locked: true,
+        interactive: false,
+      })}
+      <div class="panelNote">通关「最终任务」后解锁排位赛 → 赢一场即可开启宇宙场。</div>
+      <button class="btn backBtn" data-act="back">返回</button>`);
+    return;
+  }
+
   if (q.hasQuest) {
     showPanel(`<div class="modeTitle">🌌 宇宙场 · 金币任务</div>
       ${pending ? `<div class="panelNote">完成下面的任务即可获得基础宇宙车「第一宇宙速度」</div>` : ""}
@@ -731,7 +749,7 @@ export function renderSpacePanel() {
   const topPx = store.phys.topSpeed > 1 ? store.phys.topSpeed : (cur ? (cur.nominalKmh || 60) * (100 / 3.6) : 1667);
   const topKmh = Math.round(toKmh(topPx));
   showPanel(`<div class="modeTitle">🌌 宇宙场</div>
-    <div class="panelNote">太空背景 · 5 个难度分级 · <b>每个分级都按你的车速跑满 6 分钟</b>（换车后面板上的距离会跟着变）。AI 按你的实际极速配速。</div>
+    <div class="panelNote">太空背景 · 5 个难度分级 · <b>越难的赛道越长、对手越快</b>（长度按你的车速缩放：易 6 分钟 → 终极 30 分钟）。每位对手还有 ±7% 的个体随机。</div>
     ${SPACE_TIERS.map((t, i) => {
       const len = spaceLenOf(t, topPx);
       const ai = spaceAIScale(topPx, t);
@@ -739,8 +757,8 @@ export function renderSpacePanel() {
         cls: "vehCard",
         icon: t.icon,
         title: `宇宙场 · ${t.name}`,
-        sub: `${abbrevLen(len)} · ${SPACE_TARGET_SEC / 60} 分钟 · ${t.segs} 段地形`,
-        meta: `对手配速 ≈ ${abbrevNum(Math.round(toKmh(ai)))} km/h（你的 ${Math.round((ai / topPx) * 100)}%）· 通关 🪙${abbrevNum(t.gold)}`,
+        sub: `${abbrevLen(len)} · ${Math.round((SPACE_TARGET_SEC * (t.lenK || 1)) / 60)} 分钟 · ${t.segs} 段地形`,
+        meta: `对手配速 ≈ ${abbrevNum(Math.round(toKmh(ai)))} km/h（你的 ${Math.round((ai / topPx) * 100)}% ±7%）· 通关 🪙${abbrevNum(t.gold)}`,
         interactive: true,
         attrs: `data-act="spaceStart" data-tier="${i}"`,
       });
@@ -1254,3 +1272,6 @@ function slotListHtml() {
     ${hasEmpty ? `<button class="btn sm ghost slotNew" data-act="slotNew">✨ 新建存档</button>` : `<div class="panelNote">存档位已满（上限 ${MAX_SLOTS} 个）</div>`}
     <div class="panelNote">切换存档位会各自保存独立的进度 / 星级 / 金币 / 车库。当前正在玩的存档位不能删除。</div>`;
 }
+
+
+

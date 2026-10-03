@@ -37,6 +37,37 @@ const P = (mass, inertia, suspK, suspC, travel, torque, rpm, wheelieK, wheelieUp
  * coil  悬挂弹簧幅度；0 = 刚性前叉（公路车本来就没有避震）
  */
 const POSE = (shX, shY, hdX, hdY, barX, barY) => ({ shX, shY, hdX, hdY, barX, barY });
+
+/**
+ * 速度拖尾规格（纯表现层，render/trail.js 消费）。
+ *
+ * ★ 形态学（ART）管的是"车长什么样"，拖尾管的是"车跑起来留下什么"——
+ *   两者分开，是因为拖尾不参与任何物理，且要按**该车此刻的极速**归一化，
+ *   塞进 art 会让人以为改 art 会影响物理。
+ *
+ * ★ 七台宇宙车必须**每台一种颜色 + 一种形态**（用户明确要求）。形态不是换色，
+ *   是换画法：电弧 / 螺旋 / 日冕 / 余烬 / 涟漪 / 涡旋 / 光矛，七种画法
+ *   连抖动相位（seed）都错开，避免七台车同屏时拖尾同频闪烁。
+ *
+ * core  拖尾**芯**：接近白的高温色（能量最密处）
+ * glow  拖尾**外焰**：车辆主色系（余晖、边缘）
+ * style 签名形态，决定 render/trail.js 走哪条绘制分支：
+ *       arc 电弧 / helix 螺旋 / corona 日冕 / ember 余烬 / ripple 涟漪 / vortex 涡旋 / lance 光矛
+ * len   **满档尾长（屏幕 px，不是世界 px）** —— 见 render/trail.js 的"零逐帧分配"纪律 3
+ * width 满档半宽（屏幕 px）
+ * count 元素数（闪电条数 / 火舌数 / 光环数 / 碎块数），随画质档缩放
+ * spread 横向散布（屏幕 px），只对 arc / corona 生效
+ * seed  抖动相位种子：黄金角错开，保证七台车不同步
+ */
+const TRAIL = (style, core, glow, o) => Object.assign({
+  style, core, glow,
+  len: 220,
+  width: 9,
+  count: 4,
+  spread: 8,
+  seed: 0,
+}, o);
+
 const ART = (o) => Object.assign({
   tire: 3,        // 外胎线宽（px）
   rim: true,      // 是否画内圈（细胎高轮不画）
@@ -439,15 +470,15 @@ export const VEHICLES = [
     nominalKmh: 28440,
     // ★ costK 由"四项升满 = 车价 × 40"反解：单项满级 ΣupCost(1..500) = 155,300，
     //   四项就是 155,300 × 4 = 621,200，于是 costK = 车价 / 15,530。
-    costK: 643915,
-    price: 10000000000,
+    costK: 51513,
+    price: 800000000,
 
     speed: 2.6,
     grip: 3.42,
     weight: 3.10,
     airRot: 0.612,
     fuel: 5,
-    color: "#8ec9ff",
+    color: "#5EC8F5",   // 冰蓝 —— 近地轨道的天空色
     // ★ 近地轨道：常规胎、有避震、平把、标准头盔 —— "刚够上天的入门轨道车"
     art: ART({
       tire: 2.8, rim: true, spokes: 10, spokeW: 1.3, tube: 3.6,
@@ -455,9 +486,13 @@ export const VEHICLES = [
       helmR: 5.0, peak: true, vents: 2,
       pose: POSE(1.5, 0.5, 2.0, 0.5, 0.5, -0.5),
     }),
+    // ★ 拖尾：电弧（arc）—— 近地轨道的第一印象是"电"。三条分叉电弧，
+    //   越靠后越散开；芯是接近白的蓝，外焰是车色。
+    trail: TRAIL("arc", "#EAF9FF", "#5EC8F5",
+      { len: 190, width: 8, count: 3, spread: 9, seed: 0.13 }),
     // ★ inertia = 1 / airRot = 1.63（|airRot×inertia−1| = 0）
     phys: P(3.10, 1.63, 1.7, 1.5, 12, 26.4, 6.6, /* wheelieK */ 4.6, /* wheelieUp */ 20.2),
-    ultra: { fx: {}, name: "环绕形态", icon: "🛰️", mode: "omega", cost: 125000000000,
+    ultra: { fx: {}, name: "环绕形态", icon: "🛰️", mode: "omega", cost: 10000000000,
       desc: "28440 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
   {
@@ -470,15 +505,15 @@ export const VEHICLES = [
     // ★ 11.2 km/s = 40,320 km/h —— 摆脱地球引力束缚的最小速度。
     //   月球 1 号是第一个达到它的探测器。
     nominalKmh: 40320,
-    costK: 3090792,
-    price: 48000000000,
+    costK: 1545396,
+    price: 24000000000,
 
     speed: 2.6,
     grip: 6.18,
     weight: 2.45,
     airRot: 0.745,
     fuel: 6,
-    color: "#6fb8ff",
+    color: "#3FE0A5",   // 翡翠 —— 脱离地球后的第一抹绿
     // ★ 逃逸轨道：细胎、弯把、窄坐垫、前倾伏低
     art: ART({
       tire: 2.0, rim: false, spokes: 14, spokeW: 1.0, tube: 3.0,
@@ -486,9 +521,12 @@ export const VEHICLES = [
       helmR: 5.4, peak: false, vents: 3,
       pose: POSE(4.5, 2.5, 5.5, 2.0, 1.5, 1.5),
     }),
+    // ★ 拖尾：螺旋（helix）—— 挣脱地球之后进入绕行轨道，两股反向螺旋束。
+    trail: TRAIL("helix", "#E6FFF6", "#3FE0A5",
+      { len: 235, width: 10, count: 2, seed: 0.41 }),
     // ★ inertia = 1 / airRot = 1.34
     phys: P(2.45, 1.34, 1.8, 1.5, 11, 39.2, 8.1, /* wheelieK */ 7.4, /* wheelieUp */ 41.5),
-    ultra: { fx: {}, name: "逃逸形态", icon: "🚀", mode: "omega", cost: 600000000000,
+    ultra: { fx: {}, name: "逃逸形态", icon: "🚀", mode: "omega", cost: 300000000000,
       desc: "40320 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
   {
@@ -502,15 +540,15 @@ export const VEHICLES = [
     //   （地球轨道上的绝对值是 42.1 km/s；取地球公转方向发射，故只需额外补一点。）
     //   旅行者 1/2 号靠引力弹弓达到了它。
     nominalKmh: 60120,
-    costK: 18544752,
-    price: 288000000000,
+    costK: 46361880,
+    price: 720000000000,
 
     speed: 2.6,
     grip: 11.4,
     weight: 1.90,
     airRot: 0.868,
     fuel: 7,
-    color: "#9d8cff",
+    color: "#FFE14D",   // 明黄 —— 太阳的金
     // ★ 星际逃逸：极细胎、多辐条、直把展开、大头盔开面罩
     art: ART({
       tire: 1.5, rim: false, spokes: 20, spokeW: 0.7, tube: 2.6,
@@ -518,9 +556,13 @@ export const VEHICLES = [
       helmR: 6.0, peak: true, vents: 4,
       pose: POSE(-1.0, -2.0, -1.5, -2.0, -2.0, -3.0),
     }),
+    // ★ 拖尾：日冕（corona）—— 太阳的金。日冕从尾根向后**成扇形炸开**，
+    //   与前三台的"束状"读法完全不同；每根日珥末端带一枚亮斑。
+    trail: TRAIL("corona", "#FFF8D6", "#FFE14D",
+      { len: 215, width: 11, count: 9, seed: 0.68 }),
     // ★ inertia = 1 / airRot = 1.15
     phys: P(1.90, 1.15, 1.9, 1.5, 10, 52.6, 9.6, /* wheelieK */ 11.6, /* wheelieUp */ 86.4),
-    ultra: { fx: {}, name: "星际形态", icon: "🌌", mode: "omega", cost: 3600000000000,
+    ultra: { fx: {}, name: "星际形态", icon: "🌌", mode: "omega", cost: 9000000000000,
       desc: "60120 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
   {
@@ -534,15 +576,15 @@ export const VEHICLES = [
     //   中文维基给的是"≥525 km/s"（银河系含暗物质、精确质量未知，只能给下限），
     //   而非广为误传的 ~30 km/s —— 29.8 km/s 是地球的**公转速度**。
     nominalKmh: 1890000,
-    costK: 222537025,
-    price: 3456000000000,
+    costK: 1390856407,
+    price: 21600000000000,
 
     speed: 2.6,
     grip: 27.8,
     weight: 1.42,
     airRot: 0.942,
     fuel: 9,
-    color: "#c77dff",
+    color: "#FF6B3D",   // 烈橙 —— 银河核的炽热
     // ★ 银河逃逸：粗胎配宽辐条、长上管、大坐垫 —— 罕见的"重装高速车"
     art: ART({
       tire: 3.0, rim: true, spokes: 12, spokeW: 1.8, tube: 4.6,
@@ -550,9 +592,13 @@ export const VEHICLES = [
       helmR: 5.6, peak: true, vents: 3,
       pose: POSE(-0.5, -2.5, -1.0, -2.0, 0, -3.0),
     }),
+    // ★ 拖尾：余烬（ember）—— 银河核的炽热。这是七台里唯一**离散**的一台：
+    //   碎块沿尾部散开、边飞边升高、边冷边暗，和其余六台的连续能量束互补。
+    trail: TRAIL("ember", "#FFD98A", "#FF6B3D",
+      { len: 245, width: 10, count: 15, seed: 0.29 }),
     // ★ inertia = 1 / airRot = 1.06
     phys: P(1.42, 1.06, 2.0, 1.5, 9, 92.4, 13.5, /* wheelieK */ 9.7, /* wheelieUp */ 104.2),
-    ultra: { fx: {}, name: "银河形态", icon: "🌠", mode: "omega", cost: 43200000000000,
+    ultra: { fx: {}, name: "银河形态", icon: "🌠", mode: "omega", cost: 270000000000000,
       desc: "1890000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
   {
@@ -565,15 +611,15 @@ export const VEHICLES = [
     // ★ 约 1000 km/s = 3,600,000 km/h —— 脱离**本星系群**（银河系 + 仙女座等
     //   约 50 个星系）所需的逃逸速度。无统一定义，取常见科普值。
     nominalKmh: 3600000,
-    costK: 2670444301,
-    price: 41472000000000,
+    costK: 41725692209,
+    price: 648000000000000,
 
     speed: 2.6,
     grip: 63.4,
     weight: 1.02,
     airRot: 1.031,
     fuel: 11,
-    color: "#e05fff",
+    color: "#FF4D9E",   // 洋红 —— 星系团的能量
     // ★ 星系群逃逸：细管、超多辐条、极端前趴、无前檐
     art: ART({
       tire: 1.0, rim: false, spokes: 26, spokeW: 0.45, tube: 2.0,
@@ -581,9 +627,13 @@ export const VEHICLES = [
       helmR: 6.4, peak: false, vents: 6,
       pose: POSE(7.5, 6.0, 9.5, 5.0, 3.0, 4.5),
     }),
+    // ★ 拖尾：涟漪（ripple）—— 星系团的能量。垂直于行进方向的一圈圈激波环，
+    //   沿尾部向外扩散并变淡，是七台里唯一的"波"形画法。
+    trail: TRAIL("ripple", "#FFD6EC", "#FF4D9E",
+      { len: 250, width: 12, count: 6, seed: 0.87 }),
     // ★ inertia = 1 / airRot = 0.97
     phys: P(1.02, 0.97, 2.1, 1.5, 8, 168.5, 19.5, /* wheelieK */ 22.4, /* wheelieUp */ 192.7),
-    ultra: { fx: {}, name: "星系群形态", icon: "🕸️", mode: "omega", cost: 518400000000000,
+    ultra: { fx: {}, name: "星系群形态", icon: "🕸️", mode: "omega", cost: 8100000000000000,
       desc: "3600000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
   {
@@ -597,15 +647,15 @@ export const VEHICLES = [
     //   ★ 取 1500 而非常见的 2000：用户指定第七项落在 1500~2000 km/s，
     //     而七档必须严格递增 —— 若第六项取 2000，第七项就无处安放了。
     nominalKmh: 5400000,
-    costK: 32045331616,
-    price: 497664000000000,
+    costK: 1251770766259,
+    price: 19440000000000000,
 
     speed: 2.6,
     grip: 128.5,
     weight: 0.72,
     airRot: 0.502,
     fuel: 13,
-    color: "#ff5fd2",
+    color: "#B07CFF",   // 星紫 —— 超星系团的冷辉
     // ★ 超星系团：粗胎、宽辐条、宽大尾翼式长上管 —— "越强越难驾驭"的重量派
     art: ART({
       tire: 3.8, rim: true, spokes: 8, spokeW: 2.4, tube: 5.2,
@@ -613,9 +663,13 @@ export const VEHICLES = [
       helmR: 5.8, peak: true, vents: 2,
       pose: POSE(1.0, -5.0, -0.5, -4.0, 1.0, -5.5),
     }),
+    // ★ 拖尾：涡旋（vortex）—— 超星系团的冷辉。环面倾角沿尾部一路扭转并自转，
+    //   越远越小 = 一条正在收束的虫洞，是七台里唯一带"透视纵深"的画法。
+    trail: TRAIL("vortex", "#F0E4FF", "#B07CFF",
+      { len: 262, width: 13, count: 5, seed: 0.55 }),
     // ★ inertia = 1 / airRot = 1.99
     phys: P(0.72, 1.99, 2.2, 1.5, 7, 305.8, 27.5, /* wheelieK */ 8.4, /* wheelieUp */ 92.6),
-    ultra: { fx: {}, name: "超星系团形态", icon: "🕳️", mode: "omega", cost: 6220800000000000,
+    ultra: { fx: {}, name: "超星系团形态", icon: "🕳️", mode: "omega", cost: 243000000000000000,
       desc: "5400000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
   {
@@ -629,15 +683,15 @@ export const VEHICLES = [
     //   ★ 严格说"第七宇宙速度"没有科学共识：第六项已对应可观测宇宙边界，
     //     再往外没有明确的引力系统可供"逃逸"。这里按玩家的世界观命名。
     nominalKmh: 6300000,
-    costK: 384543979395,
-    price: 5971968000000000,
+    costK: 37553122987766,
+    price: 583200000000000000,
 
     speed: 2.6,
     grip: 312.0,
     weight: 0.42,
     airRot: 1.284,
     fuel: 16,
-    color: "#ffffff",
+    color: "#F0F4FF",   // 星白 —— 逃出一切之后只剩光
     // ★ 全域逃逸：最细管、最多辐条、最极端前趴
     art: ART({
       tire: 0.6, rim: false, spokes: 32, spokeW: 0.22, tube: 1.1,
@@ -645,9 +699,14 @@ export const VEHICLES = [
       helmR: 6.8, peak: false, vents: 8,
       pose: POSE(12, 10, 15, 9.5, 5, 8),
     }),
+    // ★ 拖尾：光矛（lance）—— 逃出一切之后只剩光。全场最长、最直、最亮：
+    //   一枚纺锤形光幕 + 一条贯穿的芯线 + 稀疏的星屑，是七台里唯一的"直线"画法
+    //   （其余六台都在摆动），刻意与"全域逃逸 = 不再有曲率"的设定对上。
+    trail: TRAIL("lance", "#FFFFFF", "#F0F4FF",
+      { len: 420, width: 9, count: 7, seed: 0.02 }),
     // ★ inertia = 1 / airRot = 0.78
     phys: P(0.42, 0.78, 2.3, 1.5, 6, 420.6, 36, /* wheelieK */ 31.2, /* wheelieUp */ 398.4),
-    ultra: { fx: {}, name: "全域形态", icon: "💫", mode: "omega", cost: 74649600000000000,
+    ultra: { fx: {}, name: "全域形态", icon: "💫", mode: "omega", cost: 7290000000000000000,
       desc: "6300000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
 
@@ -1055,3 +1114,4 @@ export const VEHICLES = [
 for (const v of VEHICLES) {
   if (v.ultra && v.ultra.fx) v.ultra.fxText = fxText(v.ultra.fx);
 }
+
