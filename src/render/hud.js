@@ -294,8 +294,22 @@ function drawInfoCard(r) {
         : String(store.run.gateIdx + 1);
       info.push("⏱ 第" + idxLabel + "门 " + rem.toFixed(1) + "s");
     }
-    if (!info.length) info.push("缩放 " + Math.round(store.cam.zoomBase * 100) + "% · R 重启 · +/- 缩放");
   }
+  // ★ 缩放读数**常驻**，不再藏在 `if (!info.length)` 兜底里。
+  //   旧写法把缩放当成"没有别的东西可显示时才补上的一行"，于是：
+  //   自由模式永远先 push 了里程行 → 这行永远不显示；
+  //   关卡模式只要还有计时门 → 同样不显示。
+  //   而 +/- 改的是**全局** zoomBase（0.6~2.5），换模式/重开都不重置，
+  //   按键时的 toast 只有 600ms。于是"画面被放大到看不清"这件事
+  //   玩家全程没有任何提示 —— 表现就是"莫名其妙地被放大了"。
+  //   实测 zoomBase 2.5 时可见世界宽度从 329px 掉到 225px。
+  const zPct = Math.round(store.cam.zoomBase * 100);
+  // "· +/- 可调" 只在宽屏追加：整行实测 232px（带提示）/ 177px（不带），
+  // 而窄屏顶栏三个圆钮的左缘在 ~320px 视口时已到 252px ——
+  // 带提示会挤到只剩 12px 余量。不带提示则缩放值本身照样常驻可见。
+  info.push(!compact && Math.abs(store.cam.zoomBase - 1.4) >= 0.01
+    ? "缩放 " + zPct + "% · +/- 可调"
+    : "缩放 " + zPct + "%");
   label(info.join("   "), x, r.y + 30, "caption", token("text-mid"));
 
   // 里程进度条（细，无底板：暗色槽 + 强调色填充）

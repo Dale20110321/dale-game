@@ -9074,9 +9074,9 @@
         const idxLabel = total > 20 ? `${store.run.gateIdx + 1}/${total}` : String(store.run.gateIdx + 1);
         info.push("⏱ 第" + idxLabel + "门 " + rem.toFixed(1) + "s");
       }
-      if (!info.length)
-        info.push("缩放 " + Math.round(store.cam.zoomBase * 100) + "% · R 重启 · +/- 缩放");
     }
+    const zPct = Math.round(store.cam.zoomBase * 100);
+    info.push(!compact && Math.abs(store.cam.zoomBase - 1.4) >= 0.01 ? "缩放 " + zPct + "% · +/- 可调" : "缩放 " + zPct + "%");
     label(info.join("   "), x, r.y + 30, "caption", token("text-mid"));
     const mx = (bike.rear.x + bike.front.x) / 2;
     const pct = store.mode === "free" ? 1 : clamp(mx / Math.max(1, store.finishX), 0, 1);
