@@ -18,6 +18,15 @@
  */
 export const CAM_ZOOM_BASE = 1.4;
 
+/**
+ * 巡航层阈值（px/s）= 3600 km/h：超过就改画色带而不再画逐点地形。
+ *
+ * ★ 放在 config 而不是 render/terrain.js：game/world.js 的 buildChunk 也要读它
+ *   来决定"要不要生成装饰"（那个速度下装饰进不了视野，实测每帧白花 8.4ms），
+ *   而 game 在 render 之上，直接 import 会是反向依赖。两边都读 config 才是干净的。
+ */
+export const CRUISE_V = 100000;
+
 /** 固定物理步长（秒） */
 export const DT = 1 / 60;
 /** 每个物理步的子步数 */
@@ -216,9 +225,11 @@ export const wheelieTauOf = (mTot, gravity, kMul) =>
  *
  * ★ 必须 ≥ 任何形态的目标极速，否则二分会在上界处提前收敛、
  *   把极速**静默截断**成一个假的平衡点（表盘与 HUD 一起说谎）。
- *   无相形态 100,000 km/h = 2,777,778 px/s，故上界抬到 4e7。
+ *   最高的一台是宇宙级「第七宇宙速度」满级形态 6,300,000 km/h
+ *   = 1.75e8 px/s，故上界抬到 2e8 —— 仍留出余量，且**低于 NUM_CAP_V = 3e8**
+ *   （两者是同一道兜底，TOP_SPEED_CAP 在前、NUM_CAP_V 在后，后者才是硬顶）。
  */
-export const TOP_SPEED_CAP = 4e7;
+export const TOP_SPEED_CAP = 2e8;
 
 /**
  * 平路上**真实可达的极速**（px/s）——驱动能力与阻力的交点。

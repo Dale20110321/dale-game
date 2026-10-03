@@ -1,6 +1,6 @@
-// 世界实体：关卡构建（金币 / 油罐 / 加速带 / 装饰）、拾取、骑尘
+﻿// 世界实体：关卡构建（金币 / 油罐 / 加速带 / 装饰）、拾取、骑尘
 import { mulberry32, clamp } from "../core/utils.js";
-import { SUB_DT, DT, REF_SPEED, DUST_V, DUST_HEAVY_V, KICK_V, KICK_MIN_V, CAN_FUEL, hazardSpeed, gateSpeed } from "../config/constants.js";
+import { SUB_DT, DT, REF_SPEED, DUST_V, DUST_HEAVY_V, KICK_V, KICK_MIN_V, CAN_FUEL, CRUISE_V, hazardSpeed, gateSpeed } from "../config/constants.js";
 import { THEMES } from "../config/themes.js";
 import { token } from "../config/ui-tokens.js";
 import { levelAt, courseAt, levelHillY, STEP_W, variantRule, segmentThemeAt, setFreeSeed } from "../config/levels.js";
@@ -10,6 +10,7 @@ import { getUp } from "../core/storage.js";
 import { VEHICLES } from "../config/vehicles.js";
 import { view } from "../core/canvas.js";
 import { emitParticles } from "../render/particles.js";
+
 import { showToast } from "../core/toast.js";
 import { playCoinSound, playBoostSound } from "../core/audio.js";
 import { addGold } from "./progress.js";
@@ -84,7 +85,7 @@ const CHUNK_AHEAD = 3;
  * ★ 种子必须由 chunk 下标唯一决定，不能用"接着上一个继续摇"——
  *   否则玩家倒车回来时新生成的 chunk 会与刚才丢掉的不是同一条路。
  */
-function buildChunk(L, ci) {
+function buildChunk(L, ci, withDeco) {
   const x0 = ci * CHUNK_W;
   const x1 = Math.min(L.len, x0 + CHUNK_W);
   const rng = mulberry32((L.seed ^ (ci * 0x9e3779b1)) >>> 0);
@@ -113,13 +114,17 @@ function buildChunk(L, ci) {
   // ---- 装饰：步长随 chunk 恒定 ----
   // ★ 流式赛道的装饰间距比普通关**大得多**（420px vs 130px）：
   //   代价是"看起来稀疏"，但在宇宙级速度下这个代价是看不见的 ——
-  //   一帧位移 46km，屏幕里本来就只有巡航色带（drawCruiseBands，>3600 km/h 生效），
+  //   一帧位移数十 km，屏幕里本来就只有巡航色带（drawCruiseBands，>3600 km/h 生效），
   //   逐个装饰根本进不了视野。
   //   收益是跨块那一帧的开销从 ~21ms 降到 ~7ms：
   //   生成一个 chunk 要为每个装饰调 2 次 groundInfo（各含 3 次 levelHillY），
   //   间距放大 3.2 倍就直接把这一项砍到三分之一。
+  //
+  // ★ 进巡航层后**整段跳过**装饰：CHUNK_W 是 2M px，而顶档宇宙车的可视世界宽度
+  //   只有 160k px —— 生成量是实际能显示量的 12 倍，实测每帧白花 8.4ms。
+  //   金币/危险段仍然生成（它们进得了视野，也仍然要拾取/判定）。
   const T0 = THEMES[segmentThemeAt(L, x0)] || THEMES[0];
-  for (let x = x0 + 220; x < x1 - 120; x += 175 + rng() * 490) {
+  for (let x = withDeco ? x0 + 220 : x1; x < x1 - 120; x += 175 + rng() * 490) {
     const gi = groundInfo(x);
     if (gi.y === Infinity) continue;
     if (Math.abs(gi.m) > 0.5) continue;
@@ -149,6 +154,7 @@ function buildChunk(L, ci) {
  */
 let lastLo = -1;
 let lastHi = -1;
+let lastCamX = 0;   // 上一次 streamChunks 时的相机 x：用来算本帧跨过了几块
 export function streamChunks() {
   const L = currentL;
   if (!L || !L.streaming) return;
@@ -164,13 +170,23 @@ export function streamChunks() {
   const lo = Math.max(0, ci0 - CHUNK_BACK);
   const hi = Math.min(Math.ceil(L.len / CHUNK_W) - 1, ci0 + CHUNK_AHEAD);
   let grew = false;
-  // ★ 每帧最多生成 1 个 chunk：跨块那一帧只付一个 chunk 的钱，
-  //   而不是"窗口里所有缺失块"的钱（首次进入或倒车跨多块时后者可能是好几个）。
-  //   提前量 CHUNK_AHEAD=3 远大于每帧的块数（最快 46,296px/帧 vs 2,000,000px/块），
-  //   所以单块/帧的速率绝不至于跟不上。
-  for (let ci = lo; ci <= hi && !grew; ci++) {
+  // ★ 每帧的生成**预算随相机位移缩放**，而不是死板的"1 块/帧"。
+  //   最初写死 1 是因为当时最快的车一帧只走 46,296px（0.02 块），
+  //   1 块/帧绰绰有余。但宇宙级顶档是 1.76e8 px/s = **2.9M px/帧 = 1.5 块/帧**，
+  //   死板的 1 块/帧会**永远追不上** —— 窗口每帧被抽干，前方是空的。
+  //   预算取"本帧相机跨过的块数 + 1"，另设 8 块上限兜住倒车/开局的大跳跃。
+  //   低速时它算出来是 1，与原行为一致；高速时才放宽。
+  const perFrame = Math.abs(camX - lastCamX);
+  const budget = Math.max(1, Math.min(8, Math.ceil(perFrame / CHUNK_W) + 1));
+  lastCamX = camX;
+  // 进巡航层（>CRUISE_V）后装饰不再生成：那个速度下一帧就能跨过整个可视窗口，
+  // 逐个装饰根本进不了视野（render/terrain.js 的 drawCruiseBands 也已经接管了地形）。
+  const withDeco = store.phys.topSpeed < CRUISE_V;
+  let made = 0;
+  for (let ci = lo; ci <= hi && made < budget; ci++) {
     if (world.chunks.has(ci)) continue;
-    world.chunks.set(ci, buildChunk(L, ci));
+    world.chunks.set(ci, buildChunk(L, ci, withDeco));
+    made++;
     grew = true;
   }
 
@@ -388,6 +404,7 @@ export function buildLevel() {
   world.takenX = new Set();
   world.chunksDirty = false;
   lastLo = -1; lastHi = -1;   // 强制 streamChunks 重建第一屏
+  lastCamX = 0;               // 预算按"本帧位移"算，开局相机在 0，不能拿上一局的残值
   store.finishX = L.len;
   const th0 = segmentThemeAt(L, 0);
   store.phys.theme = th0;

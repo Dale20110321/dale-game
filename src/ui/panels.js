@@ -273,7 +273,7 @@ function onPanelClick(e) {
       return;
     case "spaceClaim":
       if (claimSpaceQuest()) {
-        showToast("☄️ 已获得「归墟」！宇宙场向你开放", 2000, "success");
+        showToast("🛰️ 已获得「第一宇宙速度」！宇宙场向你开放", 2000, "success");
         renderSpacePanel();
       } else {
         showToast("金币任务还没完成", 1200);
@@ -704,12 +704,12 @@ export function renderSpacePanel() {
 
   if (q.hasQuest) {
     showPanel(`<div class="modeTitle">🌌 宇宙场 · 金币任务</div>
-      ${pending ? `<div class="panelNote">完成下面的任务即可获得基础宇宙车「归墟」</div>` : ""}
+      ${pending ? `<div class="panelNote">完成下面的任务即可获得基础宇宙车「第一宇宙速度」</div>` : ""}
       ${card({
         cls: "vehCard",
         icon: "☄️",
         title: "累计赚取 " + abbrevNum(q.need, { yuan: true }),
-        sub: "完成后可获得基础宇宙车「归墟」（¥8亿 · 极速 1000 km/h）",
+        sub: "完成后可获得基础宇宙车「第一宇宙速度」（价值 ¥100亿 · 极速 28,440 km/h）",
         meta: `进度 ${abbrevNum(q.got)} / ${abbrevNum(q.need)}（${Math.round(q.progress * 100)}%）`,
         body: progress(q.progress * 100, { label: "金币任务" }),
         interactive: q.got >= q.need,
@@ -718,14 +718,14 @@ export function renderSpacePanel() {
       })}
       ${q.got < q.need
         ? `<div class="panelNote">金币来自通关、赛道拾取、比赛名次与段位奖励。${pending ? "点击下方返回可稍后再来。" : ""}</div>`
-        : `<div class="panelNote">✅ 条件已达成，点击上方卡片领取归墟</div>`}
+        : `<div class="panelNote">✅ 条件已达成，点击上方卡片领取「第一宇宙速度」</div>`}
       <button class="btn backBtn" data-act="back">返回</button>`);
     return;
   }
 
   const cur = VEHICLES[store.currentVehicle];
   // ★ 必须用**实车**极速（store.phys.topSpeed，已含升级与形态），
-  //   不能用 nominalKmh（形态标称）：Lv0 归墟实车只有约 90 km/h，
+  //   不能用 nominalKmh（形态标称）：Lv0 的实车极速远低于标称值，
   //   拿标称 1000 去算会显示"对手 ≈900 km/h"，与真实开局差一个数量级。
   //   实车极速由 applyUpgrades 维护，进入菜单时已算好。
   const topPx = store.phys.topSpeed > 1 ? store.phys.topSpeed : (cur ? (cur.nominalKmh || 60) * (100 / 3.6) : 1667);

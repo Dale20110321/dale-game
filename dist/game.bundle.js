@@ -163,6 +163,7 @@
 
   // src/config/constants.js
   var CAM_ZOOM_BASE = 1.4;
+  var CRUISE_V = 1e5;
   var DT = 1 / 60;
   var SUB = 6;
   var SUB_DT = DT / SUB;
@@ -209,7 +210,7 @@
     return (k0 + up0 * f / full) / WHEELIE_K;
   }
   var wheelieTauOf = (mTot, gravity, kMul) => mTot * gravity * WHEELBASE * 0.5 * WHEELIE_K * (kMul || 1);
-  var TOP_SPEED_CAP = 40000000;
+  var TOP_SPEED_CAP = 200000000;
   function topSpeedOf(veh, up, o) {
     const p = veh && veh.phys || {};
     const u = up || {};
@@ -888,225 +889,266 @@
       }
     },
     {
-      id: "omega",
-      name: "归墟",
-      icon: "☄️",
-      desc: "究极之上：1000 km/h · 全程飞行 · 撞不烂",
+      id: "cv1",
+      name: "第一宇宙速度",
+      icon: "\uD83D\uDEF0️",
+      desc: "7.9 km/s · 环绕速度 · 近地轨道",
       tier: "宇宙",
       maxLv: 500,
-      nominalKmh: 1000,
-      costK: 51513,
-      price: 800000000,
+      nominalKmh: 28440,
+      costK: 643915,
+      price: 10000000000,
       speed: 2.6,
-      grip: 11.13,
-      weight: 1.48,
-      airRot: 0.488,
-      fuel: 4,
-      color: "#e0f0ff",
+      grip: 3.42,
+      weight: 3.1,
+      airRot: 0.612,
+      fuel: 5,
+      color: "#8ec9ff",
       art: ART({
-        tire: 2.6,
+        tire: 2.8,
         rim: true,
-        spokes: 12,
-        spokeW: 1.2,
-        tube: 3.4,
-        topDrop: 4,
-        coil: 0.9,
+        spokes: 10,
+        spokeW: 1.3,
+        tube: 3.6,
+        topDrop: 6,
+        coil: 1.1,
         bar: "flat",
         saddleW: 9,
-        helmR: 4.8,
+        helmR: 5,
         peak: true,
         vents: 2,
-        pose: POSE(2.5, 1.5, 3.5, 1, 0, -0.5)
+        pose: POSE(1.5, 0.5, 2, 0.5, 0.5, -0.5)
       }),
-      phys: P(1.48, 2.05, 1.7, 1.5, 12, 24.28, 6.15, 3.95, 16.09),
+      phys: P(3.1, 1.63, 1.7, 1.5, 12, 26.4, 6.6, 4.6, 20.2),
       ultra: {
         fx: {},
-        name: "终焉形态",
-        icon: "☄️",
+        name: "环绕形态",
+        icon: "\uD83D\uDEF0️",
         mode: "omega",
-        cost: 10000000000,
-        desc: "1000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
+        cost: 125000000000,
+        desc: "28440 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
       }
     },
     {
-      id: "astral",
-      name: "星殒",
-      icon: "✴️",
-      desc: "第二宇宙级：5000 km/h · 永远在天上",
+      id: "cv2",
+      name: "第二宇宙速度",
+      icon: "\uD83D\uDE80",
+      desc: "11.2 km/s · 地球逃逸速度",
       tier: "宇宙",
       maxLv: 500,
-      nominalKmh: 5000,
-      costK: 1545396,
-      price: 24000000000,
+      nominalKmh: 40320,
+      costK: 3090792,
+      price: 48000000000,
       speed: 2.6,
-      grip: 22.44,
-      weight: 1.32,
-      airRot: 0.685,
-      fuel: 5,
-      color: "#b8a4ff",
+      grip: 6.18,
+      weight: 2.45,
+      airRot: 0.745,
+      fuel: 6,
+      color: "#6fb8ff",
+      art: ART({
+        tire: 2,
+        rim: false,
+        spokes: 14,
+        spokeW: 1,
+        tube: 3,
+        topDrop: 10,
+        coil: 0.5,
+        bar: "drop",
+        saddleW: 7,
+        helmR: 5.4,
+        peak: false,
+        vents: 3,
+        pose: POSE(4.5, 2.5, 5.5, 2, 1.5, 1.5)
+      }),
+      phys: P(2.45, 1.34, 1.8, 1.5, 11, 39.2, 8.1, 7.4, 41.5),
+      ultra: {
+        fx: {},
+        name: "逃逸形态",
+        icon: "\uD83D\uDE80",
+        mode: "omega",
+        cost: 600000000000,
+        desc: "40320 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
+      }
+    },
+    {
+      id: "cv3",
+      name: "第三宇宙速度",
+      icon: "\uD83C\uDF0C",
+      desc: "16.7 km/s · 太阳系逃逸速度",
+      tier: "宇宙",
+      maxLv: 500,
+      nominalKmh: 60120,
+      costK: 18544752,
+      price: 288000000000,
+      speed: 2.6,
+      grip: 11.4,
+      weight: 1.9,
+      airRot: 0.868,
+      fuel: 7,
+      color: "#9d8cff",
       art: ART({
         tire: 1.5,
         rim: false,
         spokes: 20,
         spokeW: 0.7,
         tube: 2.6,
-        topDrop: 13,
-        coil: 0,
-        bar: "drop",
-        saddleW: 5,
-        helmR: 5.4,
-        peak: false,
-        vents: 2,
-        pose: POSE(6.5, 4.5, 8, 4, 2.5, 3)
-      }),
-      phys: P(1.32, 1.46, 1.8, 1.5, 11, 34.54, 7.52, 6.31, 34.11),
-      ultra: {
-        fx: {},
-        name: "星殒形态",
-        icon: "✴️",
-        mode: "omega",
-        cost: 300000000000,
-        desc: "5000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
-      }
-    },
-    {
-      id: "collapse",
-      name: "坍缩",
-      icon: "\uD83D\uDD73️",
-      desc: "第三宇宙级：10000 km/h · 引力都追不上",
-      tier: "宇宙",
-      maxLv: 500,
-      nominalKmh: 1e4,
-      costK: 46361880,
-      price: 720000000000,
-      speed: 2.6,
-      grip: 47.63,
-      weight: 1.08,
-      airRot: 0.862,
-      fuel: 7,
-      color: "#7b6cff",
-      art: ART({
-        tire: 1.1,
-        rim: false,
-        spokes: 24,
-        spokeW: 0.5,
-        tube: 2.2,
-        topDrop: 17,
+        topDrop: 14,
         coil: 0,
         bar: "wide",
-        saddleW: 11,
-        helmR: 6.4,
-        peak: true,
-        vents: 5,
-        pose: POSE(-1.5, -3, -2, -2.5, -2.5, -3.5)
-      }),
-      phys: P(1.08, 1.16, 1.9, 1.5, 10, 46.64, 8.88, 10.4, 75.39),
-      ultra: {
-        fx: {},
-        name: "坍缩形态",
-        icon: "\uD83D\uDD73️",
-        mode: "omega",
-        cost: 9000000000000,
-        desc: "10000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
-      }
-    },
-    {
-      id: "void",
-      name: "虚掷",
-      icon: "⚫",
-      desc: "第四宇宙级：25000 km/h · 慢速状态就已如此",
-      tier: "宇宙",
-      maxLv: 500,
-      nominalKmh: 25000,
-      costK: 1390856407,
-      price: 21600000000000,
-      speed: 2.6,
-      grip: 86.12,
-      weight: 0.92,
-      airRot: 0.98,
-      fuel: 9,
-      color: "#3d2b6e",
-      art: ART({
-        tire: 0.9,
-        rim: false,
-        spokes: 28,
-        spokeW: 0.35,
-        tube: 1.8,
-        topDrop: 21,
-        coil: 0,
-        bar: "drop",
-        saddleW: 2.5,
+        saddleW: 10,
         helmR: 6,
-        peak: false,
-        vents: 6,
-        pose: POSE(9, 7.5, 11, 7, 3.5, 5.5)
+        peak: true,
+        vents: 4,
+        pose: POSE(-1, -2, -1.5, -2, -2, -3)
       }),
-      phys: P(0.92, 1.02, 2, 1.5, 9, 73.56, 12, 16.82, 138.3),
+      phys: P(1.9, 1.15, 1.9, 1.5, 10, 52.6, 9.6, 11.6, 86.4),
       ultra: {
         fx: {},
-        name: "虚掷形态",
-        icon: "⚫",
+        name: "星际形态",
+        icon: "\uD83C\uDF0C",
         mode: "omega",
-        cost: 270000000000000,
-        desc: "25000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
+        cost: 3600000000000,
+        desc: "60120 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
       }
     },
     {
-      id: "endgame",
-      name: "终末",
-      icon: "\uD83D\uDC80",
-      desc: "第五宇宙级：50000 km/h · 掠过一颗星只要一眨眼",
+      id: "cv4",
+      name: "第四宇宙速度",
+      icon: "\uD83C\uDF20",
+      desc: "525 km/s · 银河系逃逸速度",
       tier: "宇宙",
       maxLv: 500,
-      nominalKmh: 50000,
-      costK: 333805537669,
-      price: 5184000000000000,
+      nominalKmh: 1890000,
+      costK: 222537025,
+      price: 3456000000000,
       speed: 2.6,
-      grip: 70.28,
-      weight: 1.88,
-      airRot: 0.495,
-      fuel: 11,
-      color: "#1a0d2e",
+      grip: 27.8,
+      weight: 1.42,
+      airRot: 0.942,
+      fuel: 9,
+      color: "#c77dff",
       art: ART({
-        tire: 3.4,
+        tire: 3,
         rim: true,
-        spokes: 8,
-        spokeW: 2.2,
-        tube: 5,
-        topDrop: 2,
-        coil: 1.6,
+        spokes: 12,
+        spokeW: 1.8,
+        tube: 4.6,
+        topDrop: 3,
+        coil: 1.5,
         bar: "flat",
-        saddleW: 14,
-        helmR: 5.2,
+        saddleW: 13,
+        helmR: 5.6,
         peak: true,
         vents: 3,
-        pose: POSE(0, -4, -1.5, -3.5, 0.5, -4.5)
+        pose: POSE(-0.5, -2.5, -1, -2, 0, -3)
       }),
-      phys: P(1.88, 2.02, 2.1, 1.5, 8, 141.55, 18, 10.85, 115.74),
+      phys: P(1.42, 1.06, 2, 1.5, 9, 92.4, 13.5, 9.7, 104.2),
       ultra: {
         fx: {},
-        name: "终末形态",
-        icon: "\uD83D\uDC80",
+        name: "银河形态",
+        icon: "\uD83C\uDF20",
         mode: "omega",
-        cost: 64800000000000000,
-        desc: "50000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
+        cost: 43200000000000,
+        desc: "1890000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
       }
     },
     {
-      id: "formless",
-      name: "无相",
-      icon: "\uD83C\uDF0C",
-      desc: "第六宇宙级：100000 km/h · 全宇宙几乎没有第二个人买得起",
+      id: "cv5",
+      name: "第五宇宙速度",
+      icon: "\uD83D\uDD78️",
+      desc: "1000 km/s · 本星系群逃逸速度",
       tier: "宇宙",
       maxLv: 500,
-      nominalKmh: 1e5,
-      costK: 10014166130071,
-      price: 155520000000000000,
+      nominalKmh: 3600000,
+      costK: 2670444301,
+      price: 41472000000000,
       speed: 2.6,
-      grip: 286.6,
-      weight: 0.78,
-      airRot: 1.163,
-      fuel: 14,
+      grip: 63.4,
+      weight: 1.02,
+      airRot: 1.031,
+      fuel: 11,
+      color: "#e05fff",
+      art: ART({
+        tire: 1,
+        rim: false,
+        spokes: 26,
+        spokeW: 0.45,
+        tube: 2,
+        topDrop: 20,
+        coil: 0,
+        bar: "drop",
+        saddleW: 4,
+        helmR: 6.4,
+        peak: false,
+        vents: 6,
+        pose: POSE(7.5, 6, 9.5, 5, 3, 4.5)
+      }),
+      phys: P(1.02, 0.97, 2.1, 1.5, 8, 168.5, 19.5, 22.4, 192.7),
+      ultra: {
+        fx: {},
+        name: "星系群形态",
+        icon: "\uD83D\uDD78️",
+        mode: "omega",
+        cost: 518400000000000,
+        desc: "3600000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
+      }
+    },
+    {
+      id: "cv6",
+      name: "第六宇宙速度",
+      icon: "\uD83D\uDD73️",
+      desc: "1500 km/s · 超星系团逃逸速度",
+      tier: "宇宙",
+      maxLv: 500,
+      nominalKmh: 5400000,
+      costK: 32045331616,
+      price: 497664000000000,
+      speed: 2.6,
+      grip: 128.5,
+      weight: 0.72,
+      airRot: 0.502,
+      fuel: 13,
+      color: "#ff5fd2",
+      art: ART({
+        tire: 3.8,
+        rim: true,
+        spokes: 8,
+        spokeW: 2.4,
+        tube: 5.2,
+        topDrop: 1,
+        coil: 1.8,
+        bar: "wide",
+        saddleW: 15,
+        helmR: 5.8,
+        peak: true,
+        vents: 2,
+        pose: POSE(1, -5, -0.5, -4, 1, -5.5)
+      }),
+      phys: P(0.72, 1.99, 2.2, 1.5, 7, 305.8, 27.5, 8.4, 92.6),
+      ultra: {
+        fx: {},
+        name: "超星系团形态",
+        icon: "\uD83D\uDD73️",
+        mode: "omega",
+        cost: 6220800000000000,
+        desc: "5400000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
+      }
+    },
+    {
+      id: "cv7",
+      name: "第七宇宙速度",
+      icon: "\uD83D\uDCAB",
+      desc: "1750 km/s · 整个宇宙的逃逸速度",
+      tier: "宇宙",
+      maxLv: 500,
+      nominalKmh: 6300000,
+      costK: 384543979395,
+      price: 5971968000000000,
+      speed: 2.6,
+      grip: 312,
+      weight: 0.42,
+      airRot: 1.284,
+      fuel: 16,
       color: "#ffffff",
       art: ART({
         tire: 0.6,
@@ -1123,14 +1165,14 @@
         vents: 8,
         pose: POSE(12, 10, 15, 9.5, 5, 8)
       }),
-      phys: P(0.78, 0.86, 2.2, 1.5, 7, 264.54, 26, 34.84, 481.39),
+      phys: P(0.42, 0.78, 2.3, 1.5, 6, 420.6, 36, 31.2, 398.4),
       ultra: {
         fx: {},
-        name: "无相形态",
-        icon: "\uD83C\uDF0C",
+        name: "全域形态",
+        icon: "\uD83D\uDCAB",
         mode: "omega",
-        cost: 1944000000000000000,
-        desc: "100000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
+        cost: 74649600000000000,
+        desc: "6300000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
       }
     },
     {
@@ -1443,7 +1485,7 @@
       price: 14000,
       speed: 2.05,
       grip: 1.02,
-      weight: 0.88,
+      weight: 1.02,
       airRot: 1.25,
       fuel: 2.2,
       color: "#ffb703",
@@ -1518,7 +1560,7 @@
       price: 103000,
       speed: 1.9,
       grip: 1.65,
-      weight: 1.36,
+      weight: 2.45,
       airRot: 0.769,
       fuel: 2.3,
       color: "#212529",
@@ -3066,12 +3108,16 @@
   function finishAnchor(L) {
     return L.len - FINISH_PAD;
   }
-  var BUCKET_W = 2048;
+  var BUCKET_W_MIN = 2048;
+  var BUCKET_MAX = 20000;
+  var bucketWidthOf = (len) => Math.max(BUCKET_W_MIN, Math.ceil(len / BUCKET_MAX));
+  var STEPS_PER_SEG_MAX = 2000;
   function buildIndex(L) {
     if (L._idx)
       return L._idx;
     const n = L.len;
-    const nBuckets = Math.max(1, Math.ceil(n / BUCKET_W) + 2);
+    const bw = bucketWidthOf(n);
+    const nBuckets = Math.max(1, Math.ceil(n / bw) + 2);
     const waveB = new Array(nBuckets);
     const stepB = new Array(nBuckets);
     const featB = new Array(nBuckets);
@@ -3079,8 +3125,8 @@
     const wLen = ws.length;
     let sLo = 0;
     for (let b = 0;b < nBuckets; b++) {
-      const bx0 = b * BUCKET_W;
-      const bx1 = bx0 + BUCKET_W;
+      const bx0 = b * bw;
+      const bx1 = bx0 + bw;
       while (sLo < L.steps.length && L.steps[sLo].cx + STEP_W <= bx0)
         sLo++;
       let sHi = sLo;
@@ -3090,8 +3136,8 @@
     }
     let fLo = 0;
     for (let b = 0;b < nBuckets; b++) {
-      const bx0 = b * BUCKET_W;
-      const bx1 = bx0 + BUCKET_W;
+      const bx0 = b * bw;
+      const bx1 = bx0 + bw;
       while (fLo < L.feats.length && L.feats[fLo].x1 <= bx0)
         fLo++;
       let fHi = fLo;
@@ -3099,7 +3145,7 @@
         fHi++;
       featB[b] = [fLo, fHi];
     }
-    L._idx = { nBuckets, waveB, stepB, featB, wLen };
+    L._idx = { nBuckets, bw, waveB, stepB, featB, wLen };
     return L._idx;
   }
   function hillRaw(L, x) {
@@ -3110,7 +3156,7 @@
       const w = ws[i];
       relief += w.amp * Math.sin(x * w.f + w.ph);
     }
-    const b = x / BUCKET_W | 0;
+    const b = x / idx.bw | 0;
     const steps = L.steps;
     if (b >= 0 && b < idx.nBuckets) {
       const r = idx.stepB[b];
@@ -3381,7 +3427,7 @@
           continue;
         feats.push({ ...f, x0: f.x0 + s * segLen, x1: f.x1 + s * segLen });
       }
-      const sp = buildSteps(mood, 1, 1, segLen, rng, Math.max(1, Math.round(segLen / mood.stepGap)));
+      const sp = buildSteps(mood, 1, 1, segLen, rng, Math.max(1, Math.min(STEPS_PER_SEG_MAX, Math.round(segLen / mood.stepGap))));
       for (const st of sp)
         steps.push({ cx: Math.round(st.cx + s * segLen), drop: st.drop });
     }
@@ -3448,11 +3494,11 @@
   var FINALE_INDEX = LEVELS.length;
   var MODE_SPACE = "space";
   var SPACE_TIERS = [
-    { id: "easy", name: "易", icon: "\uD83C\uDF11", kmh: 1000, segs: 12, slopeDeg: 26, gold: 40000000000, themes: [3, 11, 24, 34] },
-    { id: "mid", name: "中", icon: "\uD83E\uDE90", kmh: 5000, segs: 18, slopeDeg: 22, gold: 24000000000000, themes: [24, 34, 3, 11] },
-    { id: "hard", name: "难", icon: "\uD83C\uDF0C", kmh: 1e4, segs: 24, slopeDeg: 18, gold: 108000000000000000, themes: [34, 3, 24, 11] },
-    { id: "brutal", name: "极难", icon: "⚫", kmh: 25000, segs: 30, slopeDeg: 14, gold: 5184000000000000000000, themes: [3, 34, 11, 24] },
-    { id: "final", name: "终极", icon: "\uD83C\uDF20", kmh: 50000, segs: 36, slopeDeg: 10, gold: 1555200000000000000000000, themes: [11, 24, 34, 3] }
+    { id: "easy", name: "易", icon: "\uD83C\uDF11", kmh: 28440, segs: 12, slopeDeg: 26, gold: 40000000000, themes: [3, 11, 24, 34] },
+    { id: "mid", name: "中", icon: "\uD83E\uDE90", kmh: 40320, segs: 18, slopeDeg: 22, gold: 24000000000000, themes: [24, 34, 3, 11] },
+    { id: "hard", name: "难", icon: "\uD83C\uDF0C", kmh: 60120, segs: 24, slopeDeg: 18, gold: 108000000000000000, themes: [34, 3, 24, 11] },
+    { id: "brutal", name: "极难", icon: "⚫", kmh: 3600000, segs: 30, slopeDeg: 14, gold: 5184000000000000000000, themes: [3, 34, 11, 24] },
+    { id: "final", name: "终极", icon: "\uD83C\uDF20", kmh: 6300000, segs: 36, slopeDeg: 10, gold: 1555200000000000000000000, themes: [11, 24, 34, 3] }
   ];
   var SPACE_TARGET_SEC = 360;
   var spaceLenOf = (tier, playerTop) => Math.round(Math.max(1, playerTop || 1) * SPACE_TARGET_SEC);
@@ -5816,7 +5862,7 @@
   var CHUNK_W = 2000000;
   var CHUNK_BACK = 2;
   var CHUNK_AHEAD = 3;
-  function buildChunk(L, ci) {
+  function buildChunk(L, ci, withDeco) {
     const x0 = ci * CHUNK_W;
     const x1 = Math.min(L.len, x0 + CHUNK_W);
     const rng = mulberry32((L.seed ^ ci * 2654435761) >>> 0);
@@ -5836,7 +5882,7 @@
       coins.push({ x, y: gy - 35, taken: false, ph: rng() * 6.28, coinVal: L.coinVal || 30 });
     }
     const T0 = THEMES[segmentThemeAt(L, x0)] || THEMES[0];
-    for (let x = x0 + 220;x < x1 - 120; x += 175 + rng() * 490) {
+    for (let x = withDeco ? x0 + 220 : x1;x < x1 - 120; x += 175 + rng() * 490) {
       const gi = groundInfo(x);
       if (gi.y === Infinity)
         continue;
@@ -5856,6 +5902,7 @@
   }
   var lastLo = -1;
   var lastHi = -1;
+  var lastCamX = 0;
   function streamChunks() {
     const L = currentL;
     if (!L || !L.streaming)
@@ -5869,10 +5916,16 @@
     const lo = Math.max(0, ci0 - CHUNK_BACK);
     const hi = Math.min(Math.ceil(L.len / CHUNK_W) - 1, ci0 + CHUNK_AHEAD);
     let grew = false;
-    for (let ci = lo;ci <= hi && !grew; ci++) {
+    const perFrame = Math.abs(camX - lastCamX);
+    const budget = Math.max(1, Math.min(8, Math.ceil(perFrame / CHUNK_W) + 1));
+    lastCamX = camX;
+    const withDeco = store.phys.topSpeed < CRUISE_V;
+    let made = 0;
+    for (let ci = lo;ci <= hi && made < budget; ci++) {
       if (world.chunks.has(ci))
         continue;
-      world.chunks.set(ci, buildChunk(L, ci));
+      world.chunks.set(ci, buildChunk(L, ci, withDeco));
+      made++;
       grew = true;
     }
     if (lo === lastLo && hi === lastHi && !grew && !world.chunksDirty) {
@@ -6049,6 +6102,7 @@
     world.chunksDirty = false;
     lastLo = -1;
     lastHi = -1;
+    lastCamX = 0;
     store.finishX = L.len;
     const th0 = segmentThemeAt(L, 0);
     store.phys.theme = th0;
@@ -6467,7 +6521,7 @@
     }
     return false;
   }
-  var QUEST_VEHICLE = "omega";
+  var QUEST_VEHICLE = "cv1";
   function spaceQuestState() {
     const idx = VEHICLES.findIndex((v) => v.id === QUEST_VEHICLE);
     const owned = (store.ownedVehicles || []).includes(idx);
@@ -7683,7 +7737,6 @@
       cap *= 2;
     GBUF_N = Math.min(cap, GBUF_MAX);
   }
-  var CRUISE_V = 1e5;
   var CRUISE_BANDS = 26;
   var CRUISE_BAND_PX = 46;
   function drawCruiseBands(cx, cy, W, H, pal) {
@@ -9859,7 +9912,7 @@
         return;
       case "spaceClaim":
         if (claimSpaceQuest()) {
-          showToast("☄️ 已获得「归墟」！宇宙场向你开放", 2000, "success");
+          showToast("\uD83D\uDEF0️ 已获得「第一宇宙速度」！宇宙场向你开放", 2000, "success");
           renderSpacePanel();
         } else {
           showToast("金币任务还没完成", 1200);
@@ -10197,19 +10250,19 @@
     store.pendingSpace = false;
     if (q.hasQuest) {
       showPanel(`<div class="modeTitle">\uD83C\uDF0C 宇宙场 · 金币任务</div>
-      ${pending ? `<div class="panelNote">完成下面的任务即可获得基础宇宙车「归墟」</div>` : ""}
+      ${pending ? `<div class="panelNote">完成下面的任务即可获得基础宇宙车「第一宇宙速度」</div>` : ""}
       ${card({
         cls: "vehCard",
         icon: "☄️",
         title: "累计赚取 " + abbrevNum(q.need, { yuan: true }),
-        sub: "完成后可获得基础宇宙车「归墟」（¥8亿 · 极速 1000 km/h）",
+        sub: "完成后可获得基础宇宙车「第一宇宙速度」（价值 ¥100亿 · 极速 28,440 km/h）",
         meta: `进度 ${abbrevNum(q.got)} / ${abbrevNum(q.need)}（${Math.round(q.progress * 100)}%）`,
         body: progress(q.progress * 100, { label: "金币任务" }),
         interactive: q.got >= q.need,
         locked: q.got < q.need,
         attrs: q.got >= q.need ? 'data-act="spaceClaim"' : ""
       })}
-      ${q.got < q.need ? `<div class="panelNote">金币来自通关、赛道拾取、比赛名次与段位奖励。${pending ? "点击下方返回可稍后再来。" : ""}</div>` : `<div class="panelNote">✅ 条件已达成，点击上方卡片领取归墟</div>`}
+      ${q.got < q.need ? `<div class="panelNote">金币来自通关、赛道拾取、比赛名次与段位奖励。${pending ? "点击下方返回可稍后再来。" : ""}</div>` : `<div class="panelNote">✅ 条件已达成，点击上方卡片领取「第一宇宙速度」</div>`}
       <button class="btn backBtn" data-act="back">返回</button>`);
       return;
     }

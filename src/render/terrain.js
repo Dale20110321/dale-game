@@ -1,4 +1,4 @@
-// 地形渲染：地表填充 + 阴影 + 数据驱动的地表纹理（THEMES[i].surface）
+﻿// 地形渲染：地表填充 + 阴影 + 数据驱动的地表纹理（THEMES[i].surface）
 // 纹理绘制函数只做视觉，不含物理依赖，也不含"按主题下标分支"的硬编码。
 import { token } from "../config/ui-tokens.js";
 import { ctx, view } from "../core/canvas.js";
@@ -7,6 +7,7 @@ import { store, bike } from "../core/store.js";
 import { groundY } from "../physics/terrain.js";
 import { bikeVx } from "../physics/bike.js";
 import { clamp } from "../core/utils.js";
+import { CRUISE_V } from "../config/constants.js";
 import { getQuality } from "./postfx.js";
 import { getLight } from "./light.js";
 import { worldView } from "./camera.js";
@@ -271,7 +272,13 @@ function ensureGBuf(need) {
  *   这正是"高速下右半屏空白"的根因（dense 缓冲按屏幕宽度展开），
  *   而巡航层天生只需 3×CRUISE_BANDS 个点。
  */
-const CRUISE_V = 100000;      // 巡航层阈值（px/s）= 3600 km/h
+/**
+ * 巡航层阈值（px/s）= 3600 km/h：超过就改画色带而不再画逐点地形。
+ *
+ * ★ 定义放在 config/constants.js（由这里 import）而不是就地导出：
+ *   game/world.js 的 buildChunk 也要用它决定"要不要生成装饰"，而 game → render
+ *   是反向依赖（game 在 render 之上）。两边都 import config 才是干净的。
+ */
 const CRUISE_BANDS = 26;      // 色带条数（屏幕纵向可分辨的上限）
 const CRUISE_BAND_PX = 46;    // 每条带的屏幕高度（px）
 
