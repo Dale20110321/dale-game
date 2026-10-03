@@ -264,6 +264,57 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 }
 #modePanel.enter { opacity: 0; transform: translateY(8px); }
 
+/* ============================================================
+   吸顶返回栏
+   ------------------------------------------------------------
+   车库（32 辆 / 6 组）、存档、支线墙、升级车间、设置都能滚好几屏，
+   而返回按钮原本在内容末尾 —— 必须一路滑到底才够得到。
+   现在统一在面板顶部放一条 sticky 栏，滚动时始终够得着。
+
+   ★ 用 sticky 而不是 fixed：这些面板自己就是滚动容器
+     （#modePanel / #shop 都带 overflow-y:auto），fixed 会脱离容器
+     浮到菜单之上，sticky 则随内容滚出、只在面板内吸顶。
+   ★ 半透明 + 背景色是必需的：内容从栏下滚过时若完全透明，
+     文字会与按钮叠在一起，看着像两层字。
+   ============================================================ */
+.panelBar {
+  position: sticky; top: calc(var(--space-3) * -1); z-index: 3;
+  display: flex; justify-content: flex-end;
+  margin: calc(var(--space-3) * -1) calc(var(--space-3) * -1) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  /* ★ 底色必须够不透明。实测先用了 --glass-fill-strong（rgba 白 0.12），
+     车库滚到底时下方卡片文字整片透上来，"返回"和正文叠成一团 ——
+     比没有吸顶栏更糟。backdrop-filter 在部分浏览器/低性能模式下还会被跳过。
+     故用实色 surface-2 打底，上面再叠一层半透明高光保住玻璃质感。 */
+  background: var(--surface-2);
+  box-shadow: 0 1px 0 var(--glass-highlight) inset, 0 6px 14px rgba(0, 0, 0, 0.30);
+  border-bottom: 1px solid var(--glass-border);
+}
+/* 顶栏里的返回：比正文按钮更实一点，滚动时它是唯一的出口，要好点得准 */
+.panelBar .panelBack {
+  min-width: 76px;
+  background: var(--glass-fill-strong); border: 1px solid var(--glass-highlight);
+  font-weight: var(--font-title-weight);
+}
+/* 末尾那枚老返回按钮不再显示 —— 同一个动作只留顶栏一处，避免两个"返回" */
+#modePanel .backBtn { display: none; }
+
+/* #shop / #settings 是 align-items:center 的 flex 列，
+   子项默认被压成内容宽 —— 吸顶栏要满宽才像一条"栏"，故单独撑开。
+   ★ top 必须吃掉容器自己的 padding：sticky 的 top 是相对**滚动内容盒**的，
+     #shop 顶部有 max(space-4, safe-area-inset-top) 的 padding，
+     写 top:0 会让栏停在 padding 之上、压到刘海/状态栏下面。
+     这里负 margin 抵消 padding，top:0 才是"紧贴视口上沿"。 */
+#shop .panelBar, #settings .panelBar { align-self: stretch; position: sticky; top: 0; }
+#shop .panelBar {
+  margin: 0 calc(var(--space-3) * -1) var(--space-2);
+  padding-left: var(--space-3); padding-right: var(--space-3);
+}
+#settings .panelBar {
+  margin: calc(var(--space-4) * -1) calc(var(--space-4) * -1) var(--space-2);
+  padding-left: var(--space-4); padding-right: var(--space-4);
+}
+
 /* ---- 暂停操作条（overlay 顶层，避开关卡地图的显示切换） ---- */
 #pauseBar {
   position: relative; z-index: 2; /* 高于 #menuBg 渐晕层 */
@@ -427,7 +478,15 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
    ============================================================ */
 #settings {
   position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
+  align-items: center;
+  /* ★ 与 #shop 同一个坑：flex 列 + justify-content:center 在内容溢出时，
+     上下**同时**溢出，而溢出到容器之上的那半永远滚不到。
+     本来只是丢掉设置项的下半截；顶栏（唯一的返回出口）也在上面，
+     等于整个面板在矮屏上关不掉。
+     `safe center` 正是为此而生：放得下就居中，放不下自动退回顶部对齐。
+     前一行 flex-start 是不认识 `safe` 的老浏览器的兜底（那个方向本来也更安全）。 */
+  justify-content: flex-start;
+  justify-content: safe center;
   background: var(--scrim-strong); color: var(--text-hi); text-align: center;
   z-index: 31; padding: var(--space-4); overflow-y: auto;
 }
@@ -440,6 +499,7 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 }
 .setNote { font-size: var(--font-caption-size); color: var(--text-mid); max-width: 420px; line-height: 1.7; margin-bottom: var(--space-2); }
 .setFoot { margin-top: var(--space-4); }
+.setFootNote { font-size: var(--font-micro-size); color: var(--text-lo); letter-spacing: 1px; }
 #btnMute { min-width: 160px; }
 
 /* ============================================================

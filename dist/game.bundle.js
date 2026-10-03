@@ -9539,9 +9539,10 @@
       homeFloat.style.display = "flex";
     syncTouchVisibility();
   }
+  var PANEL_BAR = '<div class="panelBar"><button class="btn sm panelBack" data-act="back" type="button">‹ 返回</button></div>';
   function showPanel(html) {
     setMenuGroupsVisible(false);
-    modePanel.innerHTML = html;
+    modePanel.innerHTML = PANEL_BAR + html;
     modePanel.classList.remove("hidden");
     modePanel.classList.add("enter");
     modePanel.offsetWidth;

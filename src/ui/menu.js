@@ -184,11 +184,30 @@ export function hideOverlay() {
   syncTouchVisibility(); // 进游戏：触摸方向键该出现了
 }
 
+/**
+ * 面板顶部的**吸顶返回栏**。
+ *
+ * ★ 为什么要注入而不是各模板自己写：车库（32 辆分 6 组）、存档、支线墙…
+ *   都是能滚好几屏的长列表，而返回按钮原本写在 HTML **末尾**，
+ *   必须一路滑到底才够得到 —— 用户反馈"每次都要滑到最下面才能返回"。
+ *   面板模板有 9 处，散着改迟早漏；集中在 showPanel 注入一次就全覆盖，
+ *   新增面板也自动带上。
+ *
+ *   末尾那枚 `<button class="backBtn">` 不删（模板里还有别的逻辑引用），
+ *   由 CSS 的 `#modePanel .backBtn { display: none }` 隐藏 ——
+ *   保证同一个动作在屏幕上只出现一处。
+ *
+ * 用 `position: sticky` 而不是 fixed：#modePanel 自身就是滚动容器，
+ *   sticky 会跟着内容滚出视口，天然不会浮在菜单之上。
+ */
+const PANEL_BAR =
+  '<div class="panelBar"><button class="btn sm panelBack" data-act="back" type="button">‹ 返回</button></div>';
+
 export function showPanel(html) {
   // 面板打开时收起菜单分组：改成"一屏一视图"，避免菜单与面板叠在一起
   // （叠着会把顶部挤出视口，看起来坏且点不到）
   setMenuGroupsVisible(false);
-  modePanel.innerHTML = html;
+  modePanel.innerHTML = PANEL_BAR + html;
   modePanel.classList.remove("hidden");
   // 进场过渡：先落到 .enter（位移 + 透明），强制回流后移除 → 过渡到基础态
   modePanel.classList.add("enter");
