@@ -1,4 +1,4 @@
-// 共享可变状态容器（唯一）。所有模块通过 import 读写这里，
+﻿// 共享可变状态容器（唯一）。所有模块通过 import 读写这里，
 // 从而彻底避免模块间互相 import 造成的循环依赖。
 import { START_X, topSpeedOf, CAM_ZOOM_BASE } from "../config/constants.js";
 import { VEHICLES } from "../config/vehicles.js";
@@ -112,6 +112,9 @@ export const store = {
   run: {
     // 单局世代号：重开/换关时递增，用于作废上一局的延迟结算回调
     gen: 0,
+    // 本局随机种子（resetRunState 每次重开重掷）：宇宙场用它派生每��对手的配速抖动。
+    // 同一局内恒定（不会每帧乱跳），换局才换一批快慢组合。
+    seed: 1,
     crashed: false,
     crashTimer: 0,
     settling: false,
@@ -258,3 +261,4 @@ export const uiHooks = {
   /** 重画主页面视图（菜单态）。未注册时 menu.js 静默跳过。 */
   onHome: null,
 };
+

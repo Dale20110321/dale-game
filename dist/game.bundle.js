@@ -338,6 +338,10 @@
   var SPEEDLINE_REF = 560;
   var SPEEDLINE_WARP_V = 1e5;
   var SPEEDLINE_WARP_REF = 20000000;
+  var TRAIL_ON = 0.14;
+  var TRAIL_FULL = 0.92;
+  var TRAIL_METEOR_LO = 0.5;
+  var TRAIL_METEOR_HI = 0.86;
   var STUN_TIME = 1.1;
   var REV_ENTER_V = 24;
   var REV_SPEED = 0.3;
@@ -525,6 +529,7 @@
         x: START_X - 120 - i * 190,
         spd: 0,
         finish: false,
+        ix: i,
         bias: 0.93 + (i * 7 + 3) % 11 / 100,
         team: f.team ? i < size - 1 ? PLAYER_TEAM : RIVAL_TEAM : -1
       });
@@ -561,6 +566,16 @@
   // src/config/vehicles.js
   var P = (mass, inertia, suspK, suspC, travel, torque, rpm, wheelieK, wheelieUp) => ({ mass, inertia, suspK, suspC, travel, torque, rpm, wheelieK, wheelieUp });
   var POSE = (shX, shY, hdX, hdY, barX, barY) => ({ shX, shY, hdX, hdY, barX, barY });
+  var TRAIL = (style, core, glow, o) => Object.assign({
+    style,
+    core,
+    glow,
+    len: 220,
+    width: 9,
+    count: 4,
+    spread: 8,
+    seed: 0
+  }, o);
   var ART = (o) => Object.assign({
     tire: 3,
     rim: true,
@@ -896,14 +911,14 @@
       tier: "宇宙",
       maxLv: 500,
       nominalKmh: 28440,
-      costK: 643915,
-      price: 10000000000,
+      costK: 51513,
+      price: 800000000,
       speed: 2.6,
       grip: 3.42,
       weight: 3.1,
       airRot: 0.612,
       fuel: 5,
-      color: "#8ec9ff",
+      color: "#5EC8F5",
       art: ART({
         tire: 2.8,
         rim: true,
@@ -919,13 +934,14 @@
         vents: 2,
         pose: POSE(1.5, 0.5, 2, 0.5, 0.5, -0.5)
       }),
+      trail: TRAIL("arc", "#EAF9FF", "#5EC8F5", { len: 190, width: 8, count: 3, spread: 9, seed: 0.13 }),
       phys: P(3.1, 1.63, 1.7, 1.5, 12, 26.4, 6.6, 4.6, 20.2),
       ultra: {
         fx: {},
         name: "环绕形态",
         icon: "\uD83D\uDEF0️",
         mode: "omega",
-        cost: 125000000000,
+        cost: 10000000000,
         desc: "28440 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
       }
     },
@@ -937,14 +953,14 @@
       tier: "宇宙",
       maxLv: 500,
       nominalKmh: 40320,
-      costK: 3090792,
-      price: 48000000000,
+      costK: 1545396,
+      price: 24000000000,
       speed: 2.6,
       grip: 6.18,
       weight: 2.45,
       airRot: 0.745,
       fuel: 6,
-      color: "#6fb8ff",
+      color: "#3FE0A5",
       art: ART({
         tire: 2,
         rim: false,
@@ -960,13 +976,14 @@
         vents: 3,
         pose: POSE(4.5, 2.5, 5.5, 2, 1.5, 1.5)
       }),
+      trail: TRAIL("helix", "#E6FFF6", "#3FE0A5", { len: 235, width: 10, count: 2, seed: 0.41 }),
       phys: P(2.45, 1.34, 1.8, 1.5, 11, 39.2, 8.1, 7.4, 41.5),
       ultra: {
         fx: {},
         name: "逃逸形态",
         icon: "\uD83D\uDE80",
         mode: "omega",
-        cost: 600000000000,
+        cost: 300000000000,
         desc: "40320 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
       }
     },
@@ -978,14 +995,14 @@
       tier: "宇宙",
       maxLv: 500,
       nominalKmh: 60120,
-      costK: 18544752,
-      price: 288000000000,
+      costK: 46361880,
+      price: 720000000000,
       speed: 2.6,
       grip: 11.4,
       weight: 1.9,
       airRot: 0.868,
       fuel: 7,
-      color: "#9d8cff",
+      color: "#FFE14D",
       art: ART({
         tire: 1.5,
         rim: false,
@@ -1001,13 +1018,14 @@
         vents: 4,
         pose: POSE(-1, -2, -1.5, -2, -2, -3)
       }),
+      trail: TRAIL("corona", "#FFF8D6", "#FFE14D", { len: 215, width: 11, count: 9, seed: 0.68 }),
       phys: P(1.9, 1.15, 1.9, 1.5, 10, 52.6, 9.6, 11.6, 86.4),
       ultra: {
         fx: {},
         name: "星际形态",
         icon: "\uD83C\uDF0C",
         mode: "omega",
-        cost: 3600000000000,
+        cost: 9000000000000,
         desc: "60120 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
       }
     },
@@ -1019,14 +1037,14 @@
       tier: "宇宙",
       maxLv: 500,
       nominalKmh: 1890000,
-      costK: 222537025,
-      price: 3456000000000,
+      costK: 1390856407,
+      price: 21600000000000,
       speed: 2.6,
       grip: 27.8,
       weight: 1.42,
       airRot: 0.942,
       fuel: 9,
-      color: "#c77dff",
+      color: "#FF6B3D",
       art: ART({
         tire: 3,
         rim: true,
@@ -1042,13 +1060,14 @@
         vents: 3,
         pose: POSE(-0.5, -2.5, -1, -2, 0, -3)
       }),
+      trail: TRAIL("ember", "#FFD98A", "#FF6B3D", { len: 245, width: 10, count: 15, seed: 0.29 }),
       phys: P(1.42, 1.06, 2, 1.5, 9, 92.4, 13.5, 9.7, 104.2),
       ultra: {
         fx: {},
         name: "银河形态",
         icon: "\uD83C\uDF20",
         mode: "omega",
-        cost: 43200000000000,
+        cost: 270000000000000,
         desc: "1890000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
       }
     },
@@ -1060,14 +1079,14 @@
       tier: "宇宙",
       maxLv: 500,
       nominalKmh: 3600000,
-      costK: 2670444301,
-      price: 41472000000000,
+      costK: 41725692209,
+      price: 648000000000000,
       speed: 2.6,
       grip: 63.4,
       weight: 1.02,
       airRot: 1.031,
       fuel: 11,
-      color: "#e05fff",
+      color: "#FF4D9E",
       art: ART({
         tire: 1,
         rim: false,
@@ -1083,13 +1102,14 @@
         vents: 6,
         pose: POSE(7.5, 6, 9.5, 5, 3, 4.5)
       }),
+      trail: TRAIL("ripple", "#FFD6EC", "#FF4D9E", { len: 250, width: 12, count: 6, seed: 0.87 }),
       phys: P(1.02, 0.97, 2.1, 1.5, 8, 168.5, 19.5, 22.4, 192.7),
       ultra: {
         fx: {},
         name: "星系群形态",
         icon: "\uD83D\uDD78️",
         mode: "omega",
-        cost: 518400000000000,
+        cost: 8100000000000000,
         desc: "3600000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
       }
     },
@@ -1101,14 +1121,14 @@
       tier: "宇宙",
       maxLv: 500,
       nominalKmh: 5400000,
-      costK: 32045331616,
-      price: 497664000000000,
+      costK: 1251770766259,
+      price: 19440000000000000,
       speed: 2.6,
       grip: 128.5,
       weight: 0.72,
       airRot: 0.502,
       fuel: 13,
-      color: "#ff5fd2",
+      color: "#B07CFF",
       art: ART({
         tire: 3.8,
         rim: true,
@@ -1124,13 +1144,14 @@
         vents: 2,
         pose: POSE(1, -5, -0.5, -4, 1, -5.5)
       }),
+      trail: TRAIL("vortex", "#F0E4FF", "#B07CFF", { len: 262, width: 13, count: 5, seed: 0.55 }),
       phys: P(0.72, 1.99, 2.2, 1.5, 7, 305.8, 27.5, 8.4, 92.6),
       ultra: {
         fx: {},
         name: "超星系团形态",
         icon: "\uD83D\uDD73️",
         mode: "omega",
-        cost: 6220800000000000,
+        cost: 243000000000000000,
         desc: "5400000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
       }
     },
@@ -1142,14 +1163,14 @@
       tier: "宇宙",
       maxLv: 500,
       nominalKmh: 6300000,
-      costK: 384543979395,
-      price: 5971968000000000,
+      costK: 37553122987766,
+      price: 583200000000000000,
       speed: 2.6,
       grip: 312,
       weight: 0.42,
       airRot: 1.284,
       fuel: 16,
-      color: "#ffffff",
+      color: "#F0F4FF",
       art: ART({
         tire: 0.6,
         rim: false,
@@ -1165,13 +1186,14 @@
         vents: 8,
         pose: POSE(12, 10, 15, 9.5, 5, 8)
       }),
+      trail: TRAIL("lance", "#FFFFFF", "#F0F4FF", { len: 420, width: 9, count: 7, seed: 0.02 }),
       phys: P(0.42, 0.78, 2.3, 1.5, 6, 420.6, 36, 31.2, 398.4),
       ultra: {
         fx: {},
         name: "全域形态",
         icon: "\uD83D\uDCAB",
         mode: "omega",
-        cost: 74649600000000000,
+        cost: 7290000000000000000,
         desc: "6300000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段"
       }
     },
@@ -1688,6 +1710,7 @@
     },
     run: {
       gen: 0,
+      seed: 1,
       crashed: false,
       crashTimer: 0,
       settling: false,
@@ -3494,14 +3517,14 @@
   var FINALE_INDEX = LEVELS.length;
   var MODE_SPACE = "space";
   var SPACE_TIERS = [
-    { id: "easy", name: "易", icon: "\uD83C\uDF11", kmh: 28440, segs: 12, slopeDeg: 26, gold: 40000000000, themes: [3, 11, 24, 34] },
-    { id: "mid", name: "中", icon: "\uD83E\uDE90", kmh: 40320, segs: 18, slopeDeg: 22, gold: 24000000000000, themes: [24, 34, 3, 11] },
-    { id: "hard", name: "难", icon: "\uD83C\uDF0C", kmh: 60120, segs: 24, slopeDeg: 18, gold: 108000000000000000, themes: [34, 3, 24, 11] },
-    { id: "brutal", name: "极难", icon: "⚫", kmh: 3600000, segs: 30, slopeDeg: 14, gold: 5184000000000000000000, themes: [3, 34, 11, 24] },
-    { id: "final", name: "终极", icon: "\uD83C\uDF20", kmh: 6300000, segs: 36, slopeDeg: 10, gold: 1555200000000000000000000, themes: [11, 24, 34, 3] }
+    { id: "easy", name: "易", icon: "\uD83C\uDF11", kmh: 28440, segs: 12, slopeDeg: 26, lenK: 1, aiK: 0.7, gold: 40000000000, themes: [3, 11, 24, 34] },
+    { id: "mid", name: "中", icon: "\uD83E\uDE90", kmh: 40320, segs: 18, slopeDeg: 22, lenK: 1.6, aiK: 0.8, gold: 24000000000000, themes: [24, 34, 3, 11] },
+    { id: "hard", name: "难", icon: "\uD83C\uDF0C", kmh: 60120, segs: 24, slopeDeg: 18, lenK: 2.4, aiK: 0.87, gold: 108000000000000000, themes: [34, 3, 24, 11] },
+    { id: "brutal", name: "极难", icon: "⚫", kmh: 3600000, segs: 30, slopeDeg: 14, lenK: 3.6, aiK: 0.93, gold: 5184000000000000000000, themes: [3, 34, 11, 24] },
+    { id: "final", name: "终极", icon: "\uD83C\uDF20", kmh: 6300000, segs: 36, slopeDeg: 10, lenK: 5, aiK: 0.97, gold: 1555200000000000000000000, themes: [11, 24, 34, 3] }
   ];
   var SPACE_TARGET_SEC = 360;
-  var spaceLenOf = (tier, playerTop) => Math.round(Math.max(1, playerTop || 1) * SPACE_TARGET_SEC);
+  var spaceLenOf = (tier, playerTop) => Math.round(Math.max(1, playerTop || 1) * SPACE_TARGET_SEC * (tier.lenK || 1));
   var spaceCache = new Map;
   function spaceCourse(tierIdx, playerTop) {
     const t = SPACE_TIERS[tierIdx];
@@ -3545,9 +3568,17 @@
   }
   function spaceAIScale(playerTop, tier) {
     const KM = (v) => v / 3.6 * 100;
-    const cap = KM(50000);
+    const cap = KM(1e7);
     const player = Math.max(1, playerTop || 0);
-    return Math.min(player * 0.9, cap);
+    const aiK = tier && tier.aiK || 0.9;
+    return Math.min(player * aiK, cap);
+  }
+  function spaceAIJitter(base, i, seed) {
+    let t = (seed ^ (i + 1) * 2654435761) >>> 0;
+    t = Math.imul(t ^ t >>> 16, 569420461) >>> 0;
+    t = Math.imul(t ^ t >>> 15, 1935289751) >>> 0;
+    const r = ((t ^ t >>> 15) >>> 0) / 4294967296;
+    return base * (0.93 + r * 0.14);
   }
   function levelAt(idx) {
     return idx === FINALE_INDEX ? FINALE : LEVELS[idx];
@@ -6463,13 +6494,16 @@
     const list = store.racers;
     if (!list || !list.length)
       return;
-    const target = spaceAIScale(store.phys.topSpeed, SPACE_TIERS[spaceTierOf()] || SPACE_TIERS[0]);
+    const tier = SPACE_TIERS[spaceTierOf()] || SPACE_TIERS[0];
+    const base = spaceAIScale(store.phys.topSpeed, tier);
+    const seed = store.run.seed || 0;
     for (const ai of list) {
       if (ai.finish)
         continue;
       if (groundInfo(ai.x).y === Infinity)
         continue;
-      ai.spd += (target * ai.bias - ai.spd) * Math.min(1, dt * 3);
+      const want = spaceAIJitter(base, ai.ix || 0, seed) * ai.bias;
+      ai.spd += (want - ai.spd) * Math.min(1, dt * 3);
       ai.x += ai.spd * dt;
       if (store.finishX !== Infinity && ai.x >= store.finishX) {
         ai.finish = true;
@@ -6521,6 +6555,9 @@
     }
     return false;
   }
+  function rankedCleared() {
+    return (store.progress.wins || 0) > 0;
+  }
   var QUEST_VEHICLE = "cv1";
   function spaceQuestState() {
     const idx = VEHICLES.findIndex((v) => v.id === QUEST_VEHICLE);
@@ -6553,6 +6590,7 @@
   function resetRunState() {
     const run = store.run;
     run.gen++;
+    run.seed = (Math.imul(run.gen, 2654435761) ^ (store.selLevel + 1) * 2654435761) >>> 0;
     run.crashed = false;
     run.crashTimer = 0;
     run.settling = false;
@@ -6667,12 +6705,18 @@
         showToast("\uD83D\uDD12 尚未收到排位赛邀请（通关最终任务后解锁）", 1500);
         return;
       }
-      if (mode === MODE_SPACE && !hasUniverseVehicle()) {
-        store.pendingSpace = true;
-        showToast("\uD83D\uDD12 需要先完成宇宙场金币任务", 1500);
-        return;
+      if (mode === MODE_SPACE) {
+        if (!rankedCleared()) {
+          store.pendingSpace = true;
+          showToast("\uD83D\uDD12 宇宙场需要先赢下一场排位赛", 1800);
+          return;
+        }
+        if (!hasUniverseVehicle()) {
+          store.pendingSpace = true;
+          showToast("\uD83D\uDD12 需要先完成宇宙场金币任务", 1500);
+          return;
+        }
       }
-      store.lastMode = mode;
       store.mode = mode;
       const wantAdv = opt && opt.advanced !== undefined ? !!opt.advanced : store.rankedAdvanced === true;
       store.rankedAdvanced = mode === "ranked" && wantAdv && isAdvancedUnlocked(store.progress.rating);
@@ -6721,6 +6765,7 @@
         showToast("\uD83C\uDF89 全部通关！");
     }
   }
+  var DT_HINT = 1 / 60;
   function respawn() {
     const prev = store.run.lastSafeX;
     let sx = safeSpot(prev);
@@ -6891,7 +6936,11 @@
       presenter.toMenu();
     }), 1800);
   }
-  function belowWorld(midX, midY) {
+  function belowWorld(midX, midY, dt) {
+    if (store.mode === MODE_SPACE) {
+      const perFrame = Math.abs(bikeVx()) * (dt || DT_HINT);
+      return midY > groundY(midX) + 800 + perFrame * 1.8;
+    }
     const base = store.mode === "free" ? groundY(midX) + 800 : store.phys.floorY + 800;
     return midY > base;
   }
@@ -6940,7 +6989,7 @@
     } else if (b.grounded >= 2 && !run.crashed && Math.abs(groundInfo(mid).m) <= 0.2) {
       run.lastSafeX = mid;
     }
-    if (!run.crashed && belowWorld(mid, midY))
+    if (!run.crashed && belowWorld(mid, midY, dt))
       pitRewind();
     updateCoins();
     updateCanisters();
@@ -8928,6 +8977,278 @@
     ctx.restore();
   }
 
+  // src/render/trail.js
+  var ph = 0;
+  var qFac = () => getQuality() === "low" ? 0.5 : getQuality() === "high" ? 1 : 0.78;
+  var nz = (x, s) => Math.sin(x * 1.7 + s) * 0.62 + Math.sin(x * 4.3 + s * 2.7) * 0.38;
+  function glowStroke(col, wGlow, aGlow, wCore, aCore) {
+    ctx.strokeStyle = col;
+    ctx.lineWidth = Math.max(0.5, wGlow);
+    ctx.globalAlpha = aGlow;
+    ctx.stroke();
+    ctx.lineWidth = Math.max(0.35, wCore);
+    ctx.globalAlpha = aCore;
+    ctx.stroke();
+  }
+  function velOf() {
+    let vx = 0, vy = 0, mt = 0;
+    for (const p of bike.pts) {
+      vx += (p._vx || 0) * p.m;
+      vy += (p._vy || 0) * p.m;
+      mt += p.m;
+    }
+    return mt > 0 ? [vx / mt, vy / mt] : [0, 0];
+  }
+  function intensity(spd) {
+    const top = store.phys && store.phys.topSpeed;
+    if (!(top > 0) || !(spd > 0))
+      return 0;
+    const r = spd / top;
+    if (r <= TRAIL_ON)
+      return 0;
+    return clamp(Math.log10(r / TRAIL_ON) / Math.log10(TRAIL_FULL / TRAIL_ON), 0, 1);
+  }
+  var meteorOf = (k) => clamp((k - TRAIL_METEOR_LO) / (TRAIL_METEOR_HI - TRAIL_METEOR_LO), 0, 1);
+  function drawArc(T, a, A, L, W, k, q) {
+    const n = Math.max(2, Math.round(T.count * q));
+    const steps = 9;
+    for (let b = 0;b < n; b++) {
+      const s = T.seed + b * 2.399;
+      const off = (b - (n - 1) / 2) * W * 0.95;
+      ctx.beginPath();
+      for (let i = 0;i <= steps; i++) {
+        const t = i / steps;
+        const x = A - t * L;
+        const y = off + nz(t * 3.1 + ph * 9, s) * W * 0.6 * t;
+        if (i === 0)
+          ctx.moveTo(x, y);
+        else
+          ctx.lineTo(x, y);
+      }
+      glowStroke(T.glow, W * 0.34, a * 0.16, W * 0.11, a * 0.6);
+      glowStroke(T.core, W * 0.09, a * 0.28, W * 0.045, a * 0.85);
+    }
+  }
+  function drawHelix(T, a, A, L, W, k, q) {
+    const n = Math.max(2, Math.round(T.count * q));
+    const steps = 16;
+    for (let b = 0;b < n; b++) {
+      const dir = b % 2 === 0 ? 1 : -1;
+      const s = T.seed + b * 1.7;
+      ctx.beginPath();
+      for (let i = 0;i <= steps; i++) {
+        const t = i / steps;
+        const x = A - t * L;
+        const env = 0.35 + 0.65 * Math.sin(t * Math.PI);
+        const y = Math.sin(t * Math.PI * 2.5 * dir + ph * 3.4 + b) * W * 0.9 * env;
+        if (i === 0)
+          ctx.moveTo(x, y);
+        else
+          ctx.lineTo(x, y);
+      }
+      glowStroke(T.glow, W * 0.4, a * 0.15, W * 0.13, a * 0.55);
+      glowStroke(T.core, W * 0.09, a * 0.26, W * 0.05, a * 0.8);
+    }
+  }
+  function drawCorona(T, a, A, L, W, k, q) {
+    const n = Math.max(4, Math.round(T.count * q));
+    for (let i = 0;i < n; i++) {
+      const s = T.seed + i * 1.31;
+      const ang = -0.62 + 1.24 * i / Math.max(1, n - 1);
+      const len = L * (0.32 + 0.68 * Math.abs(Math.sin(ph * 2.2 + s)));
+      const ex = A - Math.cos(ang) * len;
+      const ey = Math.sin(ang) * len * 0.75;
+      ctx.beginPath();
+      ctx.moveTo(A, 0);
+      ctx.lineTo(ex, ey);
+      glowStroke(T.glow, W * 0.42, a * 0.14, W * 0.14, a * 0.5);
+      ctx.fillStyle = T.core;
+      ctx.globalAlpha = a * 0.8;
+      ctx.beginPath();
+      ctx.arc(ex, ey, Math.max(0.5, W * 0.1), 0, 7);
+      ctx.fill();
+    }
+  }
+  function drawEmber(T, a, A, L, W, k, q) {
+    const n = Math.max(4, Math.round(T.count * q));
+    for (let i = 0;i < n; i++) {
+      const s = T.seed + i * 2.11;
+      const t = ((i * 0.618033 + ph * 0.16 + T.seed) % 1 + 1) % 1;
+      const x = A - t * L;
+      const y = -t * L * 0.22 + nz(t * 2 + ph * 3, s) * W * 0.55;
+      const r = Math.max(0.5, W * (0.52 - 0.3 * t));
+      ctx.fillStyle = T.glow;
+      ctx.globalAlpha = a * (1 - t) * 0.4;
+      ctx.beginPath();
+      ctx.ellipse(x, y, r * (1 + t * 1.8), r, 0, 0, 7);
+      ctx.fill();
+      ctx.fillStyle = T.core;
+      ctx.globalAlpha = a * (1 - t) * 0.75;
+      ctx.beginPath();
+      ctx.ellipse(x, y, r * (0.75 + t * 1.2), r * 0.6, 0, 0, 7);
+      ctx.fill();
+    }
+  }
+  function drawRipple(T, a, A, L, W, k, q) {
+    const n = Math.max(3, Math.round(T.count * q));
+    for (let i = 0;i < n; i++) {
+      const s = T.seed + i * 1.9;
+      const t = ((i / n + ph * 0.13 + T.seed) % 1 + 1) % 1;
+      const x = A - t * L;
+      const y = nz(t * 1.5 + ph * 2, s) * W * 0.3;
+      const rx = Math.max(0.5, W * (0.35 + t * 1.6));
+      const ry = rx * 0.42;
+      ctx.beginPath();
+      ctx.ellipse(x, y, rx, ry, 0, 0, 7);
+      glowStroke(T.glow, W * 0.16, a * 0.14, W * 0.07, a * 0.55 * (1 - t * 0.7));
+      glowStroke(T.core, W * 0.06, a * 0.16, W * 0.035, a * 0.5 * (1 - t * 0.8));
+    }
+  }
+  function drawVortex(T, a, A, L, W, k, q) {
+    const n = Math.max(3, Math.round(T.count * q));
+    for (let i = 0;i < n; i++) {
+      const t = n > 1 ? i / (n - 1) : 0;
+      const s = T.seed + i * 0.9;
+      const x = A - t * L;
+      const y = nz(t * 1.2 + ph * 1.8, s) * W * 0.32;
+      const rx = Math.max(0.5, W * (1.5 - t * 0.85));
+      const ry = rx * 0.3;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(t * 1.5 + ph * 1.1);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, rx, ry, 0, 0, 7);
+      glowStroke(T.glow, W * 0.2, a * 0.15, W * 0.08, a * 0.55);
+      glowStroke(T.core, W * 0.07, a * 0.18, W * 0.04, a * 0.6);
+      ctx.restore();
+    }
+  }
+  function drawLance(T, a, A, L, W, k, q) {
+    for (let i = 0;i < 2; i++) {
+      const f = i === 0 ? 1 : 0.5;
+      ctx.fillStyle = i === 0 ? T.glow : T.core;
+      ctx.globalAlpha = a * (i === 0 ? 0.13 : 0.2);
+      ctx.beginPath();
+      ctx.moveTo(A, -W * 0.28 * f);
+      ctx.lineTo(A - L * 0.34, -W * f);
+      ctx.lineTo(A - L, -W * 0.05 * f);
+      ctx.lineTo(A - L, W * 0.05 * f);
+      ctx.lineTo(A - L * 0.34, W * f);
+      ctx.lineTo(A, W * 0.28 * f);
+      ctx.closePath();
+      ctx.fill();
+    }
+    glowStroke(T.core, W * 0.34, a * 0.2, W * 0.11, a * 0.85);
+    const n = Math.max(3, Math.round(T.count * q));
+    for (let i = 0;i < n; i++) {
+      const s = T.seed + i * 2.399;
+      const t = ((i * 0.382 + ph * 0.22 + T.seed) % 1 + 1) % 1;
+      const x = A - t * L;
+      const y = nz(t * 2.4 + ph * 4, s) * W * 0.8;
+      const r = Math.max(0.4, W * 0.09 * (1 - t * 0.5));
+      ctx.fillStyle = T.core;
+      ctx.globalAlpha = a * 0.7 * (1 - t * 0.6);
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, 7);
+      ctx.fill();
+    }
+  }
+  function drawMeteor(T, m, W, L) {
+    if (m <= 0)
+      return;
+    const R = W * (0.9 + 1.25 * m);
+    const TL = L * (1.15 + 0.7 * m);
+    const widths = [1, 0.74, 0.52, 0.32, 0.15];
+    for (let i = 0;i < 5; i++) {
+      const w = W * 0.85 * widths[i];
+      const inner = i === 4;
+      const tail = TL * (inner ? 0.45 : 1);
+      ctx.fillStyle = inner ? T.core : T.glow;
+      ctx.globalAlpha = m * (inner ? 0.16 : 0.05 + i * 0.04);
+      ctx.beginPath();
+      ctx.moveTo(0, -w);
+      ctx.lineTo(-tail, -w * 0.03);
+      ctx.lineTo(-tail, w * 0.03);
+      ctx.lineTo(0, w);
+      ctx.closePath();
+      ctx.fill();
+    }
+    for (let i = 9;i >= 1; i--) {
+      const t = i / 9;
+      ctx.fillStyle = i <= 3 ? T.core : T.glow;
+      ctx.globalAlpha = m * 0.075 * (1 - t) * (1 - t);
+      ctx.beginPath();
+      ctx.arc(0, 0, R * t, 0, 7);
+      ctx.fill();
+    }
+    ctx.fillStyle = T.core;
+    ctx.globalAlpha = m * 0.3;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, R * 1.35, R * 0.085, 0, 0, 7);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(0, 0, R * 0.085, R * 0.8, 0, 0, 7);
+    ctx.fill();
+  }
+  function drawTrail(dt = 1 / 60) {
+    const veh = VEHICLES[store.currentVehicle];
+    const T = veh && veh.trail;
+    if (!T)
+      return;
+    if (store.run && store.run.crashed)
+      return;
+    const [vx, vy] = velOf();
+    const spd = Math.hypot(vx, vy);
+    if (!(spd > 0.000001))
+      return;
+    const k = intensity(spd);
+    if (k <= 0)
+      return;
+    ph += dt;
+    const cam = store.cam;
+    const z = cam.zoom > 0.000001 ? cam.zoom : 1;
+    const sw = (px) => px / z;
+    const q = qFac();
+    const m = meteorOf(k);
+    const kE = k * (1 - 0.38 * m);
+    const A = sw(16);
+    const L = sw(T.len * (0.32 + 0.68 * k));
+    const W = sw(T.width * (0.55 + 0.45 * k));
+    const cxm = (bike.rear.x + bike.front.x) / 2;
+    const cym = (bike.rear.y + bike.front.y) / 2;
+    ctx.save();
+    ctx.translate(cxm - cam.x, cym - cam.y);
+    ctx.rotate(Math.atan2(vy, vx));
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    switch (T.style) {
+      case "helix":
+        drawHelix(T, kE, A, L, W, k, q);
+        break;
+      case "corona":
+        drawCorona(T, kE, A, L, W, k, q);
+        break;
+      case "ember":
+        drawEmber(T, kE, A, L, W, k, q);
+        break;
+      case "ripple":
+        drawRipple(T, kE, A, L, W, k, q);
+        break;
+      case "vortex":
+        drawVortex(T, kE, A, L, W, k, q);
+        break;
+      case "lance":
+        drawLance(T, kE, A, L, W, k, q);
+        break;
+      default:
+        drawArc(T, kE, A, L, W, k, q);
+        break;
+    }
+    drawMeteor(T, m, W, L);
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
   // src/render/hud.js
   function placeTag() {
     const isSpace = store.mode === "space";
@@ -9319,8 +9640,10 @@
     drawCanisters(cam.x, cam.y);
     drawFlag(cam.x, cam.y, store.finishX);
     drawBikeShadow();
-    if (store.state === "play" || store.state === "ended" || store.state === "pause")
+    if (store.state === "play" || store.state === "ended" || store.state === "pause") {
+      drawTrail(dt);
       drawBike(dt);
+    }
     ctx.restore();
     cam.x = bcx;
     cam.y = bcy;
@@ -10248,6 +10571,21 @@
     const q = spaceQuestState();
     const pending = store.pendingSpace;
     store.pendingSpace = false;
+    if (!rankedCleared()) {
+      showPanel(`<div class="modeTitle">\uD83C\uDF0C 宇宙场</div>
+      ${card({
+        cls: "vehCard",
+        icon: "\uD83D\uDD12",
+        title: "先赢下一场排位赛",
+        sub: "宇宙场是 5 个难度分级的长程竞速，需要你先熟悉竞速玩法",
+        meta: `排位战绩 ${store.progress.wins} 胜 ${store.progress.losses} 负`,
+        locked: true,
+        interactive: false
+      })}
+      <div class="panelNote">通关「最终任务」后解锁排位赛 → 赢一场即可开启宇宙场。</div>
+      <button class="btn backBtn" data-act="back">返回</button>`);
+      return;
+    }
     if (q.hasQuest) {
       showPanel(`<div class="modeTitle">\uD83C\uDF0C 宇宙场 · 金币任务</div>
       ${pending ? `<div class="panelNote">完成下面的任务即可获得基础宇宙车「第一宇宙速度」</div>` : ""}
@@ -10270,7 +10608,7 @@
     const topPx = store.phys.topSpeed > 1 ? store.phys.topSpeed : cur ? (cur.nominalKmh || 60) * (100 / 3.6) : 1667;
     const topKmh = Math.round(toKmh(topPx));
     showPanel(`<div class="modeTitle">\uD83C\uDF0C 宇宙场</div>
-    <div class="panelNote">太空背景 · 5 个难度分级 · <b>每个分级都按你的车速跑满 6 分钟</b>（换车后面板上的距离会跟着变）。AI 按你的实际极速配速。</div>
+    <div class="panelNote">太空背景 · 5 个难度分级 · <b>越难的赛道越长、对手越快</b>（长度按你的车速缩放：易 6 分钟 → 终极 30 分钟）。每位对手还有 ±7% 的个体随机。</div>
     ${SPACE_TIERS.map((t, i) => {
       const len = spaceLenOf(t, topPx);
       const ai = spaceAIScale(topPx, t);
@@ -10278,8 +10616,8 @@
         cls: "vehCard",
         icon: t.icon,
         title: `宇宙场 · ${t.name}`,
-        sub: `${abbrevLen(len)} · ${SPACE_TARGET_SEC / 60} 分钟 · ${t.segs} 段地形`,
-        meta: `对手配速 ≈ ${abbrevNum(Math.round(toKmh(ai)))} km/h（你的 ${Math.round(ai / topPx * 100)}%）· 通关 \uD83E\uDE99${abbrevNum(t.gold)}`,
+        sub: `${abbrevLen(len)} · ${Math.round(SPACE_TARGET_SEC * (t.lenK || 1) / 60)} 分钟 · ${t.segs} 段地形`,
+        meta: `对手配速 ≈ ${abbrevNum(Math.round(toKmh(ai)))} km/h（你的 ${Math.round(ai / topPx * 100)}% ±7%）· 通关 \uD83E\uDE99${abbrevNum(t.gold)}`,
         interactive: true,
         attrs: `data-act="spaceStart" data-tier="${i}"`
       });

@@ -1115,11 +1115,15 @@ export const MODE_SPACE = "space";
  * ★ kmh 只用于**面板上的对照文案**（"参考配速"），不参与长度与 AI 计算。
  */
 export const SPACE_TIERS = [
-  { id: "easy", name: "易", icon: "🌑", kmh: 28440, segs: 12, slopeDeg: 26, gold: 4e10, themes: [3, 11, 24, 34] },
-  { id: "mid", name: "中", icon: "🪐", kmh: 40320, segs: 18, slopeDeg: 22, gold: 2.4e13, themes: [24, 34, 3, 11] },
-  { id: "hard", name: "难", icon: "🌌", kmh: 60120, segs: 24, slopeDeg: 18, gold: 1.08e17, themes: [34, 3, 24, 11] },
-  { id: "brutal", name: "极难", icon: "⚫", kmh: 3600000, segs: 30, slopeDeg: 14, gold: 5.184e21, themes: [3, 34, 11, 24] },
-  { id: "final", name: "终极", icon: "🌠", kmh: 6300000, segs: 36, slopeDeg: 10, gold: 1.5552e24, themes: [11, 24, 34, 3] },
+  // lenK = 赛道长度倍率（相对"6 分钟基准"）；aiK = 对手配速倍率（相对玩家极速）
+  // ★ 两个都逐级递增：越难 = 赛道越长 + 对手越快（用户要求）。
+  //   aiK 全部 < 1，所以任何分级玩家都跑得过 AI —— 难的是"要跑更久、且容错更小"，
+  //   不是"必输"。真要必输就没���玩了。
+  { id: "easy", name: "易", icon: "🌑", kmh: 28440, segs: 12, slopeDeg: 26, lenK: 1.0, aiK: 0.70, gold: 4e10, themes: [3, 11, 24, 34] },
+  { id: "mid", name: "中", icon: "🪐", kmh: 40320, segs: 18, slopeDeg: 22, lenK: 1.6, aiK: 0.80, gold: 2.4e13, themes: [24, 34, 3, 11] },
+  { id: "hard", name: "难", icon: "🌌", kmh: 60120, segs: 24, slopeDeg: 18, lenK: 2.4, aiK: 0.87, gold: 1.08e17, themes: [34, 3, 24, 11] },
+  { id: "brutal", name: "极难", icon: "⚫", kmh: 3600000, segs: 30, slopeDeg: 14, lenK: 3.6, aiK: 0.93, gold: 5.184e21, themes: [3, 34, 11, 24] },
+  { id: "final", name: "终极", icon: "🌠", kmh: 6300000, segs: 36, slopeDeg: 10, lenK: 5.0, aiK: 0.97, gold: 1.5552e24, themes: [11, 24, 34, 3] },
 ];
 
 /** 宇宙场的目标时长（秒）：任何车、任何分级都跑满这么久 */
@@ -1132,7 +1136,7 @@ export const SPACE_TARGET_SEC = 360;
  * @param {number} playerTop 玩家当前实际极速（px/s）
  */
 export const spaceLenOf = (tier, playerTop) =>
-  Math.round(Math.max(1, playerTop || 1) * SPACE_TARGET_SEC);
+  Math.round(Math.max(1, playerTop || 1) * SPACE_TARGET_SEC * (tier.lenK || 1));
 
 /**
  * 宇宙场赛道（惰性构建 + 按长度缓存）。
@@ -1210,14 +1214,43 @@ export function spaceCourse(tierIdx, playerTop) {
  * @returns {number} AI 配速（px/s），已钳在 50000 km/h
  */
 export function spaceAIScale(playerTop, tier) {
-  void tier;
   const KM = (v) => (v / 3.6) * 100; // px/s → km/h
-  const cap = KM(50000);
+  // ★ 数值护栏（不是难度旋钮）：真正的"AI 慢于玩家"由 aiK < 1 保证。
+  //   原先这里是 50,000 km/h，恰好卡在顶档车的 aiK 0.80~0.97 之前 ——
+  //   于是「中/难/极难/终极」四档算出来的 AI 速度**完全相同**（都被钳在 50,000），
+  //   "越难对手越快"这条直接失效（实测 4 档都是 50,000 km/h）。
+  //   现在抬到 10,000,000 km/h：只拦"配置写错导致 AI 飞得比玩家快"这种事故，
+  //   不再干涉正常分级。
+  const cap = KM(10000000);
   const player = Math.max(1, playerTop || 0);
-  // ★ 单一公式：恒为玩家的 0.9 倍，再钳在 50000 km/h。
-  //   长度、配速、金币三者现在都以玩家极速为基准，口径统一，
-  //   "6 分钟 / AI 90% / 稳赢或可赢"三条验收在任何车上都自洽。
-  return Math.min(player * 0.9, cap);
+  // ★ 恒为玩家的该分级 aiK 倍（0.70→0.97 逐级递增 = "越难对手越快"），
+  //   再钳在 50,000 km/h。全部 aiK < 1 → 任何分级玩家都跑得过 AI。
+  const aiK = (tier && tier.aiK) || 0.9;
+  return Math.min(player * aiK, cap);
+}
+
+/**
+ * 单个对手在该分级基准配速上的**随机抖动**（用户要求"对手速度随机一点"）。
+ *
+ * ★ 为什么需要：5 个对手若配速完全相同，赛道上就是 5 条等距平行线，
+ *   名次从开局就定死了，中途超车毫无悬念。±7% 让"谁能超谁"变成实时博弈。
+ *
+ * ★ 抖动量刻意**不随分级放大**（各分级都是 ±7%）：难度由 aiK 承担，
+ *   抖动只负责"不呆板"。放大抖动会让终极级偶尔冒出快到离谱的对手，
+ *   那是运气，不是难度。
+ *
+ * @param {number} base 该分级的基准配速（spaceAIScale 的返回值）
+ * @param {number} i    对手序号（0~4）
+ * @param {number} seed 本局随机种子（同一 seed 重放结果一致）
+ */
+export function spaceAIJitter(base, i, seed) {
+  // 单步 hash（mulberry32 同款混合）：同一个 (seed, i) 永远给同一个抖动，
+  // 同一局内多次调用结果一致，换 seed 就全变。
+  let t = (seed ^ ((i + 1) * 0x9e3779b1)) >>> 0;
+  t = Math.imul(t ^ (t >>> 16), 0x21f0aaad) >>> 0;
+  t = Math.imul(t ^ (t >>> 15), 0x735a2d97) >>> 0;
+  const r = ((t ^ (t >>> 15)) >>> 0) / 4294967296;   // [0,1)
+  return base * (0.93 + r * 0.14);                  // ±7%
 }
 
 // ---------------- 关卡访问（含最终任务） ----------------
@@ -1343,3 +1376,4 @@ export function airTargetOf(L) {
   // 只要求飞满绝大多数跳台（留出容错：漏掉最后一个跳台仍能通关）
   return Math.max(1, r.jumpN - 1) * KICK_TARGET;
 }
+

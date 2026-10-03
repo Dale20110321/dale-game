@@ -10,6 +10,7 @@ import { drawTerrain } from "./terrain.js";
 import { drawBoosts, drawCanisters, drawCoins, drawDeco, drawFlag, drawGates, drawHazards, drawJumps } from "./entities.js";
 import { drawParticles } from "./particles.js";
 import { drawBike } from "./bike.js";
+import { drawTrail } from "./trail.js";
 import { shakeOffset } from "./camera.js";
 import { drawHud } from "./hud.js";
 import { applyPostFx } from "./postfx.js";
@@ -43,7 +44,12 @@ export function drawScene(dt = 1 / 60) {
   drawCanisters(cam.x, cam.y);
   drawFlag(cam.x, cam.y, store.finishX);
   drawBikeShadow();
-  if (store.state === "play" || store.state === "ended" || store.state === "pause") drawBike(dt);
+  if (store.state === "play" || store.state === "ended" || store.state === "pause") {
+    // 拖尾在车**之前**画：能量属于车尾，画在车之后会盖住骑手与车架。
+    // （宇宙级车才有 trail，其余车这一句直接返回，见 render/trail.js）
+    drawTrail(dt);
+    drawBike(dt);
+  }
   ctx.restore();
 
   cam.x = bcx;

@@ -1,4 +1,4 @@
-// 比赛模式：AI 对手 / 排位赛 AI 强度
+﻿// 比赛模式：AI 对手 / 排位赛 AI 强度
 //
 // 标定原则（据实机反馈修正）：AI 巡航速度必须与本关「三星要求均速 den3」挂钩，
 // 而不是与玩家极速 topSpeed 挂钩。原因：topSpeed 由车辆/升级决定，不随关卡变难而提高，
@@ -12,7 +12,7 @@
 //  · 排位赛（ranked）：基准 rankedAIScale(rating, advanced)×den3，不带追赶——
 //    段位赛是纯粹的配速检验，段位越高越接近、乃至超过三星节奏。
 import { START_X, RATING_PEAK, RATING_TOP, RACE_FORMATS, PLAYER_TEAM, RIVAL_TEAM, racePlaceOf, buildRacers } from "../config/constants.js";
-import { courseAt, spaceAIScale, SPACE_TIERS, spaceTierOf } from "../config/levels.js";
+import { courseAt, spaceAIScale, spaceAIJitter, SPACE_TIERS, spaceTierOf } from "../config/levels.js";
 import { store, bike } from "../core/store.js";
 import { groundInfo } from "../physics/terrain.js";
 import { emitParticles } from "../render/particles.js";
@@ -171,11 +171,18 @@ export function raceUpdate(dt) {
 export function spaceUpdate(dt) {
   const list = store.racers;
   if (!list || !list.length) return;
-  const target = spaceAIScale(store.phys.topSpeed, SPACE_TIERS[spaceTierOf()] || SPACE_TIERS[0]);
+  const tier = SPACE_TIERS[spaceTierOf()] || SPACE_TIERS[0];
+  const base = spaceAIScale(store.phys.topSpeed, tier);
+  // ★ 每个对手在该分级基准上再叠一层 ±7% 随机（用户要求"对手速度随机一点"）。
+  //   抖动按 (本局 seed, 对手序号) 决定，所以同一局内每人的配速恒定
+  //   （不会每帧乱跳、看起来像抽搐），但换一局就换一批快慢组合。
+  //   bias 仍参与相乘：它是车手之间的稳定个体差异，与本局的随机抖动正交。
+  const seed = store.run.seed || 0;
   for (const ai of list) {
     if (ai.finish) continue;
     if (groundInfo(ai.x).y === Infinity) continue;
-    ai.spd += (target * ai.bias - ai.spd) * Math.min(1, dt * 3);
+    const want = spaceAIJitter(base, ai.ix || 0, seed) * ai.bias;
+    ai.spd += (want - ai.spd) * Math.min(1, dt * 3);
     ai.x += ai.spd * dt;
     if (store.finishX !== Infinity && ai.x >= store.finishX) {
       ai.finish = true;
@@ -187,3 +194,4 @@ export function spaceUpdate(dt) {
   }
   store.raceAI = raceDecider(list);
 }
+

@@ -1,4 +1,4 @@
-// 游戏主状态机：闯关 / 比赛 / 排位 / 无限，通关结算与重生
+﻿// 游戏主状态机：闯关 / 比赛 / 排位 / 无限，通关结算与重生
 // 本模块不 import 任何 UI 模块，界面动作通过 initGame(presenter) 注入（避免循环依赖）
 import {
   START_X, WHEELBASE, toM, toKmh, LAND_REF,
@@ -75,7 +75,7 @@ export function runGuard(fn) {
 }
 
 // ---------------- 宇宙场准入与金币任务（R3.5） ----------------
-/** 宇宙级车的判据：tier === "宇宙"（6 台，maxLv 500，vehicles.js 里的宇宙分组） */
+/** 宇宙级车的判据：tier === "宇宙"（7 台，maxLv 500，vehicles.js 里的宇宙分组） */
 export function hasUniverseVehicle() {
   const owned = store.ownedVehicles || [];
   for (const i of owned) {
@@ -83,6 +83,20 @@ export function hasUniverseVehicle() {
     if (v && v.tier === "宇宙") return true;
   }
   return false;
+}
+
+/**
+ * 宇宙场的准入判据：**跑完过排位赛**（用户要求）。
+ *
+ * ★ 为什么用 wins ≥ 1 而不是"拥有宇宙车"或"登顶"：
+ *   · 金币任务已经保证玩家会拿到 cv1，用"拥有车"当门槛等于没有门槛；
+ *   · 用 `peak`（段位分 ≥ 3300「登顶」）门槛太高，那是满级玩家的终点，
+ *     而宇宙场的中低级分级正是给中段玩家练的。
+ *   · "排位赛赢过一场"恰好是"玩家已经熟悉竞速玩法"的信号 ——
+ *     宇宙场本质是竞速，把它放在排位赛之后是自然的顺序。
+ */
+export function rankedCleared() {
+  return (store.progress.wins || 0) > 0;
 }
 
 /**
@@ -144,6 +158,7 @@ export function claimSpaceQuest() {
 function resetRunState() {
   const run = store.run;
   run.gen++; // 开启新的一局：世代号 +1，作废上一局的延迟结算回调
+  run.seed = (Math.imul(run.gen, 0x9e3779b1) ^ (store.selLevel + 1) * 2654435761) >>> 0;  // 宇宙场对手抖动用
   run.crashed = false;
   run.crashTimer = 0;
   run.settling = false;
@@ -302,14 +317,22 @@ export function startGame(m, lv, opt) {
       showToast("🔒 尚未收到排位赛邀请（通关最终任务后解锁）", 1500);
       return;
     }
-    // 宇宙场准入（R3.5）：没有任何宇宙级车时不许白嫖赛道 ——
-    // 必须先接受金币任务换一台基础款（归墟）。已在任务里拿过车的直接放行。
-    if (mode === MODE_SPACE && !hasUniverseVehicle()) {
-      store.pendingSpace = true; // 由 ui 层弹出金币任务说明
-      showToast("🔒 需要先完成宇宙场金币任务", 1500);
-      return;
+    // 宇宙场准入（两道门，用户要求"跑完排位赛才有"）：
+    //  1) 排位赛赢过至少一场 —— 否则宇宙场只是竞速模式换个皮，
+    //     放在排位赛之后才是自然的进度顺序。
+    //  2) 拥有宇宙级车 —— 没有车只能干看着，先接受金币任务换一台入门款。
+    if (mode === MODE_SPACE) {
+      if (!rankedCleared()) {
+        store.pendingSpace = true;
+        showToast("🔒 宇宙场需要先赢下一场排位赛", 1800);
+        return;
+      }
+      if (!hasUniverseVehicle()) {
+        store.pendingSpace = true; // 由 ui 层弹出金币任务说明
+        showToast("🔒 需要先完成宇宙场金币任务", 1500);
+        return;
+      }
     }
-    store.lastMode = mode;
     store.mode = mode;
     // 高级赛请求：显式传入 opt.advanced 时以它为准（rating 未达标则降级为普通）；
     // 未传入时保留上一局的档位（重开 startGame() 不丢档）。
@@ -378,6 +401,9 @@ export function nextLevel() {
     if (store.mode === "level" && store.selLevel >= LEVELS.length - 1) showToast("🎉 全部通关！");
   }
 }
+
+/** belowWorld 里 dt 缺省时的兜底（正常调用一定传得到） */
+const DT_HINT = 1 / 60;
 
 /** 回到安全点 */
 export function respawn() {
@@ -589,9 +615,25 @@ function gateFail() {
 }
 
 /** 是否掉出地图：以关卡地形最低点（无限模式为当前位置地面）为基准 */
-function belowWorld(midX, midY) {
-  // 关卡模式：低于本关地形真实最低点（世界 y 最大）以下 800px 判定掉坑；
-  // 无限模式：低于"当前位置地面以下 800px"判定掉坑。
+function belowWorld(midX, midY, dt) {
+  // ★ 宇宙场必须走**局部地面**，不能用 store.phys.floorY：
+  //   floorY = measureBottomY(L)，采样数封顶在 2 万次，而宇宙场顶级赛道长
+  //   3150 亿 px（步长 7.56e6 px）。2 万个样本取 max 只是个近似值，
+  //   而地形基准线在这么长的赛道上漂移可达数百万 px —— 实测 floorY 只有 461，
+  //   局部真实地面却到 1186，正常飞行的车被反复判成"掉出地图"。
+  //
+  // ★ 余量还要随**每帧位移**放大：FLIGHT_HOVER 的升降速度上限是 1600 px/s
+  //   （26.7 px/帧），而顶级宇宙车一帧横移 290 万 px —— 地面在一帧之内就能
+  //   降下几十万 px，悬停伺服物理上追不上。若按固定 800px 判，落差稍大的
+  //   连续下坡就会每几帧触发一次 pitRewind；而飞行中 `grounded` 恒为 0，
+  //   lastSafeX 永不更新，于是每次都退回起点（实测第七宇宙速度在难/极难/终极
+  //   三档跑 1000 秒仍停在 1~3 Mpx）。
+  //   余量取"每帧位移 × 1.8"≈ 60° 坡 —— 覆盖本项目最高的 26° 坡还有余量，
+  //   而对慢速车（每帧几十 px）几乎不改变行为，掉坑判定照常生效。
+  if (store.mode === MODE_SPACE) {
+    const perFrame = Math.abs(bikeVx()) * (dt || DT_HINT);
+    return midY > groundY(midX) + 800 + perFrame * 1.8;
+  }
   const base = store.mode === "free" ? groundY(midX) + 800 : store.phys.floorY + 800;
   return midY > base;
 }
@@ -658,7 +700,7 @@ export function update(dt) {
     // 安全点只在"两轮贴地且坡度平缓(≤11°)"处更新
     run.lastSafeX = mid;
   }
-  if (!run.crashed && belowWorld(mid, midY)) pitRewind();
+  if (!run.crashed && belowWorld(mid, midY, dt)) pitRewind();
 
   updateCoins();
   updateCanisters();
@@ -723,3 +765,5 @@ export function update(dt) {
     finishLevel();
   }
 }
+
+
