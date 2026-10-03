@@ -43,6 +43,7 @@
       <button class="mtab is-on" data-mode="level" type="button" aria-selected="true">🏁 闯关</button>
       <button class="mtab" data-mode="race" type="button" aria-selected="false">🏆 比赛</button>
       <button class="mtab" data-mode="ranked" type="button" aria-selected="false">🏆 排位</button>
+      <button class="mtab" data-mode="space" type="button" aria-selected="false">🌌 宇宙场</button>
       <button class="mtab" data-mode="free" type="button" aria-selected="false">♾️ 无限</button>
     </nav>
 
@@ -62,10 +63,12 @@
   <div id="shop" class="hidden">
     <h2 id="shopTitle">🛠 升级车间</h2>
     <div class="upGold">🪙 金币 <span id="shopGold">0</span></div>
-    <div class="upItm"><div class="upT">⚙️ 引擎</div><div class="upD">爬坡力 / 红线极速</div><div class="upDelta" id="dg-engine"></div><div class="upL" id="lv-engine">Lv0</div><button class="btn sm" data-buy="engine">升级</button></div>
-    <div class="upItm"><div class="upT">🛞 轮胎</div><div class="upD">抓地 / 防滑 / 极速</div><div class="upDelta" id="dg-tire"></div><div class="upL" id="lv-tire">Lv0</div><button class="btn sm" data-buy="tire">升级</button></div>
-    <div class="upItm"><div class="upT">🛡️ 车架</div><div class="upD">倒立容错 · 油箱</div><div class="upDelta" id="dg-frame"></div><div class="upL" id="lv-frame">Lv0</div><button class="btn sm" data-buy="frame">升级</button></div>
-    <div class="upItm"><div class="upT">🛠️ 减震</div><div class="upD">落地缓冲 / 更稳</div><div class="upDelta" id="dg-susp"></div><div class="upL" id="lv-susp">Lv0</div><button class="btn sm" data-buy="susp">升级</button></div>
+    <!-- ★ 每项带一条进度条：宇宙级车上限是 500 级（普通车 100），
+         没有进度条时"升到第几级"完全无从判断，满格与否也只能靠读数字。 -->
+    <div class="upItm"><div class="upT">⚙️ 引擎</div><div class="upD">爬坡力 / 红线极速</div><div class="upDelta" id="dg-engine"></div><div class="upBar"><i id="bar-engine"></i></div><div class="upL" id="lv-engine">Lv0</div><button class="btn sm" data-buy="engine">升级</button></div>
+    <div class="upItm"><div class="upT">🛞 轮胎</div><div class="upD">抓地 / 防滑 / 极速</div><div class="upDelta" id="dg-tire"></div><div class="upBar"><i id="bar-tire"></i></div><div class="upL" id="lv-tire">Lv0</div><button class="btn sm" data-buy="tire">升级</button></div>
+    <div class="upItm"><div class="upT">🛡️ 车架</div><div class="upD">倒立容错 · 油箱</div><div class="upDelta" id="dg-frame"></div><div class="upBar"><i id="bar-frame"></i></div><div class="upL" id="lv-frame">Lv0</div><button class="btn sm" data-buy="frame">升级</button></div>
+    <div class="upItm"><div class="upT">🛠️ 减震</div><div class="upD">落地缓冲 / 更稳</div><div class="upDelta" id="dg-susp"></div><div class="upBar"><i id="bar-susp"></i></div><div class="upL" id="lv-susp">Lv0</div><button class="btn sm" data-buy="susp">升级</button></div>
     <button class="btn sm upAll" id="btnUpAll" type="button">⚡ 一键升满</button>
     <div class="upUltra" id="shopUltra"></div>
     <div class="upNote" id="shopNote"></div>

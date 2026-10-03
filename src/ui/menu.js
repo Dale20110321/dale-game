@@ -1,7 +1,8 @@
-// 主菜单 / 暂停 / 面板容器
+﻿// 主菜单 / 暂停 / 面板容器
 //  · 信息架构：Hero（标题 + 状态摘要 + 活体背景）+ 三组入口（主玩法 / 养成与进度 / 支持）
 //  · 键盘导航：方向键在入口间移动、Enter 触发（按钮原生）、Esc 关闭面板
 import { store, uiHooks } from "../core/store.js";
+import { abbrevNum } from "../core/utils.js";
 import { syncTouchVisibility } from "../core/input.js";
 import { LEVELS } from "../config/levels.js";
 import { isStorageAvailable } from "../core/storage.js";
@@ -81,7 +82,7 @@ export function renderHeroSummary() {
   // 不再在首屏堆六个 chip 把主视觉挤掉。
   heroSummary.innerHTML = [
     chip("通关 " + clearedCount() + "/" + LEVELS.length),
-    chip("🪙 " + store.gold, "gold"),
+    chip("🪙 " + abbrevNum(store.gold), "gold"),
   ].join("");
 }
 

@@ -70,6 +70,34 @@
     const n = Number(t);
     return Number.isFinite(n) ? n : 0;
   }
+  function abbrevNum(n, o) {
+    const v = Number(n);
+    if (!Number.isFinite(v))
+      return String(n);
+    const sign = v < 0 ? "-" : "";
+    const a = Math.abs(v);
+    const pre = o && o.yuan ? "¥" : "";
+    const fixed = (x, d) => {
+      const s = x.toFixed(d);
+      return s.indexOf(".") >= 0 ? s.replace(/\.?0+$/, "") : s;
+    };
+    if (a < 1e4)
+      return pre + sign + Math.round(a).toLocaleString("en-US");
+    if (a < 1e8) {
+      const wan = a / 1e4;
+      return pre + sign + (wan < 10 ? fixed(wan, 2) : wan < 1000 ? fixed(wan, 1) : String(Math.floor(wan))) + "万";
+    }
+    if (a < 1000000000000) {
+      const yi = a / 1e8;
+      return pre + sign + (yi < 10 ? fixed(yi, 2) : yi < 1000 ? fixed(yi, 1) : String(Math.floor(yi))) + "亿";
+    }
+    let e = Math.floor(Math.log10(a));
+    const mant = a / Math.pow(10, e);
+    if (mant >= 9.9995) {
+      e += 1;
+    }
+    return pre + sign + fixed(mant, 2) + "e" + e;
+  }
   var wrapX = (v, m) => {
     const w = m || 1;
     return (v % w + w) % w;
@@ -306,6 +334,8 @@
   var DUST_HEAVY_V = 320;
   var SPEEDLINE_V = 260;
   var SPEEDLINE_REF = 560;
+  var SPEEDLINE_WARP_V = 1e5;
+  var SPEEDLINE_WARP_REF = 20000000;
   var STUN_TIME = 1.1;
   var REV_ENTER_V = 24;
   var REV_SPEED = 0.3;
@@ -1564,6 +1594,7 @@
     state: "menu",
     mode: "level",
     lastMode: "level",
+    pendingSpace: false,
     rankedAdvanced: false,
     slot: 0,
     selLevel: 0,
@@ -1593,7 +1624,8 @@
       totalRuns: 0,
       totalMeters: 0,
       totalSeconds: 0,
-      lastPlayed: ""
+      lastPlayed: "",
+      earnedGold: 0
     },
     shopOpen: false,
     donateOpen: false,
@@ -1682,7 +1714,10 @@
     airScore: 0,
     hazards: [],
     gates: [],
-    jumps: []
+    jumps: [],
+    chunks: new Map,
+    takenX: new Set,
+    chunksDirty: false
   };
   var uiHooks = {
     onHome: null
@@ -3410,11 +3445,79 @@
     return L;
   })();
   var FINALE_INDEX = LEVELS.length;
+  var MODE_SPACE = "space";
+  var SPACE_TIERS = [
+    { id: "easy", name: "易", icon: "\uD83C\uDF11", kmh: 1000, segs: 12, slopeDeg: 26, gold: 40000000000, themes: [3, 11, 24, 34] },
+    { id: "mid", name: "中", icon: "\uD83E\uDE90", kmh: 5000, segs: 18, slopeDeg: 22, gold: 24000000000000, themes: [24, 34, 3, 11] },
+    { id: "hard", name: "难", icon: "\uD83C\uDF0C", kmh: 1e4, segs: 24, slopeDeg: 18, gold: 108000000000000000, themes: [34, 3, 24, 11] },
+    { id: "brutal", name: "极难", icon: "⚫", kmh: 25000, segs: 30, slopeDeg: 14, gold: 5184000000000000000000, themes: [3, 34, 11, 24] },
+    { id: "final", name: "终极", icon: "\uD83C\uDF20", kmh: 50000, segs: 36, slopeDeg: 10, gold: 1555200000000000000000000, themes: [11, 24, 34, 3] }
+  ];
+  var SPACE_TARGET_SEC = 360;
+  var spaceLenOf = (tier, playerTop) => Math.round(Math.max(1, playerTop || 1) * SPACE_TARGET_SEC);
+  var spaceCache = new Map;
+  function spaceCourse(tierIdx, playerTop) {
+    const t = SPACE_TIERS[tierIdx];
+    if (!t)
+      return null;
+    const len = spaceLenOf(t, playerTop);
+    const key = t.id + ":" + Math.ceil(len / 4096);
+    if (spaceCache.has(key))
+      return spaceCache.get(key);
+    const base = buildLongCourse({
+      name: `宇宙场 · ${t.name}`,
+      len,
+      segs: t.segs,
+      slopeDeg: t.slopeDeg,
+      seed: 5950976 + tierIdx * 7919,
+      themes: t.themes
+    });
+    const L = {
+      ...base,
+      coinN: 0,
+      ramp: 0.5,
+      den3: Math.max(1, playerTop || 1),
+      fuelK: 0,
+      mech: 1.3,
+      hazardN: 0,
+      gateN: 0,
+      variant: "normal",
+      theme: t.themes[0],
+      mood: "gauntlet",
+      spaceTier: t.id,
+      streaming: true
+    };
+    L.coinN = Math.max(8, Math.round(SPACE_TARGET_SEC / 3));
+    L.hazardN = Math.max(2, Math.round(SPACE_TARGET_SEC / 90));
+    L.coinVal = Math.max(1, Math.round(t.gold / (L.coinN * 20)));
+    fitSlope(L, t.slopeDeg);
+    spaceCache.set(key, L);
+    if (spaceCache.size > 6)
+      spaceCache.delete(spaceCache.keys().next().value);
+    return L;
+  }
+  function spaceAIScale(playerTop, tier) {
+    const KM = (v) => v / 3.6 * 100;
+    const cap = KM(50000);
+    const player = Math.max(1, playerTop || 0);
+    return Math.min(player * 0.9, cap);
+  }
   function levelAt(idx) {
     return idx === FINALE_INDEX ? FINALE : LEVELS[idx];
   }
-  function courseAt(idx, mode) {
+  function courseAt(idx, mode, playerTop) {
+    if (mode === MODE_SPACE)
+      return spacePinned || spaceCourse(spaceTier, playerTop || 27778) || RACE_COURSE;
     return mode === "race" || mode === "ranked" ? RACE_COURSE : levelAt(idx);
+  }
+  var spaceTier = 0;
+  function setSpaceTier(i) {
+    spaceTier = Math.max(0, Math.min(SPACE_TIERS.length - 1, i | 0));
+  }
+  var spaceTierOf = () => spaceTier;
+  var spacePinned = null;
+  function pinSpaceCourse(L) {
+    spacePinned = L || null;
   }
   function hasSegments(L) {
     return !!(L && Array.isArray(L.segments) && L.segments.length > 0);
@@ -3816,6 +3919,7 @@
     store.stat.totalMeters = Math.max(0, Number(o.totalMeters !== undefined ? o.totalMeters : o.dist) || 0);
     store.stat.totalSeconds = Math.max(0, Number(o.totalSeconds !== undefined ? o.totalSeconds : o.time) || 0);
     store.stat.lastPlayed = typeof o.lastPlayed === "string" ? o.lastPlayed : "";
+    store.stat.earnedGold = Math.max(0, Number(o.earnedGold) || 0);
     return store.stat;
   }
   function saveStat() {
@@ -5454,8 +5558,14 @@
       store.phys.fuel = store.phys.fuelMax;
       return;
     }
+    if (store.mode === "free") {
+      const v = VEHICLES[store.currentVehicle];
+      const use = 0.005 * v.weight + (key.right && !store.run.crashed ? 0.021 * v.weight : 0);
+      store.phys.fuel = Math.max(0, store.phys.fuel - use * dt);
+      return;
+    }
     const v = VEHICLES[store.currentVehicle];
-    const L = store.mode === "level" ? levelAt(store.selLevel) : null;
+    const L = courseAt(store.selLevel, store.mode, store.phys.topSpeed);
     const fk = L ? L.fuelK : 1;
     const use = (0.005 * v.weight + (key.right && !store.run.crashed ? 0.021 * v.weight : 0)) * fk;
     store.phys.fuel = Math.max(0, store.phys.fuel - use * dt);
@@ -5608,6 +5718,8 @@
     if (!n)
       return;
     store.gold = safeGold(store.gold + n);
+    store.stat.earnedGold = safeGold((store.stat.earnedGold || 0) + n);
+    saveStat();
     save();
     if (store.gold >= 5000)
       checkAch("rich");
@@ -5698,14 +5810,104 @@
   var CAN_MIN_GAP = 2500;
   var CAN_MAX = 6000;
   var BOOST_HAZARD_GAP = 400;
+  var currentL = null;
   function measureBottomY(L) {
+    const step = Math.max(25, Math.round(L.len / 20000));
     let max = -Infinity;
-    for (let x = 0;x <= L.len; x += 25) {
+    for (let x = 0;x <= L.len; x += step) {
       const y = levelHillY(L, x);
       if (y > max)
         max = y;
     }
     return isFinite(max) ? max : 300;
+  }
+  var CHUNK_W = 2000000;
+  var CHUNK_BACK = 2;
+  var CHUNK_AHEAD = 3;
+  function buildChunk(L, ci) {
+    const x0 = ci * CHUNK_W;
+    const x1 = Math.min(L.len, x0 + CHUNK_W);
+    const rng = mulberry32((L.seed ^ ci * 2654435761) >>> 0);
+    const coins = [];
+    const decoFore = [];
+    const decoBack = [];
+    const nChunks = Math.max(1, Math.ceil(L.len / CHUNK_W));
+    const i0 = Math.max(0, Math.ceil(x0 / L.len * L.coinN - 0.5));
+    const i1 = Math.min(L.coinN - 1, Math.ceil(x1 / L.len * L.coinN - 0.5));
+    for (let i = i0;i <= i1; i++) {
+      const x = L.len * (i + 0.5) / L.coinN;
+      if (x < x0 || x >= x1)
+        continue;
+      const gy = groundY(x);
+      if (gy === Infinity)
+        continue;
+      coins.push({ x, y: gy - 35, taken: false, ph: rng() * 6.28, coinVal: L.coinVal || 30 });
+    }
+    const T0 = THEMES[segmentThemeAt(L, x0)] || THEMES[0];
+    for (let x = x0 + 220;x < x1 - 120; x += 175 + rng() * 490) {
+      const gi = groundInfo(x);
+      if (gi.y === Infinity)
+        continue;
+      if (Math.abs(gi.m) > 0.5)
+        continue;
+      const s = 0.7 + rng() * 0.7;
+      const ph = rng() * 6.28;
+      const T = THEMES[segmentThemeAt(L, x)] || T0;
+      const di = pickDecoIndex(T.deco, rng());
+      const item = { x, y: gi.y, kind: T.deco[di], s, ph };
+      if (TALL_DECO.has(item.kind))
+        decoFore.push(item);
+      else
+        decoBack.push(item);
+    }
+    return { coins, decoFore, decoBack, x0, x1 };
+  }
+  var lastLo = -1;
+  var lastHi = -1;
+  function streamChunks() {
+    const L = currentL;
+    if (!L || !L.streaming)
+      return;
+    const camX = store.cam.x;
+    const ci0 = Math.floor(camX / CHUNK_W);
+    for (const k of world.chunks.keys()) {
+      if (k < ci0 - CHUNK_BACK || k > ci0 + CHUNK_AHEAD + 1)
+        world.chunks.delete(k);
+    }
+    const lo = Math.max(0, ci0 - CHUNK_BACK);
+    const hi = Math.min(Math.ceil(L.len / CHUNK_W) - 1, ci0 + CHUNK_AHEAD);
+    let grew = false;
+    for (let ci = lo;ci <= hi && !grew; ci++) {
+      if (world.chunks.has(ci))
+        continue;
+      world.chunks.set(ci, buildChunk(L, ci));
+      grew = true;
+    }
+    if (lo === lastLo && hi === lastHi && !grew && !world.chunksDirty) {
+      world.chunksDirty = false;
+      return;
+    }
+    lastLo = lo;
+    lastHi = hi;
+    world.chunksDirty = false;
+    const coins = [];
+    const decoFore = [];
+    const decoBack = [];
+    for (let ci = lo;ci <= hi; ci++) {
+      const c = world.chunks.get(ci);
+      if (!c)
+        continue;
+      for (const o of c.coins)
+        if (!world.takenX.has(o.x))
+          coins.push(o);
+      for (const o of c.decoFore)
+        decoFore.push(o);
+      for (const o of c.decoBack)
+        decoBack.push(o);
+    }
+    world.coins = coins;
+    world.decoFore = decoFore;
+    world.decoBack = decoBack;
   }
   function pickDecoIndex(list, r) {
     let total = 0;
@@ -5819,10 +6021,42 @@
     }
     return out;
   }
+  function pickBoostSpot(L, hazards, seed, tooClose) {
+    const inHazardZone = (x) => hazards.some((h) => x > h.x0 - BOOST_HAZARD_GAP && x < h.x1 + BOOST_HAZARD_GAP);
+    let win = 120000;
+    for (let attempt = 0;attempt < 3; attempt++, win *= 4) {
+      const lo = Math.max(120, seed - win);
+      const hi = Math.min(L.len - 320, seed + win);
+      if (hi <= lo)
+        return null;
+      let bestSpot = null, bestSafe = null;
+      for (let x = lo;x <= hi; x += 12) {
+        if (inHazardZone(x) || tooClose(x))
+          continue;
+        if (bestSafe === null || Math.abs(x - seed) < Math.abs(bestSafe - seed))
+          bestSafe = x;
+        if (groundInfo(x).m < 0.25 && groundInfo(x + 240).m < -0.35) {
+          if (bestSpot === null || Math.abs(x - seed) < Math.abs(bestSpot - seed))
+            bestSpot = x;
+        }
+      }
+      if (bestSpot !== null)
+        return bestSpot;
+      if (bestSafe !== null)
+        return bestSafe;
+    }
+    return null;
+  }
   function buildLevel() {
     const idx = store.selLevel;
-    const L = courseAt(idx, store.mode);
+    const L = courseAt(idx, store.mode, store.phys.topSpeed);
     const rng = mulberry32(1000 + idx * 97);
+    currentL = L;
+    world.chunks = new Map;
+    world.takenX = new Set;
+    world.chunksDirty = false;
+    lastLo = -1;
+    lastHi = -1;
     store.finishX = L.len;
     const th0 = segmentThemeAt(L, 0);
     store.phys.theme = th0;
@@ -5831,9 +6065,11 @@
     store.phys.gravity = T.g;
     store.phys.traction = T.traction;
     const coins = [];
-    for (let i = 0;i < L.coinN; i++) {
-      const cx = L.len * 0.15 + i * (L.len * 0.75) / (L.coinN - 1);
-      coins.push({ x: cx, y: groundY(cx) - 35, taken: false, ph: rng() * 6.28, coinVal: L.coinVal || 30 });
+    if (!L.streaming) {
+      for (let i = 0;i < L.coinN; i++) {
+        const cx = L.len * 0.15 + i * (L.len * 0.75) / (L.coinN - 1);
+        coins.push({ x: cx, y: groundY(cx) - 35, taken: false, ph: rng() * 6.28, coinVal: L.coinVal || 30 });
+      }
     }
     const vh = VEHICLES[store.currentVehicle];
     const up = getUp();
@@ -5864,48 +6100,29 @@
       }
     }
     const hazards = buildHazards(L, mulberry32(9000 + idx * 173));
+    const deco = L.streaming ? { fore: [], back: [] } : buildDeco(L, mulberry32(5000 + idx * 131));
     const boosts = [];
     const boostN = Math.max(1, 3 - Math.round(L.ramp * 2));
-    const inHazardZone = (x) => hazards.some((h) => x > h.x0 - BOOST_HAZARD_GAP && x < h.x1 + BOOST_HAZARD_GAP);
-    const spots = [];
-    const safe = [];
-    for (let x = 120;x <= L.len - 320; x += 12) {
-      if (inHazardZone(x))
-        continue;
-      safe.push(x);
-      if (groundInfo(x).m < 0.25 && groundInfo(x + 240).m < -0.35)
-        spots.push(x);
-    }
     const used = [];
-    const pick = (list, seed) => {
-      let best = null;
-      for (const x of list) {
-        if (used.some((u) => Math.abs(u - x) < 600))
-          continue;
-        if (best === null || Math.abs(x - seed) < Math.abs(best - seed))
-          best = x;
-      }
-      return best;
-    };
+    const tooClose = (x) => used.some((u) => Math.abs(u - x) < 600);
     for (let k = 1;k <= boostN; k++) {
       const seed = L.len * (0.12 + 0.76 * k / (boostN + 1));
-      let bx = pick(spots, seed);
-      if (bx === null)
-        bx = pick(safe, seed);
+      const bx = pickBoostSpot(L, hazards, seed, tooClose);
       if (bx === null)
         continue;
       used.push(bx);
       boosts.push({ x: bx, y: groundY(bx) - 4, taken: false, ph: rng() * 6.28 });
     }
-    const deco = buildDeco(L, mulberry32(5000 + idx * 131));
-    world.coins = coins;
     world.canisters = canisters;
     world.boosts = boosts;
-    world.decoFore = deco.fore;
-    world.decoBack = deco.back;
+    world.coins = coins;
+    world.decoFore = L.streaming ? [] : deco.fore;
+    world.decoBack = L.streaming ? [] : deco.back;
     world.hazards = hazards;
     world.gates = buildGates(L);
     world.jumps = buildJumps(L);
+    if (L.streaming)
+      streamChunks();
   }
   function syncSegmentTheme(L, x) {
     const th = segmentThemeAt(L, x);
@@ -6034,6 +6251,8 @@
       c.ph += 0.05;
       if (Math.hypot(c.x - mx, c.y - my) < 45) {
         c.taken = true;
+        world.takenX.add(c.x);
+        world.chunksDirty = true;
         store.run.coinGot++;
         addGold(c.coinVal || 30);
         playCoinSound();
@@ -6156,9 +6375,11 @@
   function racePlace(list, playerX) {
     return racePlaceOf(list, playerX, raceFormat());
   }
-  function raceInit(format) {
-    store.raceFormat = format && RACE_FORMATS[format] ? format : "duel";
-    const built = buildRacers(store.raceFormat);
+  function raceInit(format, keepFormat) {
+    const f = format && RACE_FORMATS[format] ? format : "duel";
+    if (!keepFormat)
+      store.raceFormat = f;
+    const built = buildRacers(f);
     store.racers = built.r;
     store.raceAI = raceDecider(store.racers);
   }
@@ -6187,6 +6408,28 @@
         const gy = groundInfo(store.finishX);
         if (gy.y !== Infinity) {
           emitParticles(store.finishX, gy.y - 20, 16, { color: token("danger"), spd: 2, life: 30, size: 3, grav: 0.03 });
+        }
+      }
+    }
+    store.raceAI = raceDecider(list);
+  }
+  function spaceUpdate(dt) {
+    const list = store.racers;
+    if (!list || !list.length)
+      return;
+    const target = spaceAIScale(store.phys.topSpeed, SPACE_TIERS[spaceTierOf()] || SPACE_TIERS[0]);
+    for (const ai of list) {
+      if (ai.finish)
+        continue;
+      if (groundInfo(ai.x).y === Infinity)
+        continue;
+      ai.spd += (target * ai.bias - ai.spd) * Math.min(1, dt * 3);
+      ai.x += ai.spd * dt;
+      if (store.finishX !== Infinity && ai.x >= store.finishX) {
+        ai.finish = true;
+        const gy = groundInfo(store.finishX);
+        if (gy !== Infinity) {
+          emitParticles(store.finishX, gy.y - 20, 16, { color: token("danger"), spd: 3, life: 30, size: 4, grav: 0.03 });
         }
       }
     }
@@ -6222,6 +6465,44 @@
         return;
       fn();
     };
+  }
+  function hasUniverseVehicle() {
+    const owned = store.ownedVehicles || [];
+    for (const i of owned) {
+      const v = VEHICLES[i];
+      if (v && v.tier === "宇宙")
+        return true;
+    }
+    return false;
+  }
+  var QUEST_VEHICLE = "omega";
+  function spaceQuestState() {
+    const idx = VEHICLES.findIndex((v) => v.id === QUEST_VEHICLE);
+    const owned = (store.ownedVehicles || []).includes(idx);
+    const need = 800000000;
+    const got = store.stat && store.stat.earnedGold || 0;
+    return {
+      done: owned,
+      hasQuest: !owned,
+      need,
+      got: Math.min(got, need),
+      progress: Math.max(0, Math.min(1, got / need))
+    };
+  }
+  function claimSpaceQuest() {
+    const st = spaceQuestState();
+    if (!st.hasQuest)
+      return false;
+    if (st.got < st.need)
+      return false;
+    const idx = VEHICLES.findIndex((v) => v.id === QUEST_VEHICLE);
+    if (!(idx >= 0) || (store.ownedVehicles || []).includes(idx))
+      return false;
+    if (!Array.isArray(store.ownedVehicles))
+      store.ownedVehicles = [0];
+    store.ownedVehicles.push(idx);
+    save();
+    return true;
   }
   function resetRunState() {
     const run = store.run;
@@ -6268,6 +6549,8 @@
       raceInit("duel");
     else if (store.mode === "race")
       raceInit(store.raceFormat);
+    else if (store.mode === MODE_SPACE)
+      raceInit("melee", true);
     resumeFinaleCheckpoint();
     store.state = "play";
     presenter.hideOverlay();
@@ -6338,6 +6621,11 @@
         showToast("\uD83D\uDD12 尚未收到排位赛邀请（通关最终任务后解锁）", 1500);
         return;
       }
+      if (mode === MODE_SPACE && !hasUniverseVehicle()) {
+        store.pendingSpace = true;
+        showToast("\uD83D\uDD12 需要先完成宇宙场金币任务", 1500);
+        return;
+      }
       store.lastMode = mode;
       store.mode = mode;
       const wantAdv = opt && opt.advanced !== undefined ? !!opt.advanced : store.rankedAdvanced === true;
@@ -6348,9 +6636,16 @@
       }
       if (store.mode === "free")
         freeInit(opt && opt.theme);
-      else
+      else {
+        if (store.mode === MODE_SPACE) {
+          setSpaceTier(opt && opt.tier !== undefined ? opt.tier : spaceTierOf());
+          applyUpgrades();
+          pinSpaceCourse(spaceCourse(spaceTierOf(), store.phys.topSpeed));
+        }
         buildLevel();
-      applyUpgrades();
+      }
+      if (store.mode !== MODE_SPACE)
+        applyUpgrades();
       beginRun();
     } catch (err) {
       console.error("startGame 错误:", err);
@@ -6484,6 +6779,14 @@
       result.rating = after;
       showToast((won ? "\uD83C\uDFC6 排位胜利 \uD83E\uDE99+" : "\uD83C\uDFF3 排位失利 \uD83E\uDE99+") + gain, 900, won ? "success" : "warn");
       result.nextLabel = "继续 →";
+    } else if (store.mode === MODE_SPACE) {
+      const tier = SPACE_TIERS[spaceTierOf()] || SPACE_TIERS[0];
+      const gold = tier.gold;
+      addGold(gold);
+      result.goldGain = gold;
+      result.title = `${tier.icon} 宇宙场 · ${tier.name}`;
+      result.nextLabel = "继续 →";
+      showToast(`\uD83C\uDF0C 宇宙场「${tier.name}」完成 · \uD83E\uDE99+${gold}`, 1400, "success");
     } else if (store.mode === "level") {
       const elapsed = store.time - run.levelStartTime + run.penaltyTime;
       const ratio = run.totalCoins > 0 ? run.coinGot / run.totalCoins : 1;
@@ -6568,9 +6871,10 @@
     }
     store.time += dt;
     stepPhysics();
-    if (store.mode === "level" || store.mode === "race" || store.mode === "ranked") {
+    if (store.mode === "level" || store.mode === "race" || store.mode === "ranked" || store.mode === MODE_SPACE) {
       syncSegmentTheme(courseAt(store.selLevel, store.mode), (b.rear.x + b.front.x) / 2);
     }
+    streamChunks();
     updateParticles();
     emitRideDust();
     updateStats(dt);
@@ -6600,7 +6904,7 @@
       handleFuelEmpty();
     if (toKmh(Math.abs(b.speed)) >= 30)
       checkAch("fast");
-    if (store.mode === "level" && !run.settling) {
+    if ((store.mode === "level" || store.mode === MODE_SPACE) && !run.settling) {
       if (!run.crashed && world.hazards.length && !ignoresHazardLimit()) {
         const spd = Math.abs(bikeVx());
         for (const h of world.hazards) {
@@ -6625,7 +6929,9 @@
         }
       }
     }
-    if (store.mode === "race" || store.mode === "ranked") {
+    if (store.mode === MODE_SPACE) {
+      spaceUpdate(dt);
+    } else if (store.mode === "race" || store.mode === "ranked") {
       raceUpdate(dt);
       if (store.raceAI && store.raceAI.finish && !run.settling) {
         run.settling = true;
@@ -7371,25 +7677,67 @@
     }
   };
   var GS = 8;
-  var GBUF_N = 2048;
-  var gBuf = new Float64Array(GBUF_N);
-  var gOk = new Uint8Array(GBUF_N);
-  var lBuf = new Float64Array(GBUF_N);
+  var GBUF_MIN = 2048;
+  var GBUF_MAX = 16384;
+  var GBUF_N = GBUF_MIN;
+  var gBuf = new Float64Array(GBUF_MAX);
+  var gOk = new Uint8Array(GBUF_MAX);
+  var lBuf = new Float64Array(GBUF_MAX);
+  function ensureGBuf(need) {
+    if (need <= GBUF_N)
+      return;
+    let cap = GBUF_N;
+    while (cap < need && cap < GBUF_MAX)
+      cap *= 2;
+    GBUF_N = Math.min(cap, GBUF_MAX);
+  }
+  var CRUISE_V = 1e5;
+  var CRUISE_BANDS = 26;
+  var CRUISE_BAND_PX = 46;
+  function drawCruiseBands(cx, cy, W, H, pal) {
+    ctx.fillStyle = pal[0];
+    ctx.fillRect(0, 0, W, H);
+    const bandW = W / CRUISE_BANDS;
+    for (let b = 0;b < CRUISE_BANDS; b++) {
+      const a = [], x0 = b * bandW;
+      for (const f of [0.15, 0.5, 0.85]) {
+        const gy = groundY(cx + x0 + bandW * f);
+        if (gy !== Infinity)
+          a.push(gy);
+      }
+      if (!a.length)
+        continue;
+      a.sort((p, q) => p - q);
+      const gy = a[a.length >> 1] - cy;
+      const t = Math.max(0, Math.min(1, (gy + H * 0.5) / (H * 1.5)));
+      ctx.fillStyle = t > 0.62 ? pal[1] : t > 0.34 ? pal[0] : pal[2] || pal[0];
+      ctx.fillRect(x0, gy, bandW + 1, CRUISE_BAND_PX);
+    }
+    ctx.fillStyle = token("fx-lit-top");
+    ctx.globalAlpha = 0.55;
+    ctx.fillRect(0, 0, W, 2);
+    ctx.globalAlpha = 1;
+  }
   function zoomNow() {
     const z = store.cam.zoom;
     return z > 0.01 ? z : 1;
   }
+  var gUsed = 0;
   function invalidateGround() {
-    gOk.fill(0);
+    gOk.fill(0, 0, gUsed);
   }
   function groundBuf(cx) {
-    const n = Math.min(GBUF_N, Math.ceil(view.W / zoomNow() / GS) + 2 | 0);
+    const need = Math.ceil(view.W / zoomNow() / GS) + 2 | 0;
+    ensureGBuf(need);
+    const n = Math.min(GBUF_N, need);
     for (let i = 0;i < n; i++) {
       if (!gOk[i]) {
         gBuf[i] = groundY(cx + i * GS);
         gOk[i] = 1;
       }
     }
+    if (n > gUsed)
+      gUsed = n;
     return n;
   }
   function drawTerrain(cx, cy) {
@@ -7397,6 +7745,10 @@
     const H = view.H / zoomNow();
     const T = THEMES[store.phys.theme] || THEMES[0];
     const pal = T.pal;
+    if (Math.abs(bikeVx()) > CRUISE_V) {
+      drawCruiseBands(cx, cy, W, H, pal);
+      return;
+    }
     invalidateGround();
     const n = groundBuf(cx);
     ctx.fillStyle = pal[0];
@@ -8533,9 +8885,10 @@
 
   // src/render/hud.js
   function placeTag() {
-    if (store.mode !== "race")
+    const isSpace = store.mode === "space";
+    if (store.mode !== "race" && !isSpace)
       return "";
-    const f = RACE_FORMATS[store.raceFormat] || RACE_FORMATS.duel;
+    const f = isSpace ? RACE_FORMATS.melee : RACE_FORMATS[store.raceFormat] || RACE_FORMATS.duel;
     if (f.riders < 2)
       return "";
     const p = racePlaceOf(store.racers || [], (bike.rear.x + bike.front.x) / 2, f);
@@ -8647,7 +9000,7 @@
     const L = hudLayout(!!w, touchActive);
     drawInfoCard(L.info);
     drawFuelGauge(L.fuel);
-    if (store.mode === "race" || store.mode === "ranked")
+    if (store.mode === "race" || store.mode === "ranked" || store.mode === "space")
       drawRaceBar(L.race);
     drawSpeedGauge(L.speed);
     if (L.drive)
@@ -8690,7 +9043,7 @@
     const L = courseAt(store.selLevel, store.mode) || LEVELS[0];
     const compact = view.W < 520 || view.H < 480;
     const isFinale = store.mode === "level" && store.selLevel === FINALE_INDEX;
-    const title = store.mode === "free" ? "♾ 自由模式" : isFinale ? "\uD83C\uDFAF " + L.name : store.mode === "race" || store.mode === "ranked" ? "\uD83C\uDFC6 " + (store.mode === "ranked" ? "排位赛" : "比赛") + " 第" + (store.selLevel + 1) + "关" : "关卡 " + (store.selLevel + 1) + (compact ? "" : " · " + L.name);
+    const title = store.mode === "free" ? "♾ 自由模式" : isFinale ? "\uD83C\uDFAF " + L.name : store.mode === "space" ? "\uD83C\uDF0C " + L.name : store.mode === "race" || store.mode === "ranked" ? "\uD83C\uDFC6 " + (store.mode === "ranked" ? "排位赛" : "比赛") + " 第" + (store.selLevel + 1) + "关" : "关卡 " + (store.selLevel + 1) + (compact ? "" : " · " + L.name);
     ctx.save();
     ctx.shadowColor = token("shadow-text-strong");
     ctx.shadowBlur = 6;
@@ -8701,7 +9054,7 @@
       if (vi)
         bx += badgeText(vi.icon + vi.name, bx, r.y + 1, token("glass-fill-strong"), token("info")) + 4;
     }
-    if ((store.mode === "race" || store.mode === "ranked") && store.raceAI) {
+    if ((store.mode === "race" || store.mode === "ranked" || store.mode === "space") && store.raceAI) {
       const lead = (bike.rear.x + bike.front.x) / 2 - store.raceAI.x;
       const txt = lead >= 0 ? "领先 " + Math.round(toM(lead)) + "m" : "落后 " + Math.round(toM(-lead)) + "m";
       bx += badgeText(txt, bx, r.y + 1, token("glass-fill-strong"), lead >= 0 ? token("success") : token("danger")) + 4;
@@ -8713,11 +9066,13 @@
     if (store.mode === "free") {
       info.push("里程 " + Math.round(toM((bike.rear.x + bike.front.x) / 2)) + "m" + (store.best > 0 ? " · 最佳 " + store.best + "m" : ""));
     } else {
-      const g = store.mode === "level" ? world.gates[store.run.gateIdx] : null;
+      const g = store.mode === "level" || store.mode === "space" ? world.gates[store.run.gateIdx] : null;
       if (g) {
         const ride = store.time - store.run.levelStartTime - store.run.crashStall;
         const rem = Math.max(0, g.limit - ride);
-        info.push("⏱ 第" + (store.run.gateIdx + 1) + "门 " + rem.toFixed(1) + "s");
+        const total = world.gates.length;
+        const idxLabel = total > 20 ? `${store.run.gateIdx + 1}/${total}` : String(store.run.gateIdx + 1);
+        info.push("⏱ 第" + idxLabel + "门 " + rem.toFixed(1) + "s");
       }
       if (!info.length)
         info.push("缩放 " + Math.round(store.cam.zoomBase * 100) + "% · R 重启 · +/- 缩放");
@@ -8810,7 +9165,8 @@
     ctx.strokeStyle = frac > 0.85 ? token("danger") : frac > 0.6 ? token("warn") : token("success");
     ctx.lineWidth = 7;
     ctx.stroke();
-    label(String(Math.round(kmh)), cx, cy + 4, "display", token("text-hi"), "center");
+    const kmhText = kmh >= 1e4 ? abbrevNum(kmh) : String(Math.round(kmh));
+    label(kmhText, cx, cy + 4, "display", token("text-hi"), "center");
     label("km/h", cx, cy + 18, "micro", token("text-lo"), "center");
   }
   function drawDriveIndicator(r) {
@@ -8868,21 +9224,33 @@
     if (spd < SPEEDLINE_V || store.run.crashed)
       return;
     const q = getQuality();
-    const intensBase = q === "high" ? 0.42 : 0.3;
-    const intens = clamp(spd / SPEEDLINE_REF, 0, 1) * intensBase;
-    const n = q === "high" ? 16 : 12;
+    const isHi = q === "high";
+    let intens = clamp(spd / SPEEDLINE_REF, 0, 1) * (isHi ? 0.42 : 0.3);
+    let n = isHi ? 16 : 12;
+    let lMax = isHi ? 34 : 25;
+    let lMin = 10;
+    let lw = isHi ? 1.7 : 1.5;
+    if (spd > SPEEDLINE_WARP_V) {
+      const k = clamp(Math.log10(spd / SPEEDLINE_WARP_V) / Math.log10(SPEEDLINE_WARP_REF / SPEEDLINE_WARP_V), 0, 1);
+      intens = clamp(intens + k * (isHi ? 0.43 : 0.35), 0, 0.85);
+      n = Math.round(n + k * (isHi ? 68 : 52));
+      lMax = isHi ? 34 + k * 300 : 25 + k * 240;
+      lMin = 10 + k * 40;
+      lw = isHi ? 1.7 + k * 1.6 : 1.5 + k * 1.2;
+    }
+    const dir = Math.sign(bike.speed || 1);
     ctx.strokeStyle = token("obj-glass-mid");
     ctx.globalAlpha = intens;
-    ctx.lineWidth = q === "high" ? 1.7 : 1.5;
+    ctx.lineWidth = lw;
+    ctx.beginPath();
     for (let i = 0;i < n; i++) {
       const x = Math.random() * view.W;
       const y = Math.random() * view.H * 0.62;
-      const l = 10 + Math.random() * (q === "high" ? 34 : 25);
-      ctx.beginPath();
+      const l = lMin + Math.random() * (lMax - lMin);
       ctx.moveTo(x, y);
-      ctx.lineTo(x - l * Math.sign(bike.speed || 1), y);
-      ctx.stroke();
+      ctx.lineTo(x - l * dir, y);
     }
+    ctx.stroke();
     ctx.globalAlpha = 1;
   }
 
@@ -9000,6 +9368,10 @@
   function emptyState(text) {
     return `<div class="empty">${text}</div>`;
   }
+  function progress(pct, o = {}) {
+    const v = Math.max(0, Math.min(100, Number(pct) || 0));
+    return `<div class="progress"${o.attrs ? " " + o.attrs : ""}><i style="width:${v.toFixed(1)}%"></i></div>`;
+  }
   function themeVars(th) {
     const pal = th && th.pal || [];
     const sky = th && th.sky || [];
@@ -9069,7 +9441,7 @@
       return;
     heroSummary.innerHTML = [
       chip("通关 " + clearedCount() + "/" + LEVELS.length),
-      chip("\uD83E\uDE99 " + store.gold, "gold")
+      chip("\uD83E\uDE99 " + abbrevNum(store.gold), "gold")
     ].join("");
   }
   function setMenuGroupsVisible(v) {
@@ -9347,7 +9719,7 @@
     refreshMenuButtons();
   }
   function selectMode(mode) {
-    const m = mode === "race" || mode === "ranked" || mode === "free" ? mode : "level";
+    const m = mode === "race" || mode === "ranked" || mode === "free" || mode === "space" ? mode : "level";
     for (const b of document.querySelectorAll("#modeTabs .mtab")) {
       const on = b.dataset.mode === m;
       b.classList.toggle("is-on", on);
@@ -9363,6 +9735,8 @@
         homeView2.style.display = "none";
       if (m === "ranked")
         renderRankedPanel();
+      else if (m === "space")
+        renderSpacePanel();
       else
         renderFreePanel();
     }
@@ -9405,12 +9779,15 @@
     const total = LEVELS.length;
     const unlocked = done >= total;
     const cleared = store.progress.finaleDone === true;
+    const seg = Math.max(0, Math.min(FINALE_SEGS, store.progress.finaleSeg || 0));
+    const segTxt = cleared ? "36/36 段 ✅" : seg > 0 ? `⏩ 从第 ${seg + 1} / ${FINALE_SEGS} 段继续` : `0 / ${FINALE_SEGS} 段`;
     return card({
       cls: "vehCard finaleTile",
       icon: unlocked ? "\uD83C\uDFAF" : "\uD83D\uDD12",
       title: FINALE.name,
-      sub: `${Math.round(toM(FINALE.len))}m · 依次穿越 6 个场景 · 坡度 ${Math.round(FINALE.maxSlope)}°`,
-      meta: cleared ? "✅ 已通关，可重复挑战" : unlocked ? "已解锁 · 点击开始" : `通关全部 ${total} 关后解锁`,
+      sub: `${Math.round(toM(FINALE.len))}m · 依次穿越 ${FINALE_SEGS} 个场景 · ${FINALE.gateN} 个计时门 · 坡度 ${Math.round(FINALE.maxSlope)}°`,
+      meta: (cleared ? "✅ 已通关，可重复挑战" : unlocked ? "已解锁 · 点击开始" : `通关全部 ${total} 关后解锁`) + " · " + segTxt,
+      body: progress(seg / FINALE_SEGS * 100, { label: "环大陆进度" }),
       right: unlocked ? "▶" : `${done}/${total}`,
       interactive: unlocked,
       locked: !unlocked,
@@ -9485,6 +9862,17 @@
         return;
       case "free":
         api.startGame("free", undefined, { theme: +el.dataset.theme });
+        return;
+      case "spaceStart":
+        api.startGame("space", undefined, { tier: +el.dataset.tier });
+        return;
+      case "spaceClaim":
+        if (claimSpaceQuest()) {
+          showToast("☄️ 已获得「归墟」！宇宙场向你开放", 2000, "success");
+          renderSpacePanel();
+        } else {
+          showToast("金币任务还没完成", 1200);
+        }
         return;
       case "quality":
         setQuality(el.dataset.q);
@@ -9752,7 +10140,7 @@
       · 战绩 ${P.wins} 胜 ${P.losses} 负</div>
     <div class="rankBar" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"
          aria-label="${rankName(rating)} 段内进度"><i style="width:${pct.toFixed(1)}%"></i></div>
-    ${next ? `<div class="rankSub">下一段「${next.name}」还差 <b>${next.min - rating}</b> 分 · 升段奖励 \uD83E\uDE99 ${next.reward.toLocaleString()}</div>` : `<div class="rankSub">段位表已刷满 · 累计升段奖励 \uD83E\uDE99 ${RANKS.reduce((a, r) => a + r.reward, 0).toLocaleString()}</div>`}
+    ${next ? `<div class="rankSub">下一段「${next.name}」还差 <b>${next.min - rating}</b> 分 · 升段奖励 \uD83E\uDE99 ${abbrevNum(next.reward)}</div>` : `<div class="rankSub">段位表已刷满 · 累计升段奖励 \uD83E\uDE99 ${abbrevNum(RANKS.reduce((a, r) => a + r.reward, 0))}</div>`}
   </div>
   ${invited ? "" : `<div class="panelNote">\uD83D\uDD12 尚未收到排位赛邀请：通关「最终任务」后解锁</div>`}
   ${rankedTier(false, "普通排位赛", `AI 配速随段位分提升（三星节奏的 ${paceRange(false)}）`, invited, invited ? `胜 +${gainN} / 负 -${RATING_LOSS}` : "未解锁")}
@@ -9764,7 +10152,7 @@
         <span class="rkMin">${r.min}</span>
         <span class="rkName">${r.name}</span>
         <span class="rkStar" aria-label="${got} 星">${i === 0 ? "" : "★".repeat(got) + "☆".repeat(3 - got)}</span>
-        <span class="rkRew">${r.reward ? "\uD83E\uDE99 " + r.reward.toLocaleString() : "—"}</span>
+        <span class="rkRew">${r.reward ? "\uD83E\uDE99 " + abbrevNum(r.reward) : "—"}</span>
       </li>`;
     }).join("")}</ol>
     <div class="panelNote">升段奖励只在首次跨过该段门槛时发一次（掉段再升回来不补发）；
@@ -9804,6 +10192,59 @@
     }).join("")}</div>` : emptyState("还没有已通关的场景：把任一支线的 6 关全部通关即可解锁对应场景") : ""}
   <button class="btn backBtn" data-act="back">返回</button>`);
   }
+  function abbrevLen(px) {
+    const km = px / 1e5;
+    if (km < 1000)
+      return Math.round(km) + " km";
+    if (km < 1e6)
+      return Math.round(km / 1e4) + " 万 km";
+    return abbrevNum(km) + " km";
+  }
+  function renderSpacePanel() {
+    const q = spaceQuestState();
+    const pending = store.pendingSpace;
+    store.pendingSpace = false;
+    if (q.hasQuest) {
+      showPanel(`<div class="modeTitle">\uD83C\uDF0C 宇宙场 · 金币任务</div>
+      ${pending ? `<div class="panelNote">完成下面的任务即可获得基础宇宙车「归墟」</div>` : ""}
+      ${card({
+        cls: "vehCard",
+        icon: "☄️",
+        title: "累计赚取 " + abbrevNum(q.need, { yuan: true }),
+        sub: "完成后可获得基础宇宙车「归墟」（¥8亿 · 极速 1000 km/h）",
+        meta: `进度 ${abbrevNum(q.got)} / ${abbrevNum(q.need)}（${Math.round(q.progress * 100)}%）`,
+        body: progress(q.progress * 100, { label: "金币任务" }),
+        interactive: q.got >= q.need,
+        locked: q.got < q.need,
+        attrs: q.got >= q.need ? 'data-act="spaceClaim"' : ""
+      })}
+      ${q.got < q.need ? `<div class="panelNote">金币来自通关、赛道拾取、比赛名次与段位奖励。${pending ? "点击下方返回可稍后再来。" : ""}</div>` : `<div class="panelNote">✅ 条件已达成，点击上方卡片领取归墟</div>`}
+      <button class="btn backBtn" data-act="back">返回</button>`);
+      return;
+    }
+    const cur = VEHICLES[store.currentVehicle];
+    const topPx = store.phys.topSpeed > 1 ? store.phys.topSpeed : cur ? (cur.nominalKmh || 60) * (100 / 3.6) : 1667;
+    const topKmh = Math.round(toKmh(topPx));
+    showPanel(`<div class="modeTitle">\uD83C\uDF0C 宇宙场</div>
+    <div class="panelNote">太空背景 · 5 个难度分级 · <b>每个分级都按你的车速跑满 6 分钟</b>（换车后面板上的距离会跟着变）。AI 按你的实际极速配速。</div>
+    ${SPACE_TIERS.map((t, i) => {
+      const len = spaceLenOf(t, topPx);
+      const ai = spaceAIScale(topPx, t);
+      return card({
+        cls: "vehCard",
+        icon: t.icon,
+        title: `宇宙场 · ${t.name}`,
+        sub: `${abbrevLen(len)} · ${SPACE_TARGET_SEC / 60} 分钟 · ${t.segs} 段地形`,
+        meta: `对手配速 ≈ ${abbrevNum(Math.round(toKmh(ai)))} km/h（你的 ${Math.round(ai / topPx * 100)}%）· 通关 \uD83E\uDE99${abbrevNum(t.gold)}`,
+        interactive: true,
+        attrs: `data-act="spaceStart" data-tier="${i}"`
+      });
+    }).join("")}
+    <div class="panelNote">当前车辆：${cur ? cur.name : "—"}（${abbrevNum(topKmh)} km/h）。
+      AI 恒为你的 90%，上限 50,000 km/h —— 你永远跑得过他们，但磨蹭仍会输。
+      越高难的分级坡越陡、段落切换越频繁。</div>
+    <button class="btn backBtn" data-act="back">返回</button>`);
+  }
   var MAXED_OF = (veh) => {
     const m = maxLvOf(veh);
     return { engine: m, tire: m, frame: m, susp: m };
@@ -9825,7 +10266,8 @@
     稀有: "tier1",
     史诗: "tier2",
     传说: "tier3",
-    神话: "tier4"
+    神话: "tier4",
+    宇宙: "tier5"
   };
   function renderGaragePanel() {
     panelKind = "garage";
@@ -9844,7 +10286,7 @@
       const lo = prices.length ? Math.min(...prices) : 0;
       const hi = prices.length ? Math.max(...prices) : 0;
       const owned = g.items.filter((x) => store.ownedVehicles.includes(x.i)).length;
-      const range = lo === hi ? lo.toLocaleString() : lo.toLocaleString() + " → " + hi.toLocaleString();
+      const range = lo === hi ? abbrevNum(lo) : abbrevNum(lo) + " → " + abbrevNum(hi);
       return `<section class="vehGroup">
       <h3 class="vehGroupHead ${TIER_CLS[g.tier] || ""}">
         <b>${g.tier}</b>
@@ -9859,7 +10301,7 @@
           title: v.name + `<span class="vehTier ${TIER_CLS[v.tier] || ""}">${v.tier}</span>`,
           sub: v.desc,
           body: vehStatGrid(v),
-          right: sel ? "✅<br>使用中" : own ? "已<br>拥有" : "\uD83E\uDE99<br>" + v.price.toLocaleString(),
+          right: sel ? "✅<br>使用中" : own ? "已<br>拥有" : "\uD83E\uDE99<br>" + abbrevNum(v.price),
           interactive: true,
           selected: sel,
           attrs: `data-act="veh" data-veh="${i}"`
@@ -9876,9 +10318,9 @@
     return `<div class="buyRow">
     <button class="btn buyNow${afford ? "" : " ghost"}" data-act="buyVeh" data-veh="${i}"
       ${afford ? "" : 'aria-disabled="true"'}>
-      \uD83E\uDE99 立即购买并使用 · ${v.price.toLocaleString()}
+      \uD83E\uDE99 立即购买并使用 · ${abbrevNum(v.price)}
     </button>
-    <div class="buyHint">${afford ? "点击即可购买并切换到这台车" : "还差 " + lack.toLocaleString() + " 金币"}</div>
+    <div class="buyHint">${afford ? "点击即可购买并切换到这台车" : "还差 " + abbrevNum(lack) + " 金币"}</div>
   </div>`;
   }
   function buyVehicleNow(i) {
@@ -9898,8 +10340,8 @@
     if (lack > 0) {
       const n = note();
       if (n)
-        n.textContent = "金币不足，还差 " + lack.toLocaleString() + " \uD83E\uDE99（需要 " + v.price.toLocaleString() + "）";
-      showToast("\uD83E\uDE99 还差 " + lack.toLocaleString() + " 金币", 1100);
+        n.textContent = "金币不足，还差 " + abbrevNum(lack) + " \uD83E\uDE99（需要 " + abbrevNum(v.price) + "）";
+      showToast("\uD83E\uDE99 还差 " + abbrevNum(lack) + " 金币", 1100);
       return;
     }
     store.gold -= v.price;
@@ -9932,7 +10374,7 @@
       return `<div class="ultraRow lock">\uD83D\uDD12 ${v.ultra.icon} ${v.ultra.name}：${v.ultra.desc}${fxLine(v)}（全部升级满级 Lv${maxLvOf(v)} 后解锁）</div>`;
     }
     return `<div class="ultraRow buy">
-    <button class="btn sm" data-act="buyUltra" data-veh="${i}">${v.ultra.icon} 解锁「${v.ultra.name}」 · ${v.ultra.cost.toLocaleString()} \uD83E\uDE99</button>
+    <button class="btn sm" data-act="buyUltra" data-veh="${i}">${v.ultra.icon} 解锁「${v.ultra.name}」 · ${abbrevNum(v.ultra.cost)} \uD83E\uDE99</button>
     <div class="ultraDesc">${v.ultra.desc}${fxLine(v)}</div>
   </div>`;
   }
@@ -9947,7 +10389,7 @@
       return;
     }
     if (store.gold < v.ultra.cost) {
-      showToast("\uD83E\uDE99 金币不足，需要 " + v.ultra.cost.toLocaleString(), 900);
+      showToast("\uD83E\uDE99 金币不足，需要 " + abbrevNum(v.ultra.cost), 900);
       return;
     }
     store.gold -= v.ultra.cost;
@@ -10053,7 +10495,7 @@
       { label: "总星数", value: `${cur.stars}/${LEVELS.length * 3}` },
       { label: "段位分", value: `${rating} · ${rankName(rating)}` },
       { label: "成就", value: `${store.achGot.length}/${ACHS.length}` },
-      { label: "金币", value: `\uD83E\uDE99 ${store.gold}` },
+      { label: "金币", value: `\uD83E\uDE99 ${abbrevNum(store.gold)}` },
       { label: "累计里程", value: fmtKm(st.totalMeters) },
       { label: "累计时长", value: fmtHours(st.totalSeconds) },
       { label: "最后游玩", value: fmtDate(st.lastPlayed) }
@@ -10288,7 +10730,7 @@
     const ML = maxLvOf(VEHICLES[store.currentVehicle]);
     const goldEl = document.getElementById("shopGold");
     if (goldEl)
-      goldEl.textContent = store.gold.toLocaleString();
+      goldEl.textContent = abbrevNum(store.gold);
     const vehNow = VEHICLES[store.currentVehicle];
     const st = document.getElementById("shopTitle");
     if (st)
@@ -10308,7 +10750,7 @@
           if (got) {
             ultraEl.textContent = v.ultra.icon + " 特殊模式「" + v.ultra.name + "」已开启 · " + v.ultra.desc + fxLine2(v);
           } else if (full4) {
-            ultraEl.textContent = "⭐ 已全部升满！到车库花 " + v.ultra.cost.toLocaleString() + " \uD83E\uDE99 解锁「" + v.ultra.name + "」" + fxLine2(v);
+            ultraEl.textContent = "⭐ 已全部升满！到车库花 " + abbrevNum(v.ultra.cost) + " \uD83E\uDE99 解锁「" + v.ultra.name + "」" + fxLine2(v);
           } else {
             ultraEl.textContent = "\uD83D\uDD12 全部升级升到 Lv" + ML + " 后可解锁特殊模式「" + v.ultra.name + "」：" + v.ultra.desc + fxLine2(v);
           }
@@ -10322,7 +10764,13 @@
       const lv = u[k] || 0;
       const lvEl = document.getElementById("lv-" + k);
       if (lvEl)
-        lvEl.textContent = "Lv " + lv;
+        lvEl.textContent = `Lv ${lv}/${ML}`;
+      const barEl = document.getElementById("bar-" + k);
+      if (barEl) {
+        barEl.style.width = Math.min(100, lv / ML * 100).toFixed(2) + "%";
+        barEl.parentElement.setAttribute("aria-valuenow", String(lv));
+        barEl.parentElement.setAttribute("aria-valuemax", String(ML));
+      }
       const btn = document.querySelector('[data-buy="' + k + '"]');
       if (!btn)
         continue;
@@ -10345,7 +10793,7 @@
         btn.style.opacity = 0.5;
       } else {
         const c = upCostOf(VEHICLES[store.currentVehicle], lv + 1);
-        btn.textContent = "升级 " + c.toLocaleString() + " \uD83E\uDE99";
+        btn.textContent = "升级 " + abbrevNum(c) + " \uD83E\uDE99";
         btn.disabled = store.gold < c;
         btn.style.opacity = 1;
       }
@@ -10364,7 +10812,7 @@
           for (let i = lv + 1;i <= ML; i++)
             need += upCostOf(vehNow, i);
         }
-        allBtn.textContent = "⚡ 一键升满（还需 " + need.toLocaleString() + " \uD83E\uDE99）";
+        allBtn.textContent = "⚡ 一键升满（还需 " + abbrevNum(need) + " \uD83E\uDE99）";
         allBtn.disabled = store.gold < need;
         allBtn.classList.remove("done");
       }
@@ -10449,7 +10897,7 @@
     const after = previewStats(veh, u);
     const moved = Object.keys(after).filter((n) => after[n] !== before[n]);
     const gotFull = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= ML);
-    const parts = ["买 " + bought + " 级 · \uD83E\uDE99-" + spent.toLocaleString()];
+    const parts = ["买 " + bought + " 级 · \uD83E\uDE99-" + abbrevNum(spent)];
     for (const k of ["engine", "tire", "frame", "susp"]) {
       if (u[k] !== beforeLv[k])
         parts.push(UP_LABEL[k] + " Lv" + beforeLv[k] + "→Lv" + u[k]);

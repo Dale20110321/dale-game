@@ -395,7 +395,21 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   .upItm { flex-wrap: wrap; gap: var(--space-2); }
   .upDelta { flex: 1 0 100%; }
 }
-.upL { width: 54px; color: var(--success); font-weight: var(--font-title-weight); }
+/* 等级文案：现在写 "LvN/ML"，宇宙级车是 /500 —— 54px 放不下 7 个字符，
+   加到 78px 并允许换行都不至于把后面的按钮挤出容器。 */
+.upL { width: 78px; flex: none; color: var(--success); font-weight: var(--font-title-weight);
+  font-variant-numeric: tabular-nums; text-align: right; }
+/* 升级进度条（Task 13.2.2）：宇宙级车 500 级为满格，必须有一条能看出"还剩多少"的条。
+   宽度写 min(…, 100%)，与 .upItm 一样不写死，避免窄视口横向溢出。 */
+.upBar {
+  flex: 0 0 56px; height: 6px; border-radius: var(--radius-pill);
+  background: var(--glass-fill); overflow: hidden;
+}
+.upBar > i {
+  display: block; height: 100%; width: 0%;
+  background: var(--success); border-radius: inherit;
+  transition: width var(--dur-base) var(--ease-std);
+}
 #shop .upNote { font-size: var(--font-caption-size); color: var(--gold); min-height: 18px; margin: var(--space-2) 0; }
 /* 特殊模式解锁提醒：随升级进度变化（锁定=info 色，可解锁=金色，已开启=成功色） */
 #shop .upUltra {
@@ -892,10 +906,14 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 .tier2 { border-left-color: var(--accent); }
 .tier3 { border-left-color: var(--gold); }
 .tier4 { border-left-color: var(--gold-2); }
+/* 宇宙档（Task 7 新增的 6 台车）：刻意用与神话档明显不同的色相 —— 这组的
+   卖点是"另一个数量级"，配色若与神话撞色就白白浪费了这个分组。 */
+.tier5 { border-left-color: var(--cosmic); }
 .vehGroupHead.tier1 b, .vehTier.tier1 { color: var(--info); }
 .vehGroupHead.tier2 b, .vehTier.tier2 { color: var(--accent); }
 .vehGroupHead.tier3 b, .vehTier.tier3 { color: var(--gold); }
 .vehGroupHead.tier4 b, .vehTier.tier4 { color: var(--gold-2); }
+.vehGroupHead.tier5 b, .vehTier.tier5 { color: var(--cosmic); }
 .vehTier {
   display: inline-block; margin-left: var(--space-2); padding: 0 var(--space-1);
   font-size: var(--font-micro-size); font-weight: var(--font-micro-weight);

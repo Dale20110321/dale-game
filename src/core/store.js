@@ -12,6 +12,8 @@ export const store = {
   state: "menu", // menu | play | pause | ended
   mode: "level", // level | race | free | ranked
   lastMode: "level",
+  /** 宇宙场：待弹出的金币任务说明（无宇宙级车时点宇宙场 → true，由 ui 层消费后清空） */
+  pendingSpace: false,
   /** 排位赛档位：false = 普通排位赛，true = 高级排位赛（同一 mode，仅数值档位不同） */
   rankedAdvanced: false,
 
@@ -72,6 +74,8 @@ export const store = {
     totalSeconds: 0,
     /** 最后游玩时间（ISO 字符串，空串表示尚未游玩） */
     lastPlayed: "",
+    /** 累计金币收入（只增不减）：宇宙场金币任务 R3.5 的进度判据 */
+    earnedGold: 0,
   },
 
   // UI 开关
@@ -219,6 +223,25 @@ export const world = {
   hazards: [],
   gates: [],
   jumps: [],
+  /**
+   * 流式实体：已生成的 chunk（宇宙场专用，见 world.js 的 buildChunk）。
+   * Map<chunk下标, {coins, decoFore, decoBack}> —— 跑远的会被丢弃，
+   * 重新生成时结果逐位相同（种子由 chunk 下标唯一决定）。
+   */
+  chunks: new Map(),
+  /**
+   * 已拾取金币的 x 坐标集合（流式模式下跨 chunk 保留拾取状态）。
+   * ★ 为什么不用实体自身的 taken 标记：chunk 被丢弃后重新生成会得到全新的
+   *   实体对象，taken 就丢了 —— 玩家会看到"吃过的金币又出现一次"。
+   *   坐标是稳定的（同一 chunk 生成结果相同），用它做键即可。
+   *   只增不减：一局最多几百枚，内存可忽略。
+   */
+  takenX: new Set(),
+  /**
+   * 拾取状态变了 → 下次 streamChunks 必须重建扁平数组。
+   * 少了这个标记，被吃掉的金币会一直留在渲染数组里（要等跨块才消失）。
+   */
+  chunksDirty: false,
 };
 
 // ---------------- 跨层 UI 钩子 ----------------
