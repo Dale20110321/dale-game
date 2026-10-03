@@ -12,7 +12,7 @@
 //  · 排位赛（ranked）：基准 rankedAIScale(rating, advanced)×den3，不带追赶——
 //    段位赛是纯粹的配速检验，段位越高越接近、乃至超过三星节奏。
 import { START_X, RATING_PEAK, RATING_TOP, RACE_FORMATS, PLAYER_TEAM, RIVAL_TEAM, racePlaceOf, buildRacers } from "../config/constants.js";
-import { levelAt } from "../config/levels.js";
+import { courseAt } from "../config/levels.js";
 import { store, bike } from "../core/store.js";
 import { groundInfo } from "../physics/terrain.js";
 import { emitParticles } from "../render/particles.js";
@@ -115,7 +115,7 @@ export function raceInit(format) {
 export function raceUpdate(dt) {
   const list = store.racers;
   if (!list || !list.length) return;
-  const L = levelAt(store.selLevel);
+  const L = courseAt(store.selLevel, store.mode);
   const playerX = (bike.rear.x + bike.front.x) / 2;
 
   for (const ai of list) {

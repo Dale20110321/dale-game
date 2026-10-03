@@ -3,7 +3,7 @@ import { mulberry32, clamp } from "../core/utils.js";
 import { SUB_DT, DT, REF_SPEED, DUST_V, DUST_HEAVY_V, KICK_V, KICK_MIN_V, CAN_FUEL, hazardSpeed, gateSpeed } from "../config/constants.js";
 import { THEMES } from "../config/themes.js";
 import { token } from "../config/ui-tokens.js";
-import { levelAt, levelHillY, STEP_W, variantRule, segmentThemeAt, setFreeSeed } from "../config/levels.js";
+import { levelAt, courseAt, levelHillY, STEP_W, variantRule, segmentThemeAt, setFreeSeed } from "../config/levels.js";
 import { store, world, bike } from "../core/store.js";
 import { groundInfo, groundY, canSpot } from "../physics/terrain.js";
 import { getUp } from "../core/storage.js";
@@ -17,6 +17,14 @@ import { pickCanister } from "./stats.js";
 
 /** 限时门的"起步余量"（px）：抵消静止起步必然低于均速的那段路程 */
 const GATE_START_ALLOW = 900;
+
+/**
+ * 油罐预算的两条上限（见 buildLevel 里的推导）。
+ * CAN_MIN_GAP 是间距下限（px）：罐间距窄于此值时高速下会连成"油罐墙"。
+ * CAN_MAX 是总数上限：只为给极端里程封顶，避免几十万个小对象。
+ */
+const CAN_MIN_GAP = 2500;
+const CAN_MAX = 6000;
 
 /**
  * 加速带距限速区（危险段）的最小间距（px）：≥ 一次全力刹车的距离，
@@ -105,9 +113,14 @@ function buildHazards(L, rng) {
 }
 
 /**
- * 限时门：3~5 道，累计时限 = (x + 起步余量) / 要求均速。
+ * 限时门：累计时限 = (x + 起步余量) / 要求均速。
  * 起步余量抵消"静止起步加速"这段必然低于均速的路程，避免第一道门就变成不可能任务；
  * 要求均速比三星放宽 20%，所以只有摔车/磨蹭才会超时。
+ *
+ * ★ 有关分段的关卡（终局关 36 段 × 10 门）按**段内均匀**布门，
+ *   而不是按全长均分：终局关每段 462,963px，按全长均分得到的门距
+ *   与段界无关，视觉上与"每段 10 门"的验收口径（R1.2）对不上，
+ *   而且段界处会出现两门贴在一起。段内布门天然对齐地形段。
  */
 function buildGates(L) {
   const out = [];
@@ -115,12 +128,26 @@ function buildGates(L) {
   if (n <= 0) return out;
   const r = variantRule(L.variant);
   const spd = gateSpeed(L.den3) * r.gateK;
-  const x0 = L.len * 0.22;
-  const x1 = L.len * 0.94;
-  for (let i = 0; i < n; i++) {
-    const x = Math.round(x0 + ((x1 - x0) * (i + 1)) / n);
-    out.push({ x, limit: (x + GATE_START_ALLOW) / spd, passed: false });
+  if (L.segments && L.segments.length) {
+    // 段内均匀：第 s 段占 [seg.x, 下一段起点)，段内放 n/段数 个门
+    const perSeg = Math.round(n / L.segments.length);
+    for (let s = 0; s < L.segments.length; s++) {
+      const sx = L.segments[s].x;
+      const ex = s + 1 < L.segments.length ? L.segments[s + 1].x : L.len;
+      for (let k = 1; k <= perSeg; k++) {
+        const x = Math.round(sx + ((ex - sx) * k) / (perSeg + 1));
+        out.push({ x, limit: (x + GATE_START_ALLOW) / spd, passed: false, seg: s });
+      }
+    }
+  } else {
+    const x0 = L.len * 0.22;
+    const x1 = L.len * 0.94;
+    for (let i = 0; i < n; i++) {
+      const x = Math.round(x0 + ((x1 - x0) * (i + 1)) / n);
+      out.push({ x, limit: (x + GATE_START_ALLOW) / spd, passed: false, seg: 0 });
+    }
   }
+  out.sort((a, b) => a.x - b.x);
   return out;
 }
 
@@ -154,7 +181,9 @@ function buildJumps(L) {
  */
 export function buildLevel() {
   const idx = store.selLevel;
-  const L = levelAt(idx);
+  // ★ 赛事走专用赛道（R6.1，见 levels.js 的 RACE_COURSE 注释）：
+  //   AI 与地形必须取同一条，否则会出现"车跑在 A 赛道上、地形却是 B 的"。
+  const L = courseAt(idx, store.mode);
   const rng = mulberry32(1000 + idx * 97);
   store.finishX = L.len;
   const th0 = segmentThemeAt(L, 0);
@@ -190,7 +219,20 @@ export function buildLevel() {
   const M = 1.30 - 0.25 * L.ramp;
   // 公式推导出的"预算油罐数"（下限 1）——变体只能改赛道上的罐数，
   // 少放的罐折算成"赛前预加油"补进油箱（总油量不变，仍可通关）
-  const budgetCans = Math.max(1, Math.min(6, Math.ceil((need * M - 1) / CAN_FUEL)));
+  //
+  // ★ 上限从 6 抬到 CAN_MAX：需求 need ∝ 赛道长度，而"最多 6 罐"是给
+  //   13,200px 关卡定的硬顶。关卡拉长后它成了**不可通关**的死结 ——
+  //   实测 78,000px 需 8.4 箱、供给只有 1+6×0.6=4.6 箱（差 4 箱），
+  //   终局关 16.7M px 更是需 1795 箱而供给恒为 4.6 箱。
+  //   调低 fuelK 救不回来（二分实测收敛回 4.1 = 现状），因为 fuelK 同时
+  //   缩放消耗与"环境恶劣度"的设计意图，唯一出路是让罐数跟上里程。
+  //   CAN_MAX=6000 覆盖终局关的 3141 罐仍有 2 倍余量，且最坏也只是
+  //   几万个 {x,y,taken,ph} 小对象（~0.5MB），不构成内存压力。
+  //   真正的兜底是**间距**：任何一关的罐间距都不会窄于 CAN_MIN_GAP，
+  //   否则高速下会连成"油罐墙"（一帧穿过好几个，拾取判定 ±45px 会漏）。
+  const rawCans = Math.ceil((need * M - 1) / CAN_FUEL);
+  const byGap = Math.ceil(L.len / CAN_MIN_GAP);
+  const budgetCans = Math.max(1, Math.min(CAN_MAX, Math.min(rawCans, byGap)));
   const rule = variantRule(L.variant);
   const n = rule.canN === null ? budgetCans : Math.max(0, rule.canN);
   // 预加油比例（占基准油箱的比例）：仅在声明的变体上生效
