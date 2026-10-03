@@ -1,6 +1,6 @@
 // 共享可变状态容器（唯一）。所有模块通过 import 读写这里，
 // 从而彻底避免模块间互相 import 造成的循环依赖。
-import { START_X, topSpeedOf } from "../config/constants.js";
+import { START_X, topSpeedOf, CAM_ZOOM_BASE } from "../config/constants.js";
 import { VEHICLES } from "../config/vehicles.js";
 
 /** 全局设置 / 进度 / 环境 / 单局运行态 */
@@ -83,10 +83,11 @@ export const store = {
   donateOpen: false,
 
   // 相机
-  // ★ zoomBase = 用户用 +/- 设定的基准缩放；zoom = 实际用于渲染的缩放，
-  //   由 render/camera.js 按车速从 zoomBase 自动缩放得出（见 camZoomOf）。
-  //   两者必须分开：若让 +/- 直接改 zoom，速度自适应每帧都会把它覆盖回去。
-  cam: { x: 0, y: 0, zoom: 1.4, zoomBase: 1.4, shake: 0 },
+  // ★ zoom = 实际用于渲染的缩放，由 render/camera.js 的 camZoomOf 按车速从
+  //   常量 CAM_ZOOM_BASE 自动解算，**没有任何用户可控的基准**。
+  //   原来的 zoomBase（用户 +/- 手动基准，0.6~2.5）已移除：它是全局状态、
+  //   换模式与重开都不重置，视觉上表现为"画面莫名其妙被放大"。
+  cam: { x: 0, y: 0, zoom: CAM_ZOOM_BASE, shake: 0 },
 
   // 环境 + 车辆派生参数（buildLevel / applyUpgrades 维护）
   phys: {

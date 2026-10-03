@@ -162,6 +162,7 @@
   }
 
   // src/config/constants.js
+  var CAM_ZOOM_BASE = 1.4;
   var DT = 1 / 60;
   var SUB = 6;
   var SUB_DT = DT / SUB;
@@ -1629,7 +1630,7 @@
     },
     shopOpen: false,
     donateOpen: false,
-    cam: { x: 0, y: 0, zoom: 1.4, zoomBase: 1.4, shake: 0 },
+    cam: { x: 0, y: 0, zoom: CAM_ZOOM_BASE, shake: 0 },
     phys: {
       theme: 0,
       floorY: 0,
@@ -4288,15 +4289,6 @@
       if (e.code === "ArrowLeft" || e.code === "ArrowRight")
         e.preventDefault();
       const st = store.state;
-      if (e.code === "Minus" || e.code === "Equal") {
-        e.preventDefault();
-        const z = clamp(store.cam.zoomBase + (e.code === "Equal" ? 0.15 : -0.15), 0.6, 2.5);
-        if (z !== store.cam.zoomBase) {
-          store.cam.zoomBase = z;
-          showToast("缩放基准 " + Math.round(z * 100) + "%", 600);
-        }
-        return;
-      }
       if (e.code === "KeyR" && (st === "play" || st === "pause" || st === "ended")) {
         e.preventDefault();
         if (H.restart)
@@ -5656,12 +5648,12 @@
     }
     return mt > 0 ? Math.abs(vx / mt) : 0;
   }
-  function camZoomOf(v, base) {
+  function camZoomOf(v) {
     if (!(v > CAM_ZOOM_REF))
-      return base;
+      return CAM_ZOOM_BASE;
     const k = Math.pow(CAM_ZOOM_REF / v, CAM_ZOOM_GAMMA);
     const halfW = (view.W || 960) * 0.5;
-    const z = Math.max(CAM_ZOOM_MIN, base * k);
+    const z = Math.max(CAM_ZOOM_MIN, CAM_ZOOM_BASE * k);
     const visCap = halfW * 60 / (v * CAM_FRAME_MARGIN);
     return Math.max(CAM_ZOOM_ABS_MIN, Math.min(z, visCap));
   }
@@ -5672,7 +5664,7 @@
     const mx = (bike.rear.x + bike.front.x) / 2;
     const my = (bike.rear.y + bike.front.y) / 2;
     const v = speedOf();
-    const zTarget = camZoomOf(v, cam.zoomBase);
+    const zTarget = camZoomOf(v);
     const zl = 1 - Math.pow(1 - CAM_ZOOM_LERP, dt * 60);
     cam.zoom = lerp(cam.zoom, zTarget, zl);
     const zoom = cam.zoom > 0.01 ? cam.zoom : 1;
@@ -9075,8 +9067,6 @@
         info.push("⏱ 第" + idxLabel + "门 " + rem.toFixed(1) + "s");
       }
     }
-    const zPct = Math.round(store.cam.zoomBase * 100);
-    info.push(!compact && Math.abs(store.cam.zoomBase - 1.4) >= 0.01 ? "缩放 " + zPct + "% · +/- 可调" : "缩放 " + zPct + "%");
     label(info.join("   "), x, r.y + 30, "caption", token("text-mid"));
     const mx = (bike.rear.x + bike.front.x) / 2;
     const pct = store.mode === "free" ? 1 : clamp(mx / Math.max(1, store.finishX), 0, 1);
