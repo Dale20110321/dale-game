@@ -1,7 +1,6 @@
-// 输入：键盘 / 触摸 / 全屏 / 缩放 / 静音
+// 输入：键盘 / 触摸 / 全屏 / 静音
 // 只负责"读输入"，游戏动作（重开、暂停、车间）通过 initInput(handlers) 注入，避免循环依赖。
 import { store, bike } from "./store.js";
-import { clamp } from "./utils.js";
 import { initAudio } from "./audio.js";
 import { showToast } from "./toast.js";
 import { save } from "./storage.js";
@@ -83,18 +82,11 @@ export function initInput(handlers = {}) {
 
     const st = store.state;
 
-    if (e.code === "Minus" || e.code === "Equal") {
-      e.preventDefault();
-      // ★ 改的是 zoomBase（用户基准），不是 zoom。
-      //   zoom 每帧都会被速度自适应覆盖（render/camera.js 的 camZoomOf），
-      //   直接写它的话按键会被立刻抹掉，看起来就是"+/- 没反应"。
-      const z = clamp(store.cam.zoomBase + (e.code === "Equal" ? 0.15 : -0.15), 0.6, 2.5);
-      if (z !== store.cam.zoomBase) {
-        store.cam.zoomBase = z;
-        showToast("缩放基准 " + Math.round(z * 100) + "%", 600);
-      }
-      return;
-    }
+    // ★ +/- 手动缩放已移除，缩放完全由速度自适应决定（render/camera.js 的 camZoomOf）。
+    //   它是全局状态且换模式/重开都不重置，而按键只有 600ms 的 toast 提示 ——
+    //   于是"画面被放大到看不清"对玩家全程零提示（用户实测反馈）。
+    //   注意这里**不**再 e.preventDefault()：浏览器仍可用 Ctrl +/- 缩放页面，
+    //   但裸 +/- 已交还给浏览器默认行为（多数浏览器无绑定），语义更干净。
 
     if (e.code === "KeyR" && (st === "play" || st === "pause" || st === "ended")) {
       e.preventDefault();

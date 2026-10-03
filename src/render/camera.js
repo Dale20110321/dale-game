@@ -11,6 +11,7 @@
 //      （render/terrain.js 与 entities.js 都曾踩过这个坑）。
 import { store, bike } from "../core/store.js";
 import { view } from "../core/canvas.js";
+import { CAM_ZOOM_BASE } from "../config/constants.js";
 import { clamp, lerp } from "../core/utils.js";
 
 /** 叠加震屏强度（0~16） */
@@ -60,11 +61,15 @@ function speedOf() {
 
 /**
  * 由车速推出的目标缩放（纯函数，便于断言）。
+ *
+ * ★ 基准是常量 CAM_ZOOM_BASE，**不再接受用户设定的基准**：
+ *   手动 +/- 档（0.6~2.5）是全局状态且换模式/重开都不重置，
+ *   用户实测反馈"画面莫名其妙被放大"。现在缩放只由车速决定。
+ *
  * @param {number} v 车速（px/s）
- * @param {number} base 用户设定的基准缩放
  */
-export function camZoomOf(v, base) {
-  if (!(v > CAM_ZOOM_REF)) return base;
+export function camZoomOf(v) {
+  if (!(v > CAM_ZOOM_REF)) return CAM_ZOOM_BASE;
   const k = Math.pow(CAM_ZOOM_REF / v, CAM_ZOOM_GAMMA);
   // 取 base·k 与"保证一帧位移在屏内"的上限里**更小**的那个：
   //   · 慢速时 base·k 更小 → 维持原有观感，且不低于 CAM_ZOOM_MIN（车身可辨）
@@ -72,7 +77,7 @@ export function camZoomOf(v, base) {
   // ★ 早期写成 max(下限, base·k) 是反的：10 万 km/h 时 base·k = 0.0222 远大于
   //   上限 0.0104，下限机制根本没生效，车每帧走 46km 而屏内只有 2km。
   const halfW = (view.W || 960) * 0.5;
-  const z = Math.max(CAM_ZOOM_MIN, base * k);
+  const z = Math.max(CAM_ZOOM_MIN, CAM_ZOOM_BASE * k);
   const visCap = (halfW * 60) / (v * CAM_FRAME_MARGIN);
   return Math.max(CAM_ZOOM_ABS_MIN, Math.min(z, visCap));
 }
@@ -102,7 +107,7 @@ export function updateCamera(dt) {
   // ★ 顺序很重要：视野宽度 = view.W / zoom，zoom 变了视野跟着变，
   //   若反过来先按旧 zoom 定位再改 zoom，车会在一帧内跳一下。
   const v = speedOf();
-  const zTarget = camZoomOf(v, cam.zoomBase);
+  const zTarget = camZoomOf(v);
   const zl = 1 - Math.pow(1 - CAM_ZOOM_LERP, dt * 60);
   cam.zoom = lerp(cam.zoom, zTarget, zl);
   const zoom = cam.zoom > 0.01 ? cam.zoom : 1;
