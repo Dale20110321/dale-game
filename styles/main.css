@@ -290,12 +290,21 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
   box-shadow: 0 1px 0 var(--glass-highlight) inset, 0 6px 14px rgba(0, 0, 0, 0.30);
   border-bottom: 1px solid var(--glass-border);
 }
-/* 顶栏里的返回：比正文按钮更实一点，滚动时它是唯一的出口，要好点得准 */
+/* 顶栏里的返回：沿用 .btn 的青色渐变（深字浅底，对比 10.3:1），
+   ★ 不要再压成玻璃色 —— 那正是它显得暗淡的原因：
+   底部那枚老按钮一直是默认 .btn（亮青色），换成吸顶栏时被我一并改暗，
+   等于"为了统一外观反而更不显眼"。这里只加粗描边与轻微放大来突出，
+   配色原样保留。 */
 .panelBar .panelBack {
-  min-width: 76px;
-  background: var(--glass-fill-strong); border: 1px solid var(--glass-highlight);
+  min-width: 88px;
+  font-size: var(--font-body-size);
   font-weight: var(--font-title-weight);
+  border-color: var(--glass-highlight);
+  box-shadow: 0 var(--space-1) var(--space-3) var(--shadow-md),
+    0 0 0 1px var(--glass-highlight) inset;
 }
+.panelBar .panelBack:hover { transform: scale(1.04); }
+.panelBar .panelBack:active { transform: scale(0.98); }
 /* 末尾那枚老返回按钮不再显示 —— 同一个动作只留顶栏一处，避免两个"返回" */
 #modePanel .backBtn { display: none; }
 
