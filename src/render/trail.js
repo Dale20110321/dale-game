@@ -85,7 +85,7 @@ const meteorOf = (k) =>
   clamp((k - TRAIL_METEOR_LO) / (TRAIL_METEOR_HI - TRAIL_METEOR_LO), 0, 1);
 
 // ============================================================
-//  十种签名形态（每台宇宙车一种，见 vehicles.js 的 TRAIL 注释）
+//  十二种签名形态（每台宇宙级车一种，见 vehicles.js 的 TRAIL 注释）
 //
 //  约定：全部画在**局部坐标系**里 —— 原点在车身中心、+x = 速度方向、
 //  拖尾一律落在 -x 侧（车后方）。调用方已经 translate + rotate 到位。
@@ -388,6 +388,98 @@ function drawLattice(T, a, A, L, W, k, q) {
 }
 
 /**
+ * 编织（cv11霓粉）：四股互相缠绕的束，两两交叉、一股压一股。
+ *
+ * ★ 为什么必须是"绳"：其余十一种画法里，裂界那张网已经是唯一有**面积**的，
+ *   所以这台不能再靠"面"取胜 —— 它得回到最原始的读法：一堆实打实的绳子。
+ *   四股各走一条 sin，相位差恰好 90°，于是任意两股必然交叉；
+ *   再按 sin 的半周期交替 z 序（谁在上面轮换），就有真正的**编结**，
+ *   而不是四根平行摆动。
+ */
+function drawBraid(T, a, A, L, W, k, q) {
+  const n = Math.max(3, Math.round(T.count * q));
+  const steps = 24;
+  for (let b = 0; b < n; b++) {
+    const phase = (b / n) * Math.PI * 2;
+    ctx.beginPath();
+    for (let j = 0; j <= steps; j++) {
+      const t = j / steps;
+      // 振幅沿尾部**收束**：绳头散开、绳尾并成一股，与其余画法的"越远越淡"同向
+      const amp = W * (0.35 + 0.65 * t);
+      const x = A - t * L;
+      const y = Math.sin(t * 7.2 + phase + ph * 2.2) * amp;
+      if (j === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    // 交叉处谁压谁：按股号轮换明暗，于是编结的层次随时间滚动
+    const over = 0.5 + 0.5 * Math.sin(ph * 1.3 + b * 1.9);
+    glowStroke(T.glow, W * 0.3, a * (0.09 + 0.1 * over), W * 0.1, a * (0.3 + 0.35 * over));
+    glowStroke(T.core, W * 0.07, a * (0.16 + 0.14 * over), W * 0.03, a * 0.6);
+  }
+  // 缠在编结外的散光：让四股看起来是"能量"而不是"绳子"
+  for (let i = 0; i < Math.max(2, n); i++) {
+    const s = T.seed + i * 1.61;
+    const t = (((i * 0.317 + ph * 0.16 + T.seed) % 1) + 1) % 1;
+    const x = A - t * L;
+    const y = Math.sin(t * 7.2 + ph * 2.2 + s) * W * (0.35 + 0.65 * t);
+    ctx.fillStyle = T.core;
+    ctx.globalAlpha = a * 0.5 * (1 - t * 0.5);
+    ctx.beginPath();
+    ctx.arc(x, y, Math.max(0.35, W * 0.07 * (1 - t * 0.4)), 0, 7);
+    ctx.fill();
+  }
+}
+
+/**
+ * 事件视界（cv12 深紫）：一圈圈**向内塌缩**的环，最后收成一个吞掉一切的暗点。
+ *
+ * ★ 十二种画法里唯一的**减法**。其余十一种都在往尾根加能量（越远越亮或越远越大），
+ *   只有这一台一路把能量**拿走**：环半径随尾部收细、亮度随尾部归零，
+ *   于是拖尾的末端是一个"洞"而不是一把光 —— 万倍光速该有的样子，
+ *   不是更亮，是连光都被甩在身后追不上了。
+ * 环本身画成**逆时针内旋**，与光网的"外扩"正好相反，一眼能分清哪台是谁。
+ */
+function drawEvent(T, a, A, L, W, k, q) {
+  const n = Math.max(3, Math.round(T.count * q));
+  const steps = 14;
+  // 亮度沿尾部衰减：这就是"减法"的全部 —— 到最远处彻底消失
+  const fade = (t) => (1 - t) * (1 - t);
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    const rr = W * (1 - 0.55 * t);
+    const alpha = a * fade(t);
+    ctx.beginPath();
+    for (let j = 0; j <= steps; j++) {
+      const u = -1 + (2 * j) / steps;
+      // 内旋：相位随 t 反向增加，环看着被"卷"进中心
+      const ang = ph * 1.9 * (1 - t) + u * 1.35;
+      const x = A - t * L + Math.cos(ang) * rr * 0.22;
+      const y = Math.sin(ang) * rr;
+      if (j === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    glowStroke(T.glow, W * 0.3, alpha * 0.2, W * 0.09, alpha * 0.55);
+    // 环心一点内压的亮斑：把"洞"的中心标出来，否则读成一条普通的环
+    ctx.fillStyle = T.core;
+    ctx.globalAlpha = alpha * 0.5;
+    ctx.beginPath();
+    ctx.arc(A - t * L, 0, Math.max(0.35, rr * 0.16), 0, 7);
+    ctx.fill();
+  }
+  // 最末端的暗点：整个拖尾最终收进这里（用一个反向描边压出"黑"）
+  const hx = A - L;
+  ctx.globalAlpha = a * 0.55;
+  ctx.fillStyle = "#000000";
+  ctx.beginPath();
+  ctx.arc(hx, 0, W * 0.55, 0, 7);
+  ctx.fill();
+  ctx.globalAlpha = a * 0.8;
+  ctx.strokeStyle = T.glow;
+  ctx.lineWidth = Math.max(0.5, W * 0.12);
+  ctx.stroke();
+}
+
+/**
  * 陨星 / 彗尾层（七台共用骨架，颜色与头冠形状取自各自的 TRAIL 规格）。
  *
  * ★ 为什么是"交叉淡入"而不是"到阈值换画法"：见 constants.js 的 TRAIL_METEOR_LO。
@@ -496,6 +588,8 @@ export function drawTrail(dt = 1 / 60) {
     case "cone": drawCone(T, kE, A, L, W, k, q); break;
     case "rift": drawRift(T, kE, A, L, W, k, q); break;
     case "lattice": drawLattice(T, kE, A, L, W, k, q); break;
+    case "braid": drawBraid(T, kE, A, L, W, k, q); break;
+    case "event": drawEvent(T, kE, A, L, W, k, q); break;
     default: drawArc(T, kE, A, L, W, k, q); break; // arc 兼作兜底
   }
   drawMeteor(T, m, W, L);

@@ -1109,7 +1109,7 @@ export const MODE_SPACE = "space";
 /**
  * 6 个联赛。每个联赛给出一个**参考配速**（km/h），是这个联赛所有对手的速度基准。
  *
- * ★ 参考配速的档位刻意对齐车辆阶梯（cv1 28,440 → cv10 107,925,284,880 km/h）：
+ * ★ 参考配速的档位刻意对齐车辆阶梯（cv1 28,440 → cv12 10,792,528,488,000 km/h）：
  *   参考配速落在某台车"形态满级极速"的 1%~1.5% 附近，那台车开形态就能稳赢本联赛，
  *   而只升了一半级就会输 —— 于是"升满级"始终是推进的唯一解法。
  *
@@ -1127,6 +1127,8 @@ export const SPACE_LEAGUES = [
   { id: "L8", name: "光锥层", icon: "🔆", refKmh: 800000000,  segs: 32, slopeDeg: 8,  gold: 7.47337e21, themes: [3, 24, 34, 11] },
   { id: "L9", name: "弦外层", icon: "🌀", refKmh: 9000000000, segs: 34, slopeDeg: 6,  gold: 3.36301e23, themes: [11, 3, 24, 34] },
   { id: "L10", name: "裂界层", icon: "♾️", refKmh: 90000000000, segs: 36, slopeDeg: 5, gold: 3.02671e26, themes: [3, 11, 34, 24] },
+  { id: "L11", name: "千界层", icon: "🌠", refKmh: 900000000000, segs: 38, slopeDeg: 4, gold: 2.72404e29, themes: [11, 3, 34, 24] },
+  { id: "L12", name: "无极层", icon: "💠", refKmh: 9000000000000, segs: 40, slopeDeg: 3, gold: 2.45163e32, themes: [34, 24, 3, 11] },
 ];
 
 /**

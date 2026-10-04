@@ -30,7 +30,7 @@ import { drainFuel, setFuel } from "../physics/fuel.js";
 import { updateParticles, emitParticles } from "../render/particles.js";
 import { addShake } from "../render/camera.js";
 import { updateStats, settleLanding } from "./stats.js";
-import { addGold, checkAch } from "./progress.js";
+import { addGold, checkAch, syncStateAch, checkSpeedAch } from "./progress.js";
 import {
   buildLevel, freeInit, freeFill, syncSegmentTheme, streamChunks,
   updateBoosts, updateCanisters, updateCoins, emitRideDust, updateJumps,
@@ -306,6 +306,7 @@ export function settleRanked(won) {
   const promo = rankPromoReward(before, P.rating, claimed);
   if (promo > 0) addGold(promo);
   if (P.rating > claimed) P.promoClaimed = P.rating;
+  syncStateAch();   // 段位晋升 / 里程 / 时长等状态型成就
   settleProgress(); // 刷新 peak / freeThemes 等派生态并立即落盘
   showToast(
     (won ? "🏆 排位胜利" : "🏳 排位失利") +
@@ -502,6 +503,9 @@ function endFreeRun(reason) {
   });
   const freeVeh = VEHICLES[store.currentVehicle];
   if (freeVeh) noteVehicleRun(freeVeh.id, dist);
+  // ★ 里程类成就在这里核对：单次纪录（无限之巅 / 光年之旅）与累计里程
+  //   （环游 / 马拉松 / 深空行者）都是本局结算后才有的数。
+  syncStateAch();
   showToast(reason + " · 本次 " + dist + "m" + (record ? " 🏅 新纪录！" : ""), 1600);
   setTimeout(runGuard(() => {
     store.state = "menu";
@@ -589,6 +593,9 @@ function finishLevel() {
     const delta = spaceRatingDelta(def.leagueIdx, def.divIdx, won);
     store.space.rating = Math.max(0, store.space.rating + delta);
     noteSpaceResult(def.key, p, won);
+    if (won) checkAch("spacewin");
+    // 全联赛横扫要读 records，所以必须在 noteSpaceResult **之后**核对
+    syncStateAch();
     settleProgress();
     result.goldGain = def.gold;
     result.place = p;
@@ -632,6 +639,11 @@ function finishLevel() {
     if (!run.hasCrashed) checkAch("noc");
     if (run.totalCoins > 0 && run.coinGot >= run.totalCoins) checkAch("coinall");
     if (store.stars.length >= LEVELS.length && store.stars.every((v) => v >= 3)) checkAch("allstar");
+    // 「十连无瑕」的计数：连续零摔车通关（摔了就清零，不累计）。
+    // 口径必须是**连续**而不是累计 —— 累计的话玩家随便玩也会凑够 30 局，
+    // 成就就没有分量了。
+    store.stat.cleanRuns = run.hasCrashed ? 0 : (store.stat.cleanRuns || 0) + 1;
+    if (store.selLevel === FINALE_INDEX) checkAch("finale");
     // 通关结算：刷新阶梯派生态（支线通关 / 邀请 / 登顶）并立即写盘
     settleProgress();
   }
@@ -646,6 +658,9 @@ function finishLevel() {
   });
   const curVeh = VEHICLES[store.currentVehicle];
   if (curVeh) noteVehicleRun(curVeh.id, runMeters);
+  // 结算尾声统一核对一次状态型成就：里程 / 时长 / 排位 / 车库 / 联赛 / 最终任务。
+  // 幂等，所以"这里再调一次"不会重复弹提示。
+  syncStateAch({ cleanRuns: store.stat.cleanRuns || 0 });
   result.goldTotal = store.gold;
   // 有结果卡渲染器时交给它（玩家自选下一关/返回）；否则回退到定时自动推进
   if (typeof presenter.presentResult === "function") presenter.presentResult(result);
@@ -766,6 +781,9 @@ export function update(dt) {
   if (!fuelOk) handleFuelEmpty();
 
   if (toKmh(Math.abs(b.speed)) >= 30) checkAch("fast");
+  // ★ 光速梯队的五个成就（c / 10c / 100c / 1000c / 10000c）在这里判定。
+  //   checkSpeedAch 内部按门槛递增提前 break，每帧最多一次比较 + 少量幂等调用。
+  checkSpeedAch(toKmh(Math.abs(b.speed)));
 
   // ---- 机制判定：危险段超速必摔 / 限时门准时通过 ----
   // ★ 宇宙场也走危险段判定：world.hazards 在 space 下照样生成、scene.js 也照样画，

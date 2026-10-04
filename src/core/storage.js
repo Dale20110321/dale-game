@@ -234,6 +234,9 @@ function blankStoreState() {
   store.raceRecords = {};
   store.stat = {
     totalRuns: 0, totalMeters: 0, totalSeconds: 0, lastPlayed: "",
+    // 连续零摔车通关的局数（成就「十连无瑕」的判据）。老存档没这个字段，
+    // 读回时回落 0 —— 少一次机会而已，不该让读档失败。
+    cleanRuns: 0,
     byMode: {},
   };
 }
@@ -417,6 +420,7 @@ export function buildDoc() {
         runs: Math.max(0, intOr(st.totalRuns)),
         meters: Math.max(0, intOr(st.totalMeters)),
         seconds: Math.max(0, intOr(st.totalSeconds)),
+        cleanRuns: Math.max(0, intOr(st.cleanRuns)),
       },
       lastPlayed: strOr(st.lastPlayed, ""),
       byMode: sanitizeByMode(st.byMode),
@@ -505,6 +509,7 @@ export function applyDoc(doc) {
   store.stat.totalRuns = Math.max(0, intOr(ltTotal.runs));
   store.stat.totalMeters = Math.max(0, intOr(ltTotal.meters));
   store.stat.totalSeconds = Math.max(0, intOr(ltTotal.seconds));
+  store.stat.cleanRuns = Math.max(0, intOr(ltTotal.cleanRuns));
   store.stat.lastPlayed = strOr(lt.lastPlayed, "");
   store.stat.byMode = sanitizeByMode(lt.byMode);
 
