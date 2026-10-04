@@ -7355,7 +7355,9 @@ function lsSet2(k, v) {
 }
 function initPostFx() {
   const saved = lsGet2(QKEY);
-  let weak = view.W < 560;
+  const dpr = Math.min((typeof devicePixelRatio === "number" ? devicePixelRatio : 1) || 1, 2);
+  const pixels = view.W * view.H * dpr * dpr;
+  let weak = view.W < 560 || pixels > 1e6;
   try {
     const cores = typeof navigator !== "undefined" && navigator.hardwareConcurrency || 0;
     if (cores > 0 && cores <= 4)
@@ -7388,6 +7390,7 @@ function setRenderScalePersisted(s) {
   const v = setRenderScale(s);
   lsSet2(SKEY, String(v));
   invalidateOff();
+  markManualRenderScale();
   return v;
 }
 function applyCanvasLook() {
@@ -7579,6 +7582,49 @@ function applyPostFx(t, dt = 1 / 60) {
     drawWeather(th.ambient, t || 0, dt);
     ctx.restore();
   }
+}
+var FRAME_BUDGET_MS = 22;
+var DOWN_FRAMES = 45;
+var UP_FRAMES = 600;
+var slowRun = 0;
+var fastRun = 0;
+var autoScaleFrom = 1;
+function autoTuneFrame(dtMs) {
+  if (!(dtMs > 0) || dtMs > 400)
+    return false;
+  const cur = getRenderScale();
+  if (cur < autoScaleFrom) {
+    slowRun = 0;
+    fastRun = 0;
+    return false;
+  }
+  if (dtMs > FRAME_BUDGET_MS) {
+    fastRun = 0;
+    if (++slowRun >= DOWN_FRAMES) {
+      slowRun = 0;
+      const next = cur <= RENDER_SCALES[0] ? cur : Math.max(RENDER_SCALES[0], cur * 0.75);
+      if (next < cur) {
+        setRenderScale(next);
+        return true;
+      }
+    }
+  } else {
+    slowRun = 0;
+    if (dtMs < FRAME_BUDGET_MS * 0.6 && ++fastRun >= UP_FRAMES) {
+      fastRun = 0;
+      const next = Math.min(autoScaleFrom, cur * 4 / 3);
+      if (next > cur) {
+        setRenderScale(next);
+        return true;
+      }
+    }
+  }
+  return false;
+}
+function markManualRenderScale() {
+  autoScaleFrom = getRenderScale();
+  slowRun = 0;
+  fastRun = 0;
 }
 
 // src/render/background.js
@@ -8042,28 +8088,34 @@ function ensureGBuf(need) {
 var CRUISE_BANDS = 26;
 var CRUISE_BAND_PX = 46;
 function drawCruiseBands(cx, cy, W, H, pal) {
+  const z = zoomNow() || 1;
+  ctx.save();
+  ctx.scale(1 / z, 1 / z);
+  const SW = view.W;
+  const SH = view.H;
   ctx.fillStyle = pal[0];
-  ctx.fillRect(0, 0, W, H);
-  const bandW = W / CRUISE_BANDS;
+  ctx.fillRect(0, 0, SW, SH);
+  const bandW = SW / CRUISE_BANDS;
   for (let b = 0;b < CRUISE_BANDS; b++) {
     const a = [], x0 = b * bandW;
     for (const f of [0.15, 0.5, 0.85]) {
-      const gy = groundY(cx + x0 + bandW * f);
+      const gy = groundY(cx + x0 * z + bandW * z * f);
       if (gy !== Infinity)
         a.push(gy);
     }
     if (!a.length)
       continue;
     a.sort((p, q) => p - q);
-    const gy = a[a.length >> 1] - cy;
-    const t = Math.max(0, Math.min(1, (gy + H * 0.5) / (H * 1.5)));
+    const gy = (a[a.length >> 1] - cy) / z;
+    const t = Math.max(0, Math.min(1, (gy + SH * 0.5) / (SH * 1.5)));
     ctx.fillStyle = t > 0.62 ? pal[1] : t > 0.34 ? pal[0] : pal[2] || pal[0];
     ctx.fillRect(x0, gy, bandW + 1, CRUISE_BAND_PX);
   }
   ctx.fillStyle = token("fx-lit-top");
   ctx.globalAlpha = 0.55;
-  ctx.fillRect(0, 0, W, 2);
+  ctx.fillRect(0, 0, SW, 2);
   ctx.globalAlpha = 1;
+  ctx.restore();
 }
 function zoomNow() {
   const z = store.cam.zoom;
@@ -12197,6 +12249,8 @@ var stepper = new Stepper((dt) => {
   updateCamera(dt);
 });
 startRaf((dt) => {
+  if (dt > 0)
+    autoTuneFrame(dt * 1000);
   stepper.advance(dt);
   drawScene(dt);
 });

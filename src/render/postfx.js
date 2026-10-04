@@ -64,7 +64,16 @@ export function initPostFx() {
   // （旧默认值是 low —— 于是雾、坡面光照、投影、暖浸染、暗角全都不执行，
   //  大家看到的第一印象永远是"没开画质"的样子）。
   // 明显偏弱的设备（低并发核数 / 窄屏）回落到"中"，避免首帧就把填充率打满。
-  let weak = view.W < 560;
+  //
+  // ★ 高分屏的小屏设备（几乎所有手机）按核数算是"不弱"，于是默认开 high ——
+  //   而 high 档带一条 CSS filter（saturate/contrast），GPU 每合成一次就要
+  //   对整个画布跑一遍颜色矩阵，是持续开销不是一次性开销。
+  //   再叠上 canvas 像素数 = W×H×DPR²（390×844×2² = 131 万像素/帧），
+  //   填充率直接吃满 —— 表现就是画面一卡一卡。
+  //   所以判据除了核数，还要看**背靠背像素数**：超过 100 万就当弱设备处理。
+  const dpr = Math.min((typeof devicePixelRatio === "number" ? devicePixelRatio : 1) || 1, 2);
+  const pixels = view.W * view.H * dpr * dpr;
+  let weak = view.W < 560 || pixels > 1e6;
   try {
     const cores = (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 0;
     if (cores > 0 && cores <= 4) weak = true;
@@ -98,6 +107,7 @@ export function setRenderScalePersisted(s) {
   lsSet(SKEY, String(v));
   // 离屏层是按旧倍率建的，必须作废重建，否则合成时会拉伸糊掉
   invalidateOff();
+  markManualRenderScale();   // 手动选择优先于自动降级
   return v;
 }
 
@@ -357,4 +367,59 @@ export function applyPostFx(t, dt = 1 / 60) {
     drawWeather(th.ambient, t || 0, dt);
     ctx.restore();
   }
+}
+
+
+// ============================================================
+//  自适应降级：连续掉帧时自动降低渲染倍率
+//
+// ★ 为什么需要：画质档是**玩家开局前**设的，而真正的瓶颈往往出现在开局之后
+//   —— 跑进宇宙联赛、上了光锥、场景换成多层视差，填充率需求会突然翻几倍。
+//   这时候再让玩家自己去设置里手动调，是"已经卡了才知道去调"，
+//   而玩家多半不会想到要去调，更不会知道该调哪一项。
+//
+// ★ 判据用**真实帧间隔**，不是估计：连续若干帧超过预算就降一档，
+//   连续较长时间宽裕就升回去（带滞回，避免在阈值附近来回抖）。
+//   只动渲染倍率（像素数），不动画质档 —— 后者会改变画面内容，
+//   自动改它等于替玩家做审美决定。
+const FRAME_BUDGET_MS = 22;      // 目标 45fps：留出余量给 GC 与系统调度
+const DOWN_FRAMES = 45;          // 连续超预算多少帧才降（太敏感会来回抖）
+const UP_FRAMES = 600;           // 连续宽裕多少帧才升回去（升要比降保守）
+let slowRun = 0;
+let fastRun = 0;
+let autoScaleFrom = 1;
+
+/**
+ * 每帧喂一次真实间隔，必要时自动调整渲染倍率。
+ * @param {number} dtMs 上一帧到这一帧的真实毫秒数
+ * @returns {boolean} 渲染倍率是否被改动了
+ */
+export function autoTuneFrame(dtMs) {
+  if (!(dtMs > 0) || dtMs > 400) return false;   // 切后台/断点，不计入
+  const cur = getRenderScale();
+  if (cur < autoScaleFrom) { slowRun = 0; fastRun = 0; return false; }  // 玩家手动调过 → 不再自动干预
+  if (dtMs > FRAME_BUDGET_MS) {
+    fastRun = 0;
+    if (++slowRun >= DOWN_FRAMES) {
+      slowRun = 0;
+      // 逐档往下：省电档是最小的一步，先试它，不够再往下没有更小的了
+      const next = cur <= RENDER_SCALES[0] ? cur : Math.max(RENDER_SCALES[0], cur * 0.75);
+      if (next < cur) { setRenderScale(next); return true; }
+    }
+  } else {
+    slowRun = 0;
+    if (dtMs < FRAME_BUDGET_MS * 0.6 && ++fastRun >= UP_FRAMES) {
+      fastRun = 0;
+      const next = Math.min(autoScaleFrom, cur * 4 / 3);
+      if (next > cur) { setRenderScale(next); return true; }
+    }
+  }
+  return false;
+}
+
+/** 玩家手动改过渲染倍率后调用：关掉自动降级，把手动选择当成上限之外的决定 */
+export function markManualRenderScale() {
+  autoScaleFrom = getRenderScale();
+  slowRun = 0;
+  fastRun = 0;
 }

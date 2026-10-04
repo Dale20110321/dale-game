@@ -29,7 +29,7 @@ import { applyUpgrades, resetBike } from "./physics/bike.js";
 import { buildLevel } from "./game/world.js";
 import { updateCamera } from "./render/camera.js";
 import { drawScene } from "./render/scene.js";
-import { initPostFx } from "./render/postfx.js";
+import { initPostFx, autoTuneFrame } from "./render/postfx.js";
 import { hideOverlay, showMenu, togglePause, showResultCard } from "./ui/menu.js";
 import { initPanels } from "./ui/panels.js";
 import { initShop, toggleShop } from "./ui/shop.js";
@@ -70,6 +70,9 @@ const stepper = new Stepper((dt) => {
   updateCamera(dt);
 });
 startRaf((dt) => {
+  // ★ 自适应分辨率：连续掉帧就自动降渲染倍率（见 postfx.js 的说明）。
+  //   必须排在 drawScene **之前**，否则这一帧用的还是旧倍率。
+  if (dt > 0) autoTuneFrame(dt * 1000);
   stepper.advance(dt);
   drawScene(dt); // dt 必须传下去：渲染层的逐帧累加量（天气、踏频）依赖它
 });

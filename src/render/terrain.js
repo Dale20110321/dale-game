@@ -283,31 +283,52 @@ const CRUISE_BANDS = 26;      // 色带条数（屏幕纵向可分辨的上限�
 const CRUISE_BAND_PX = 46;    // 每条带的屏幕高度（px）
 
 function drawCruiseBands(cx, cy, W, H, pal) {
+  // ★ 这里必须**先退出世界缩放**再画，否则每帧要向光栅化器提交一个
+  //   巨大的**逻辑**矩形：调用方给的 W/H 是世界尺寸（view.W / zoom），
+  //   在巡航速度下 zoom 已经到 0.1 以下，一块"铺满全屏"的矩形实际是
+  //   3500×7700 = 两千七百万逻辑像素。经 ctx.scale 缩放后视觉上没问题，
+  //   但光栅化器要先处理完这个矩形再裁剪 —— 移动 GPU（尤其 iOS 的 Metal
+  //   后端）对此走慢路径，实测每帧多提交 18M 像素，画面一卡一卡。
+  //
+  //   色带本来就是**屏幕空间的视觉效果**（26 条固定屏幕高度的带），
+  //   所以退出缩放之后用屏幕坐标画，既正确又快：
+  //   每帧提交的像素从 18M 降到 ~1 屏。
+  const z = zoomNow() || 1;
+  ctx.save();
+  ctx.scale(1 / z, 1 / z);
+  // 屏幕上色带的宽度（原来除以了 zoom，现在要换算回来）
+  const SW = view.W;
+  const SH = view.H;
+
   // 先铺满整屏底色，防止条带之间露出上方的天空
   ctx.fillStyle = pal[0];
-  ctx.fillRect(0, 0, W, H);
-  const bandW = W / CRUISE_BANDS;
+  ctx.fillRect(0, 0, SW, SH);
+  const bandW = SW / CRUISE_BANDS;
   for (let b = 0; b < CRUISE_BANDS; b++) {
     // 带内取 3 点（首/中/尾）求中位数：对单点尖峰（断层）不敏感，
-    // 又比平均值更少受噪声影响
+    // 又比平均值更少受噪声影响。采样仍在**世界坐标**里做（groundY 的输入是世界 x）
     const a = [], x0 = b * bandW;
     for (const f of [0.15, 0.5, 0.85]) {
-      const gy = groundY(cx + x0 + bandW * f);
+      const gy = groundY(cx + x0 * z + bandW * z * f);
       if (gy !== Infinity) a.push(gy);
     }
     if (!a.length) continue;
     a.sort((p, q) => p - q);
-    const gy = a[a.length >> 1] - cy;
+    // 世界 y → 屏幕 y：先减去相机，再除以缩放（因为本函数已退出缩放）
+    const gy = (a[a.length >> 1] - cy) / z;
     // 按高度在三档色里取：越高越亮（受光），越低越暗（背光）
-    const t = Math.max(0, Math.min(1, (gy + H * 0.5) / (H * 1.5)));
+    const t = Math.max(0, Math.min(1, (gy + SH * 0.5) / (SH * 1.5)));
     ctx.fillStyle = t > 0.62 ? pal[1] : t > 0.34 ? pal[0] : pal[2] || pal[0];
     ctx.fillRect(x0, gy, bandW + 1, CRUISE_BAND_PX);
   }
   // 顶部一条亮线：代替常规模式的地表线，给出"地面在哪"的唯一参照
   ctx.fillStyle = token("fx-lit-top");
   ctx.globalAlpha = 0.55;
-  ctx.fillRect(0, 0, W, 2);
+  ctx.fillRect(0, 0, SW, 2);
   ctx.globalAlpha = 1;
+  ctx.restore();
+  void W;
+  void H;
 }
 
 /** 当前渲染缩放（防御性：zoom 非法时按 1 处理，避免除出 Infinity） */
