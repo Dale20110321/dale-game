@@ -112,22 +112,16 @@
   </div>
 </div>
 
-<!-- 入口：加载 dist/game.bundle.js（普通 script，非 ES module）。它是**唯一**入口。
-     ★ 为什么不用 <script type="module" src="src/main.js">：
-       ES module 在 file:// 下会被浏览器的 CORS 策略拦截，页面只剩静态 HTML ——
-       按钮全哑、关卡地图空白，就是"双击打不开"的根因。普通 script 没有这个限制。
-     ★ dist/ 必须跟着源码一起提交/更新：改完源码跑一次 build.bat 重新生成。
-     GitHub Pages 走 https，普通 script 同样正常加载。
-     ★★ 为什么源码入口只能"兜底"、不能并列写死：
-       两个 script 都执行 = 整个游戏被初始化**两遍**（两套 store / 两条主循环，
-       却共用同一个 DOM 和同一份 localStorage）。症状是所有交互都触发两次，
-       最典型的是存档面板里点一次「✨ 新建存档」会连建两个存档。
-       打包入口一旦执行，src/main.js 的首行会置 __daleBooted；下面的 module 脚本
-       （type="module" 天然 defer，必然晚于上面的普通 script 执行）据此跳过 import。
-       打包文件缺失时标志不存在，于是回退到源码入口 —— 本地服务器调试就靠这条。 -->
-<script src="dist/game.bundle.js"></script>
-<script type="module">
-  if (!window.__daleBooted) await import("./src/main.js");
-</script>
+<!-- 入口：直接以 ES module 加载 src/main.js —— 没有构建步骤、没有打包产物。
+     ★ 为什么不再挂 dist/game.bundle.js（历史包袱，已删）：
+       那个打包文件唯一的价值是把 ES module 压成普通 script，好让 file:// 双击能玩 ——
+       因为 ES module 在 file:// 下会被浏览器 CORS 拦死，页面只剩静态 HTML、按钮全哑。
+       但本作唯一的运行途径是 GitHub Pages（走 https），那条限制压根不成立，
+       于是它只剩下"改一次源码就得重跑一次打包、忘了就静默跑旧代码"这个纯负担。
+     ★ 代价：首屏多发 40 个 module 请求（GitHub Pages 上全是可缓存的静态文件）。
+       换回来的是"改完源码刷新即生效"，git 里也只有一份真相。
+     ★ 哪天真要支持 file:// 双击离线玩：把这行换回
+       <script src="dist/game.bundle.js"></script> 并用 bun build 重新生成。 -->
+<script type="module" src="./src/main.js"></script>
 </body>
 </html>

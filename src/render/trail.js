@@ -85,7 +85,7 @@ const meteorOf = (k) =>
   clamp((k - TRAIL_METEOR_LO) / (TRAIL_METEOR_HI - TRAIL_METEOR_LO), 0, 1);
 
 // ============================================================
-//  七种签名形态（每台宇宙车一种，见 vehicles.js 的 TRAIL 注释）
+//  十种签名形态（每台宇宙车一种，见 vehicles.js 的 TRAIL 注释）
 //
 //  约定：全部画在**局部坐标系**里 —— 原点在车身中心、+x = 速度方向、
 //  拖尾一律落在 -x 侧（车后方）。调用方已经 translate + rotate 到位。
@@ -334,6 +334,60 @@ function drawRift(T, a, A, L, W, k, q) {
 }
 
 /**
+ * 光网（cv10 酸绿）：一张向车尾**透视收缩**的网格 —— 横环 + 纵轨交替亮灭。
+ *
+ * ★ 为什么必须是"面"：其余九种画法的原型都是**被抛下的物质** —— 一束、一环、
+ *   一对断裂面，全都读成"一条细长物"。百倍光速不该还有细长物的形状：
+ *   空间坐标网被拖着一起走，它必须是一张**有面积的**东西才读得出来。
+ *   横环给"截面"、纵轨把截面连成"网格"，两者缺一就退化成同心圆或放射线。
+ *
+ * 两族笔画用**相反的相位**亮灭（横环跟 sin(t)、纵轨跟 cos(t)），
+ * 于是网格像数据在网线上跑，而不是整张一起闪。
+ */
+function drawLattice(T, a, A, L, W, k, q) {
+  const rings = Math.max(3, Math.round(T.count * q));
+  const steps = 12;
+  const spin = ph * 0.55;
+  // 网面在纵深 t 上的半径与扭转：越远越小、越远转得越多 —— 透视感全在这两行
+  const rrAt = (t) => W * (1 - 0.7 * t);
+  const angAt = (t, u) => spin * t * 0.35 + u * 0.22 * (1 + t);
+  // 网线上横坐标 u ∈ [-1,1]、纵深 t 处的那一点
+  const px = (t, u, rr) => A - t * L + Math.sin(angAt(t, u)) * rr * 0.18;
+  const py = (t, u, rr) => Math.sin(angAt(t, u) * 1.7 + T.seed) * rr * u;
+
+  // 纵轨（先画，铺在横环之下）：从尾根贯穿到最远端
+  for (let r = 0; r <= rings; r++) {
+    const u = (2 * r) / rings - 1;
+    ctx.beginPath();
+    for (let j = 0; j <= steps; j++) {
+      const t = j / steps;
+      const rr = rrAt(t);
+      const x = px(t, u, rr);
+      const y = py(t, u, rr);
+      if (j === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    const bright = 0.5 + 0.5 * Math.sin(ph * 1.7 + r * 1.11 + T.seed);
+    glowStroke(T.glow, W * 0.12, a * (0.06 + 0.08 * bright), W * 0.035, a * (0.18 + 0.26 * bright));
+  }
+  // 横环（后画，压在纵轨之上）：每一道是一整条截面线
+  for (let i = 1; i <= rings; i++) {
+    const t = i / (rings + 1);
+    const rr = rrAt(t);
+    ctx.beginPath();
+    for (let j = 0; j <= steps; j++) {
+      const u = -1 + (2 * j) / steps;
+      const x = px(t, u, rr);
+      const y = py(t, u, rr);
+      if (j === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    const bright = 0.5 + 0.5 * Math.sin(ph * 2.1 + i * 2.17 + T.seed);
+    glowStroke(T.core, W * 0.07, a * (0.12 + 0.16 * (1 - bright)), W * 0.03, a * 0.42);
+  }
+}
+
+/**
  * 陨星 / 彗尾层（七台共用骨架，颜色与头冠形状取自各自的 TRAIL 规格）。
  *
  * ★ 为什么是"交叉淡入"而不是"到阈值换画法"：见 constants.js 的 TRAIL_METEOR_LO。
@@ -441,6 +495,7 @@ export function drawTrail(dt = 1 / 60) {
     case "lance": drawLance(T, kE, A, L, W, k, q); break;
     case "cone": drawCone(T, kE, A, L, W, k, q); break;
     case "rift": drawRift(T, kE, A, L, W, k, q); break;
+    case "lattice": drawLattice(T, kE, A, L, W, k, q); break;
     default: drawArc(T, kE, A, L, W, k, q); break; // arc 兼作兜底
   }
   drawMeteor(T, m, W, L);

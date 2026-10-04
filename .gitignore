@@ -1,11 +1,9 @@
-# 依赖（零运行时依赖；node_modules 只给本地 autotest 用）
+# 依赖（零运行时依赖）
 node_modules/
 
-# 注意：dist/ 必须提交！
-#   index.html 引用 dist/game.bundle.js，GitHub Pages / file:// 直开都靠它，
-#   不提交会导致线上脚本 404、页面能看但所有按钮点不动。
-#   改完源码用 build.bat（或 bun build src/main.js --outfile dist/game.bundle.js --target browser --format iife）重新生成。
-# build/
+# ★ dist/ 已经删掉了：index.html 直接以 ES module 加载 src/main.js，
+#   没有构建步骤也没有打包产物，所以没有"忘了重新打包就跑旧代码"这个坑。
+#   真要恢复 file:// 双击离线玩时再加回来（见 index.html 入口处的注释）。
 
 # 编辑器 / 系统
 .vscode/

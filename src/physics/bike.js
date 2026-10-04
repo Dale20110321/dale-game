@@ -28,6 +28,7 @@ import {
   ROLL_RES_K, AIR_DRAG_K, LINEAR_DRAG_K, wheelInertia, torqueAt, topSpeedOf, crashTiltDeg,
   ABSOLUT_V, ABSOLUT_DRAG_K, ABSOLUT_THRUST_K, ABSOLUT_SERVO_ACC,
   OMEGA_V, OMEGA_DRAG_K, OMEGA_THRUST_K, OMEGA_SERVO_ACC, OMEGA_ACC_FRAC,
+  FLIGHT_BRAKE_FRAC,
   PX_PER_M, ultraCruiseOf,
   FLIGHT_HOVER, FLIGHT_HOVER_K, FLIGHT_HOVER_LP, FLIGHT_PITCH_K,
   REAR_LOAD, wheelieTauOf, wheelieMulOf,
@@ -369,8 +370,14 @@ function flightStep(P, dt, throttle, brk, rev) {
   // ---- 水平：目标速度 = 前馈（维持极速所需推力） + 反馈（与目标的偏差） ----
   // 终焉形态 1000 km/h；裸车悬停则回到这辆车平路可达的极速（torqueAt 解算值）
   const cruise = activeMode() === "omega" ? P.topSpeed : (P.baseTopSpeed || P.topSpeed);
+  // 飞行形态的倒车基准 = 该车**裸车极速**本身（地面车仍走 REV_SPEED = 0.3 倍）。
+  // ★ 为什么飞行形态不能沿用 0.3：那个系数是给自行车定的（"倒着蹬不快"），
+  //   而宇宙级车的 base 只有几百 px/s —— 弦外满级倒挡只有约 10 km/h，
+  //   形态极速却是 1.08e10 km/h，两者差 1e9 倍，"倒车"读起来像车被焊在地上。
+  //   飞行器不存在"倒着蹬"这回事，倒退推力与前进同级，故直接取 1.0 倍。
+  const revMax = base;
   let target;
-  if (rev) target = -base * REV_SPEED;
+  if (rev) target = -revMax;
   else if (brk) target = 0;
   else if (throttle) target = cruise;
   else target = 0;
@@ -403,9 +410,19 @@ function flightStep(P, dt, throttle, brk, rev) {
   //   （漏了这一项时实测跑到 2300 km/h，是标称值的 2.3 倍）。
   const drag = (dragK * vx * Math.abs(vx)) / P.rb.mTot;
   const push = clamp((target - vx) * OMEGA_SERVO_ACC + ff - drag, -cap, cap);
-  // 刹车：直接减速，不受前馈影响（否则松油门的滑行会被前馈顶住）
+  // 刹车：直接减速，不受前馈影响（否则松油门的滑行会被前馈顶住）。
+  // ★ 这里原来写的是 clamp(vx − brakePeak·0.6·dt, −base·REV_SPEED, +base·REV_SPEED)，
+  //   两个坑叠在一起：
+  //   1) **上界也用了倒车极速**。那个 clamp 只想防"刹过头倒回去"，只需要夹下界；
+  //      夹上界等于把前进速度也钉死在几百 px/s —— 按一下 ↓，2.998e11 px/s **一帧归零**
+  //      （玩家反馈"一点后退键速度瞬间掉下来"。那不是刹车，是钳制写错了。）
+  //   2) brakePeak 是**扭矩**（1.5e7 量级），当减速度用要三千多秒才减得完，
+  //      就算把 1) 修好也等于没有刹车。所以量级必须锚在**巡航速度**上：
+  //      从巡航速度到静止恒为 1/FLIGHT_BRAKE_FRAC 秒，28,440 km/h 的星环与
+  //      百倍光速的末车刹车手感一致，且绝不越零（倒车是 rev 的事，不是刹车的）。
+  const brakeDecel = Math.abs(cruise) * FLIGHT_BRAKE_FRAC + P.brakePeak * 0.6;
   const nextVx = brk
-    ? clamp(vx - P.brakePeak * 0.6 * dt, -base * REV_SPEED, base * REV_SPEED)
+    ? Math.sign(vx) * Math.max(0, Math.abs(vx) - brakeDecel * dt)
     : vx + push * dt;
 
   // ---- 竖直：悬停伺服（抵消重力，保持固定离地高度）----

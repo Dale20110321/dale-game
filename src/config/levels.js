@@ -105,7 +105,7 @@ const BRANCH_SEED = [
 
 /** 由场景派生后续支线（12 → 36）：name 取场景名，desc 由该场景的重力/抓地自动描述 */
 function deriveBranch(i) {
-  // 兜底：场景表还没就绪时不至于整份配置加载失败（那会让整个 bundle 白屏）。
+  // 兜底：场景表还没就绪时不至于整份配置加载失败（那会让整个页面白屏）。
   // 正常情况下 THEMES.length === N_BRANCHES，这里永远不会走到兜底分支。
   const t = THEMES[i] || { name: "场景 " + (i + 1), g: 750, traction: 1 };
   const grip = t.traction <= 0.7 ? "极滑抓地" : t.traction <= 0.85 ? "湿滑路面" : "抓地良好";
@@ -1109,7 +1109,7 @@ export const MODE_SPACE = "space";
 /**
  * 6 个联赛。每个联赛给出一个**参考配速**（km/h），是这个联赛所有对手的速度基准。
  *
- * ★ 参考配速的档位刻意对齐车辆阶梯（cv1 28,440 → cv9 10,792,528,488 km/h）：
+ * ★ 参考配速的档位刻意对齐车辆阶梯（cv1 28,440 → cv10 107,925,284,880 km/h）：
  *   参考配速落在某台车"形态满级极速"的 1%~1.5% 附近，那台车开形态就能稳赢本联赛，
  *   而只升了一半级就会输 —— 于是"升满级"始终是推进的唯一解法。
  *
@@ -1126,6 +1126,7 @@ export const SPACE_LEAGUES = [
   { id: "L7", name: "全域层", icon: "💫", refKmh: 6300000,    segs: 30, slopeDeg: 10, gold: 1.66075e20, themes: [34, 11, 24, 3] },
   { id: "L8", name: "光锥层", icon: "🔆", refKmh: 800000000,  segs: 32, slopeDeg: 8,  gold: 7.47337e21, themes: [3, 24, 34, 11] },
   { id: "L9", name: "弦外层", icon: "🌀", refKmh: 9000000000, segs: 34, slopeDeg: 6,  gold: 3.36301e23, themes: [11, 3, 24, 34] },
+  { id: "L10", name: "裂界层", icon: "♾️", refKmh: 90000000000, segs: 36, slopeDeg: 5, gold: 3.02671e26, themes: [3, 11, 34, 24] },
 ];
 
 /**
