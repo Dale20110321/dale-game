@@ -1550,7 +1550,6 @@ var store = {
     totalMeters: 0,
     totalSeconds: 0,
     lastPlayed: "",
-    earnedGold: 0,
     byMode: {}
   },
   space: {
@@ -3693,7 +3692,6 @@ function blankStoreState() {
     totalMeters: 0,
     totalSeconds: 0,
     lastPlayed: "",
-    earnedGold: 0,
     byMode: {}
   };
 }
@@ -3750,6 +3748,9 @@ function sanitizeRecords(raw) {
   return out;
 }
 function buildDoc() {
+  store.space.free = store.space.free || { runs: 0, bestMeters: 0, totalMeters: 0, bestAt: "" };
+  store.space.free.bestMeters = Math.max(0, intOr(store.best), intOr(store.space.free.bestMeters));
+  store.best = store.space.free.bestMeters;
   const vehicles = {};
   const owned = [];
   for (const index of store.ownedVehicles || []) {
@@ -3775,22 +3776,25 @@ function buildDoc() {
       forms[id] = true;
   }
   const p = store.progress || {};
-  const s = store.stat || {};
+  const st = store.stat || {};
+  const sp = store.space || {};
   const current = VEHICLES[store.currentVehicle];
+  const cleared = (store.stars || []).reduce((n, v) => n + (v >= 1 ? 1 : 0), 0);
+  const stars2 = (store.stars || []).reduce((n, v) => n + (v > 0 ? v : 0), 0);
   return {
-    app: SAVE_APP,
-    format: SAVE_FORMAT,
-    schema: CUR_SCHEMA,
-    savedAt: nowIso(),
-    migratedFrom: store.migratedFrom > 0 ? store.migratedFrom : undefined,
+    meta: {
+      app: SAVE_APP,
+      format: SAVE_FORMAT,
+      schema: CUR_SCHEMA,
+      savedAt: nowIso(),
+      migratedFrom: store.migratedFrom > 0 ? store.migratedFrom : undefined
+    },
     profile: {
       name: `存档${slotIndex() + 1}`,
-      createdAt: strOr(store.createdAt, nowIso()),
-      lastPlayed: strOr(s.lastPlayed, "")
+      createdAt: strOr(store.createdAt, nowIso())
     },
-    wallet: {
-      gold: toPlainDecimal(store.gold),
-      earned: toPlainDecimal(s.earnedGold)
+    money: {
+      gold: toPlainDecimal(store.gold)
     },
     garage: {
       current: current ? current.id : "",
@@ -3799,55 +3803,66 @@ function buildDoc() {
       vehicles
     },
     campaign: {
-      unlocked: Math.max(0, intOr(store.unlocked)),
-      sel: Math.max(0, intOr(store.selLevel)),
+      progress: {
+        unlocked: Math.max(0, intOr(store.unlocked)),
+        sel: Math.max(0, intOr(store.selLevel)),
+        cleared,
+        stars: stars2,
+        finaleSeg: Math.max(0, Math.min(FINALE_SEGS, intOr(p.finaleSeg))),
+        finaleDone: p.finaleDone === true,
+        invited: p.invited === true
+      },
       stars: (store.stars || []).map(clampStar),
-      finaleSeg: Math.max(0, Math.min(FINALE_SEGS, intOr(p.finaleSeg))),
-      finaleDone: p.finaleDone === true,
-      invited: p.invited === true
+      records: { ...store.levelRecords || {} }
     },
     ranked: {
       rating: Math.max(0, intOr(p.rating)),
       wins: Math.max(0, intOr(p.wins)),
       losses: Math.max(0, intOr(p.losses)),
       promoClaimed: Math.max(0, intOr(p.promoClaimed)),
-      advanced: store.rankedAdvanced === true
+      advanced: store.raceRanked === true || store.rankedAdvanced === true
     },
     space: {
-      rating: Math.max(0, intOr((store.space || {}).rating)),
-      records: { ...(store.space || {}).records || {} }
-    },
-    records: {
-      levels: { ...store.levelRecords || {} },
-      races: { ...store.raceRecords || {} },
+      league: {
+        rating: Math.max(0, intOr(sp.rating)),
+        records: { ...sp.records || {} }
+      },
       free: {
-        bestMeters: Math.max(0, intOr(store.best), intOr((store.space.free || {}).bestMeters)),
-        bestAt: strOr((store.space.free || {}).bestAt, "")
+        bestMeters: Math.max(0, intOr(store.best), intOr((sp.free || {}).bestMeters)),
+        bestAt: strOr((sp.free || {}).bestAt, "")
       }
     },
+    races: { ...store.raceRecords || {} },
     lifetime: {
-      runs: Math.max(0, intOr(s.totalRuns)),
-      meters: Math.max(0, intOr(s.totalMeters)),
-      seconds: Math.max(0, intOr(s.totalSeconds)),
-      lastPlayed: strOr(s.lastPlayed, ""),
-      byMode: sanitizeByMode(s.byMode)
+      totals: {
+        runs: Math.max(0, intOr(st.totalRuns)),
+        meters: Math.max(0, intOr(st.totalMeters)),
+        seconds: Math.max(0, intOr(st.totalSeconds))
+      },
+      lastPlayed: strOr(st.lastPlayed, ""),
+      byMode: sanitizeByMode(st.byMode)
     },
+    achievements: Array.isArray(store.achGot) ? store.achGot.slice() : [],
     settings: { muted: store.muted === true }
   };
 }
 function applyDoc(doc) {
   blankStoreState();
-  if (!objOr(doc))
+  const d = objOr(doc);
+  if (!d)
     return false;
-  const g = objOr(doc.garage) || {};
-  const c = objOr(doc.campaign) || {};
-  const r = objOr(doc.ranked) || {};
-  const l = objOr(doc.lifetime) || {};
-  const sp = objOr(doc.space) || {};
-  store.createdAt = strOr((objOr(doc.profile) || {}).createdAt, "");
-  store.migratedFrom = intOr(doc.migratedFrom);
-  store.gold = safeGold(fromPlainDecimal((objOr(doc.wallet) || {}).gold));
-  store.stat.earnedGold = safeGold(fromPlainDecimal((objOr(doc.wallet) || {}).earned));
+  const g = objOr(d.garage) || {};
+  const cp = objOr(objOr(d.campaign) || {});
+  const c = objOr(cp.progress) || {};
+  const r = objOr(d.ranked) || {};
+  const lt = objOr(d.lifetime) || {};
+  const ltTotal = objOr(lt.totals) || {};
+  const sl = objOr(objOr(d.space) || {});
+  const league = objOr(sl.league) || {};
+  const free = objOr(sl.free) || {};
+  store.createdAt = strOr((objOr(d.profile) || {}).createdAt, "");
+  store.migratedFrom = intOr((objOr(d.meta) || {}).migratedFrom);
+  store.gold = safeGold(fromPlainDecimal((objOr(d.money) || {}).gold));
   store.upgrades = sanitizeVehicles(g.vehicles);
   store.garageMeta = {};
   for (const id in store.upgrades) {
@@ -3872,7 +3887,8 @@ function applyDoc(doc) {
   }
   store.unlocked = Math.max(0, Math.min(LEVELS.length - 1, intOr(c.unlocked)));
   store.selLevel = Math.max(0, Math.min(LEVELS.length - 1, intOr(c.sel)));
-  store.stars = (Array.isArray(c.stars) ? c.stars.map(clampStar) : []).concat(new Array(LEVELS.length).fill(0)).slice(0, LEVELS.length);
+  store.stars = (Array.isArray(cp.stars) ? cp.stars.map(clampStar) : []).concat(new Array(LEVELS.length).fill(0)).slice(0, LEVELS.length);
+  store.levelRecords = sanitizeLevelRecords(cp.records);
   store.progress.finaleSeg = Math.max(0, Math.min(FINALE_SEGS, intOr(c.finaleSeg)));
   store.progress.finaleDone = c.finaleDone === true;
   store.progress.invited = c.invited === true;
@@ -3881,24 +3897,25 @@ function applyDoc(doc) {
   store.progress.losses = Math.max(0, intOr(r.losses));
   store.progress.promoClaimed = Math.max(0, intOr(r.promoClaimed));
   store.rankedAdvanced = r.advanced === true;
-  store.space = { rating: Math.max(0, intOr(sp.rating)), records: sanitizeRecords(sp.records) };
-  const rec = objOr(doc.records) || {};
-  store.levelRecords = sanitizeLevelRecords(rec.levels);
-  store.raceRecords = sanitizeRaceRecords(rec.races);
-  const fr = objOr(rec.free) || {};
-  store.stat.totalRuns = Math.max(0, intOr(l.runs));
-  store.stat.totalMeters = Math.max(0, intOr(l.meters));
-  store.stat.totalSeconds = Math.max(0, intOr(l.seconds));
-  store.stat.lastPlayed = strOr(l.lastPlayed, "");
-  store.stat.byMode = sanitizeByMode(l.byMode);
-  store.space.free = {
-    runs: Math.max(0, intOr(((store.stat.byMode || {}).free || {}).runs)),
-    bestMeters: Math.max(0, intOr(fr.bestMeters)),
-    totalMeters: Math.max(0, intOr(((store.stat.byMode || {}).free || {}).meters)),
-    bestAt: strOr(fr.bestAt, "")
+  store.stat.totalRuns = Math.max(0, intOr(ltTotal.runs));
+  store.stat.totalMeters = Math.max(0, intOr(ltTotal.meters));
+  store.stat.totalSeconds = Math.max(0, intOr(ltTotal.seconds));
+  store.stat.lastPlayed = strOr(lt.lastPlayed, "");
+  store.stat.byMode = sanitizeByMode(lt.byMode);
+  store.space = {
+    rating: Math.max(0, intOr(league.rating)),
+    records: sanitizeRecords(league.records),
+    free: {
+      runs: Math.max(0, intOr(((store.stat.byMode || {}).free || {}).runs)),
+      bestMeters: Math.max(0, intOr(free.bestMeters)),
+      totalMeters: Math.max(0, intOr(((store.stat.byMode || {}).free || {}).meters)),
+      bestAt: strOr(free.bestAt, "")
+    }
   };
   store.best = store.space.free.bestMeters;
-  store.muted = (objOr(doc.settings) || {}).muted === true;
+  store.raceRecords = sanitizeRaceRecords(d.races);
+  store.achGot = Array.isArray(d.achievements) ? d.achievements.filter((x) => typeof x === "string") : [];
+  store.muted = (objOr(d.settings) || {}).muted === true;
   return true;
 }
 function legacyLevelsOf(upRaw, id, veh) {
@@ -3942,25 +3959,22 @@ function legacyDocFrom(map) {
       forms[id] = true;
   }
   const starsRaw = jsonOr(src[SAVE_KEYS.stars] || "[]", []);
-  const stars = (Array.isArray(starsRaw) ? starsRaw : []).map(clampStar).concat(new Array(LEVELS.length).fill(0)).slice(0, LEVELS.length);
+  const stars2 = (Array.isArray(starsRaw) ? starsRaw : []).map(clampStar).concat(new Array(LEVELS.length).fill(0)).slice(0, LEVELS.length);
   const prog = objOr(jsonOr(src[SAVE_KEYS.prog] || "{}", {})) || {};
   const stat = objOr(jsonOr(src[SAVE_KEYS.stat] || "{}", {})) || {};
   const current = legacyIdAt(src[SAVE_KEYS.veh]);
+  const cleared = stars2.filter((v) => v >= 1).length;
+  const starSum = stars2.reduce((n, v) => n + (v > 0 ? v : 0), 0);
   return {
-    app: SAVE_APP,
-    format: SAVE_FORMAT,
-    schema: CUR_SCHEMA,
-    savedAt: nowIso(),
-    migratedFrom: ver > 0 ? ver : LEGACY_MAX_VER,
-    profile: {
-      name: `存档${slotIndex() + 1}`,
-      createdAt: nowIso(),
-      lastPlayed: strOr(stat.lastPlayed, "")
+    meta: {
+      app: SAVE_APP,
+      format: SAVE_FORMAT,
+      schema: CUR_SCHEMA,
+      savedAt: nowIso(),
+      migratedFrom: ver > 0 ? ver : LEGACY_MAX_VER
     },
-    wallet: {
-      gold: toPlainDecimal(gold),
-      earned: toPlainDecimal(safeGold(Number(stat.earnedGold) || 0))
-    },
+    profile: { name: `存档${slotIndex() + 1}`, createdAt: nowIso() },
+    money: { gold: toPlainDecimal(gold) },
     garage: {
       current: current && owned.includes(current) ? current : owned[0],
       owned,
@@ -3968,12 +3982,17 @@ function legacyDocFrom(map) {
       vehicles
     },
     campaign: {
-      unlocked: Math.max(0, intOr(src[SAVE_KEYS.unlocked])),
-      sel: Math.max(0, intOr(src[SAVE_KEYS.sel])),
-      stars,
-      finaleSeg: Math.max(0, intOr(prog.finaleSeg)),
-      finaleDone: prog.finaleDone === true,
-      invited: prog.invited === true
+      progress: {
+        unlocked: Math.max(0, intOr(src[SAVE_KEYS.unlocked])),
+        sel: Math.max(0, intOr(src[SAVE_KEYS.sel])),
+        cleared,
+        stars: starSum,
+        finaleSeg: Math.max(0, intOr(prog.finaleSeg)),
+        finaleDone: prog.finaleDone === true,
+        invited: prog.invited === true
+      },
+      stars: stars2,
+      records: {}
     },
     ranked: {
       rating: Math.max(0, intOr(src[SAVE_KEYS.rating] || prog.rating)),
@@ -3982,25 +4001,27 @@ function legacyDocFrom(map) {
       promoClaimed: Math.max(0, intOr(prog.promoClaimed)),
       advanced: false
     },
-    space: { rating: 0, records: {} },
-    records: {
-      levels: {},
-      races: {},
+    space: {
+      league: { rating: 0, records: {} },
       free: { bestMeters: Math.max(0, intOr(src[SAVE_KEYS.best])), bestAt: "" }
     },
+    races: {},
     lifetime: {
-      runs: Math.max(0, intOr(stat.totalRuns || stat.games)),
-      meters: Math.max(0, intOr(stat.totalMeters || stat.dist)),
-      seconds: Math.max(0, intOr(stat.totalSeconds || stat.time)),
+      totals: {
+        runs: Math.max(0, intOr(stat.totalRuns || stat.games)),
+        meters: Math.max(0, intOr(stat.totalMeters || stat.dist)),
+        seconds: Math.max(0, intOr(stat.totalSeconds || stat.time))
+      },
       lastPlayed: strOr(stat.lastPlayed, ""),
       byMode: {}
     },
+    achievements: Array.isArray(jsonOr(src[SAVE_KEYS.ach] || "[]", [])) ? jsonOr(src[SAVE_KEYS.ach] || "[]", []).filter((x) => typeof x === "string") : [],
     settings: { muted: src[SAVE_KEYS.mute] === "1" || src[SAVE_KEYS.mute] === 1 }
   };
 }
 function hasLegacyData() {
   for (const k of ALL_KEYS) {
-    if (k === SAVE_KEYS.doc || k === SAVE_KEYS.ach)
+    if (k === SAVE_KEYS.doc)
       continue;
     if (lsGet(k) !== null)
       return true;
@@ -4009,7 +4030,7 @@ function hasLegacyData() {
 }
 function clearLegacyKeys() {
   for (const k of ALL_KEYS) {
-    if (k === SAVE_KEYS.doc || k === SAVE_KEYS.ach)
+    if (k === SAVE_KEYS.doc)
       continue;
     lsRemove(k);
   }
@@ -4048,7 +4069,10 @@ function sanitizeRaceRecords(raw) {
 }
 function readDoc() {
   const d = objOr(jsonOr(lsGet(SAVE_KEYS.doc), null));
-  return d && d.app === SAVE_APP ? d : null;
+  if (!d)
+    return null;
+  const app = (objOr(d.meta) || {}).app || d.app;
+  return app === SAVE_APP ? d : null;
 }
 function writeDoc(doc) {
   return lsSet(SAVE_KEYS.doc, JSON.stringify(doc));
@@ -4065,7 +4089,7 @@ function loadSave() {
     } else if (hasLegacyData()) {
       const legacy = {};
       for (const k of ALL_KEYS) {
-        if (k === SAVE_KEYS.doc || k === SAVE_KEYS.ach)
+        if (k === SAVE_KEYS.doc)
           continue;
         const v = lsGet(k);
         if (v !== null)
@@ -4102,7 +4126,7 @@ function saveStat() {
   return save();
 }
 function saveAchList() {
-  return lsSet(SAVE_KEYS.ach, JSON.stringify(store.achGot || []));
+  return save();
 }
 function settleProgress() {
   refreshProgress();
@@ -4139,9 +4163,9 @@ function availableFreeThemes() {
 function isAdvancedUnlocked(rating) {
   return (Number(rating) || 0) >= RATING_ADVANCED;
 }
-function deriveUnlocks(progress, stars) {
+function deriveUnlocks(progress, stars2) {
   const p = objOr(progress) || {};
-  const arr = Array.isArray(stars) ? stars : [];
+  const arr = Array.isArray(stars2) ? stars2 : [];
   const allCleared = LEVELS.length > 0 && arr.length >= LEVELS.length && arr.slice(0, LEVELS.length).every((s) => s >= 1);
   const rating = Math.max(0, intOr(p.rating));
   return {
@@ -4242,6 +4266,8 @@ function getUp() {
   return store.upgrades[id] || (store.upgrades[id] = { engine: 0, tire: 0, frame: 0, susp: 0 });
 }
 function loadAchList() {
+  if (Array.isArray(store.achGot))
+    return;
   const v = jsonOr(lsGet(SAVE_KEYS.ach) || "[]", []);
   store.achGot = Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
 }
@@ -4364,8 +4390,6 @@ function resetSave() {
 }
 function summarizeSave(doc) {
   const d = objOr(doc) || {};
-  const c = objOr(d.campaign) || {};
-  const stars = Array.isArray(c.stars) ? c.stars : [];
   let total = 0;
   for (const s of stars) {
     const n = Number(s) || 0;
@@ -4373,12 +4397,13 @@ function summarizeSave(doc) {
       total += n;
   }
   const g = objOr(d.garage) || {};
+  const league = objOr(objOr(d.space) || {}).league;
   return {
     cleared: stars.filter((s) => Number(s) > 0).length,
     stars: total,
     rating: Math.max(0, intOr((objOr(d.ranked) || {}).rating)),
-    spaceRating: Math.max(0, intOr((objOr(d.space) || {}).rating)),
-    gold: safeGold(fromPlainDecimal((objOr(d.wallet) || {}).gold)),
+    spaceRating: Math.max(0, intOr(objOr(league) || {}).rating),
+    gold: safeGold(fromPlainDecimal((objOr(d.money) || {}).gold)),
     vehicles: Array.isArray(g.owned) ? g.owned.length : 0
   };
 }
@@ -5978,7 +6003,6 @@ function addGold(n) {
   if (!n)
     return;
   store.gold = safeGold(store.gold + n);
-  store.stat.earnedGold = safeGold((store.stat.earnedGold || 0) + n);
   save();
   if (store.gold >= 5000)
     checkAch("rich");
@@ -6757,8 +6781,11 @@ var QUEST_VEHICLE = "cv1";
 function spaceQuestState() {
   const idx = VEHICLES.findIndex((v) => v.id === QUEST_VEHICLE);
   const owned = (store.ownedVehicles || []).includes(idx);
-  const need = 50000000;
-  const got = store.stat && store.stat.earnedGold || 0;
+  const need = 30;
+  let got = 0;
+  for (let i = 0;i < store.stars.length; i++)
+    if ((store.stars[i] || 0) >= 1)
+      got++;
   return {
     done: owned,
     hasQuest: !owned,
@@ -9286,6 +9313,106 @@ function drawOne(sx, gy, ang, color, name, shadow, zoom) {
   ctx.restore();
 }
 
+// src/render/cruise.js
+var CRUISE_ZOOM = 0.05;
+var inCruiseLayer = () => store.cam.zoom < CRUISE_ZOOM;
+function drawCruiseBike() {
+  const veh = VEHICLES[store.currentVehicle];
+  const color = veh && veh.color || "#ffffff";
+  const W = view.W;
+  const H = view.H;
+  const x = W * 0.38;
+  const y = H * 0.62;
+  const top = store.phys.topSpeed || 1;
+  const spdN = Math.min(1, Math.abs(bike.speed) / Math.max(1, top));
+  const r = 7 + spdN * 6;
+  ctx.save();
+  ctx.globalAlpha = 0.18;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(x, y, r * 3.2, 0, 7);
+  ctx.fill();
+  ctx.globalAlpha = 0.45;
+  ctx.beginPath();
+  ctx.arc(x, y, r * 1.8, 0, 7);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.62, 0, 7);
+  ctx.fill();
+  if (spdN > 0.05) {
+    const len = 40 + spdN * 150;
+    ctx.globalAlpha = 0.28 * spdN;
+    ctx.fillStyle = color;
+    ctx.fillRect(x - len, y - r * 0.42, len, r * 0.84);
+    ctx.globalAlpha = 0.5 * spdN;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(x - len * 0.45, y - r * 0.16, len * 0.45, r * 0.32);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+function drawCruiseRacers() {
+  const list = store.racers;
+  if (!list || !list.length)
+    return;
+  const W = view.W;
+  const H = view.H;
+  const visW = W / store.cam.zoom;
+  const base = store.cam.x + visW * 0.38;
+  const COLORS = ["#ff6b6b", "#ffd93d", "#6bcb77", "#4d96ff", "#c780e8", "#ff9f43"];
+  ctx.save();
+  for (let i = 0;i < list.length; i++) {
+    const ai = list[i];
+    const rel = (ai.x - base) / visW;
+    if (rel < -0.6 || rel > 1.6)
+      continue;
+    const x = rel * W;
+    const y = H * 0.62 + (i % 3 - 1) * 16;
+    const color = COLORS[i % COLORS.length];
+    const r = 4.5;
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 1.9, 0, 7);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.7, 0, 7);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+function drawCruiseGround() {
+  const W = view.W;
+  const H = view.H;
+  const top = store.phys.topSpeed || 1;
+  const spdN = Math.min(1, Math.abs(bike.speed) / Math.max(1, top));
+  const T = THEMES[store.phys.theme] || THEMES[0];
+  const pal = T.pal || ["#3f7d3a", "#58a24f", "#8b5e3c"];
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = pal[2];
+  ctx.fillRect(0, H * 0.78, W, H * 0.22);
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = pal[1];
+  ctx.fillRect(0, H * 0.78, W, H * 0.07);
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = token("text-hi");
+  const gap = 60 - spdN * 40;
+  const speed = 2 + spdN * 26;
+  const offset = store.time * speed % gap;
+  ctx.fillRect(0, H * 0.78 - 2, W, 3);
+  ctx.globalAlpha = 0.35 * spdN + 0.1;
+  for (let x = -offset;x < W; x += gap)
+    ctx.fillRect(x, H * 0.78 - 14, gap * 0.45, 12);
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
 // src/render/trail.js
 var ph = 0;
 var qFac = () => getQuality() === "low" ? 0.5 : getQuality() === "high" ? 1 : 0.78;
@@ -9995,6 +10122,17 @@ function drawScene(dt = 1 / 60) {
   const bcy = cam.y;
   cam.x += off.x;
   cam.y += off.y;
+  const cruise = inCruiseLayer();
+  if (cruise) {
+    drawCruiseGround();
+    drawCruiseRacers();
+    drawCruiseBike();
+    drawSpeedLines();
+    applyPostFx(store.time, dt);
+    if (store.state === "play" || store.state === "pause" || store.state === "ended")
+      drawHud();
+    return;
+  }
   ctx.save();
   ctx.scale(cam.zoom, cam.zoom);
   drawParticles(cam.x, cam.y);
@@ -10316,8 +10454,8 @@ function showResultCard(res = {}) {
   overlay.classList.remove("hidden");
   setMenuGroupsVisible(false);
   renderHeroSummary();
-  const stars = res.stars === undefined ? null : Math.max(0, Math.min(3, res.stars));
-  const starHtml = stars === null ? "" : `<div class="resultStars">${[0, 1, 2].map((i) => badge(i < stars ? "★" : "☆", i < stars ? "star" : "lock", { lg: true, attrs: `style="--i:${i}"` })).join("")}</div>`;
+  const stars2 = res.stars === undefined ? null : Math.max(0, Math.min(3, res.stars));
+  const starHtml = stars2 === null ? "" : `<div class="resultStars">${[0, 1, 2].map((i) => badge(i < stars2 ? "★" : "☆", i < stars2 ? "star" : "lock", { lg: true, attrs: `style="--i:${i}"` })).join("")}</div>`;
   const items = [
     { label: "金币", value: `<b class="roll" data-roll="${res.goldTotal === undefined ? store.gold || 0 : res.goldTotal}">0</b>` },
     { label: "本局获得", value: "\uD83E\uDE99 +" + (res.goldGain || 0) },
@@ -10743,9 +10881,9 @@ function branchCard(bi) {
   const b = BRANCHES[bi];
   const th = THEMES[b.theme] || THEMES[0];
   const open = branchOpen(bi);
-  let stars = 0;
+  let stars2 = 0;
   for (let k = 0;k < LEVELS_PER_BRANCH; k++)
-    stars += store.stars[globalIndexOf(bi, k)] || 0;
+    stars2 += store.stars[globalIndexOf(bi, k)] || 0;
   const cleared = branchCleared(bi);
   const done = cleared >= LEVELS_PER_BRANCH;
   const nextK = firstLockedK(bi);
@@ -10755,7 +10893,7 @@ function branchCard(bi) {
     icon: `<div class="brThumb"></div>`,
     title: `${open ? "" : "\uD83D\uDD12 "}${b.name}`,
     sub: front ? `▶ 继续 第 ${nextK + 1} 关 · 场景「${th.name}」` : `场景「${th.name}」 · ${b.desc}`,
-    meta: chip(`★ ${stars}/${LEVELS_PER_BRANCH * 3}`, "gold") + (done ? " " + badge("已通关", "success") : ""),
+    meta: chip(`★ ${stars2}/${LEVELS_PER_BRANCH * 3}`, "gold") + (done ? " " + badge("已通关", "success") : ""),
     right: `<div class="brDone">${cleared}/${LEVELS_PER_BRANCH}${done ? "<br>✅" : ""}</div>`,
     interactive: true,
     selected: openBranch === bi,
@@ -10772,7 +10910,7 @@ function levelCell(bi, k) {
   const st = store.stars[gi] || 0;
   const isNext = !locked && st === 0;
   const isCur = store.selLevel === gi;
-  const stars = locked ? "\uD83D\uDD12 未解锁" : st > 0 ? "★".repeat(st) + "☆".repeat(3 - st) : "☆☆☆";
+  const stars2 = locked ? "\uD83D\uDD12 未解锁" : st > 0 ? "★".repeat(st) + "☆".repeat(3 - st) : "☆☆☆";
   const label = `${BRANCHES[bi].name} 第${k + 1}关 ${v.name} 坡度${Math.round(L.maxSlope)}度 三星时限${Math.round(starTime(L))}秒 ${locked ? "未解锁" : st + "星"}${isCur ? "，当前关卡" : isNext ? "，下一关" : ""}`;
   const cls = locked ? " locked" : isCur ? " cur" : st > 0 ? " done" : " next";
   const head = isCur ? '<span class="lvNext">\uD83D\uDCCD 当前关卡</span>' : isNext ? '<span class="lvNext">▶ 下一关</span>' : "第" + (k + 1) + "关";
@@ -10782,7 +10920,7 @@ function levelCell(bi, k) {
     <div class="thm">${badge(v.icon + " " + v.name, "variant")}</div>
     <div class="thm">坡度 ${Math.round(L.maxSlope)}° · ${Math.round(toM(L.len))}m</div>
     <div class="thm">三星 ≤ ${fmtClock(starTime(L))}</div>
-    <div class="stars">${stars}</div>
+    <div class="stars">${stars2}</div>
     ${levelRecHtml(gi, L)}
   </div>`;
 }
@@ -10982,15 +11120,15 @@ function renderSpacePanel() {
       ${card({
       cls: "vehCard",
       icon: "☄️",
-      title: "累计赚取 " + abbrevNum(q.need, { yuan: true }),
-      sub: "完成后可获得基础宇宙车「星环」（价值 ¥100亿 · 极速 28,440 km/h）",
-      meta: `进度 ${abbrevNum(q.got)} / ${abbrevNum(q.need)}（${Math.round(q.progress * 100)}%）`,
+      title: "通关主线 " + q.need + " 关",
+      sub: "完成后可获得基础宇宙车「星环」（极速 28,440 km/h）",
+      meta: `进度 ${q.got} / ${q.need} 关（${Math.round(q.progress * 100)}%）`,
       body: progress(q.progress * 100, { label: "金币任务" }),
       interactive: q.got >= q.need,
       locked: q.got < q.need,
       attrs: q.got >= q.need ? 'data-act="spaceClaim"' : ""
     })}
-      ${q.got < q.need ? `<div class="panelNote">金币来自通关、赛道拾取、比赛名次与段位奖励。${pending ? "点击下方返回可稍后再来。" : ""}</div>` : `<div class="panelNote">✅ 条件已达成，点击上方卡片领取「星环」</div>`}
+      ${q.got < q.need ? `<div class="panelNote">任意一次**首次通关**都算数；重玩已通关的关卡不再重复计数。${pending ? "点击下方返回可稍后再来。" : ""}</div>` : `<div class="panelNote">✅ 条件已达成，点击上方卡片领取「星环」</div>`}
       <button class="btn backBtn" data-act="back">返回</button>`);
     return;
   }
@@ -11061,8 +11199,8 @@ function spaceRaceCell(li, di, ri, topPx) {
   const aiKmh = abbrevNum(Math.round(toKmh(def.ai)));
   const label = def.name + "，" + fmt.name + "，" + abbrevLen(def.len) + "，" + def.dur + " 秒，" + "对手配速 " + aiKmh + " 千米每小时，奖金 " + goldNum(def.gold) + " 金币，" + (winnable ? "你的极速足够跑赢" : "当前极速跑不赢") + (rec ? "，最好第 " + rec.best + " 名，打过 " + rec.runs + " 场" : "");
   const verdict = winnable ? '<span style="color:var(--success)">✔ 你的极速足够</span>' : '<span style="color:var(--danger)">⚠ 配速高于你的极速</span>';
-  const stars = rec ? '<div class="stars">最好第 ' + rec.best + " / " + total + " 名</div>" : "";
-  return '<div class="lvCell' + (winnable ? " next" : " locked") + '" data-act="spaceStart"' + ' role="button" tabindex="0" data-league="' + li + '" data-div="' + di + '" data-race="' + ri + '"' + ' aria-label="' + label + '">' + "<div>" + SPACE_RACES[ri].icon + " " + SPACE_RACES[ri].name + "</div>" + '<div class="thm">' + badge(fmt.name, "variant") + "</div>" + '<div class="thm">' + abbrevLen(def.len) + " · " + def.dur + "s</div>" + '<div class="thm">\uD83E\uDE99 ' + goldNum(def.gold) + "</div>" + '<div class="thm">' + verdict + "</div>" + stars + "</div>";
+  const stars2 = rec ? '<div class="stars">最好第 ' + rec.best + " / " + total + " 名</div>" : "";
+  return '<div class="lvCell' + (winnable ? " next" : " locked") + '" data-act="spaceStart"' + ' role="button" tabindex="0" data-league="' + li + '" data-div="' + di + '" data-race="' + ri + '"' + ' aria-label="' + label + '">' + "<div>" + SPACE_RACES[ri].icon + " " + SPACE_RACES[ri].name + "</div>" + '<div class="thm">' + badge(fmt.name, "variant") + "</div>" + '<div class="thm">' + abbrevLen(def.len) + " · " + def.dur + "s</div>" + '<div class="thm">\uD83E\uDE99 ' + goldNum(def.gold) + "</div>" + '<div class="thm">' + verdict + "</div>" + stars2 + "</div>";
 }
 function spaceDivisionsHtml(li, rating, topPx) {
   const L = SPACE_LEAGUES[li];
@@ -11300,17 +11438,17 @@ function openSavePanel() {
 }
 function currentSummary() {
   let cleared = 0;
-  let stars = 0;
+  let stars2 = 0;
   for (let i = 0;i < LEVELS.length; i++) {
     const s = store.stars[i] || 0;
     if (s > 0) {
       cleared++;
-      stars += s;
+      stars2 += s;
     }
   }
   return {
     cleared,
-    stars,
+    stars: stars2,
     rating: store.progress.rating || 0,
     spaceRating: store.space.rating || 0,
     vehicles: (store.ownedVehicles || []).length,

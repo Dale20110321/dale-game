@@ -1,8 +1,8 @@
 // localStorage 存档读写 + 每辆车的升级数据访问 + 进度阶梯 / 累计统计 / 导入导出
 //
 // ★ **v5 结构化存档**（现行唯一事实来源）：整份进度写进**一个**键 `dale_save`，
-//   形如 { app, format, schema, savedAt, profile, wallet, garage, campaign,
-//   ranked, space, lifetime, settings }。
+//   分成 meta / profile / money / garage / campaign / ranked / space / races /
+//   lifetime / achievements / settings 十一块，每块内部再分组。
 //   旧的 bike_* 裸键方案已弃用，读档时自动迁移一次并把旧键清掉
 //   （见 migrateLegacy 与 docs/SAVE_FORMAT_DEPRECATION.md）。
 //
@@ -209,7 +209,7 @@ function blankStoreState() {
   store.raceRecords = {};
   store.stat = {
     totalRuns: 0, totalMeters: 0, totalSeconds: 0, lastPlayed: "",
-    earnedGold: 0, byMode: {},
+    byMode: {},
   };
 }
 
@@ -288,94 +288,147 @@ export function buildDoc() {
     if (store.ultra[id] === true && indexOfVeh(id) >= 0) forms[id] = true;
   }
   const p = store.progress || {};
-  const s = store.stat || {};
+  const st = store.stat || {};
+  const sp = store.space || {};
   const current = VEHICLES[store.currentVehicle];
+  const cleared = (store.stars || []).reduce((n, v) => n + (v >= 1 ? 1 : 0), 0);
+  const stars = (store.stars || []).reduce((n, v) => n + (v > 0 ? v : 0), 0);
+
+  // ★ 每一块内部再分小组，而不是一长串平铺字段。
+  //   分组本身就是语义：gameplay 里的"引擎等级"和 lifetime 里的"总局数"
+  //   平铺在一起时，读者必须逐个字段辨认它属于哪一套；分成组之后，
+  //   哪几项一起变化、哪几项是一组，一眼可见。导出的 JSON 也因此可读。
   return {
-    app: SAVE_APP,
-    format: SAVE_FORMAT,
-    schema: CUR_SCHEMA,
-    savedAt: nowIso(),
-    // 只有"从旧方案搬过来"的存档才带这个字段：新档不带，玩家一眼能分辨来历
-    migratedFrom: store.migratedFrom > 0 ? store.migratedFrom : undefined,
+    // ---- 存档自身 ----
+    meta: {
+      app: SAVE_APP,
+      format: SAVE_FORMAT,
+      schema: CUR_SCHEMA,
+      savedAt: nowIso(),
+      // 只有"从旧方案搬过来"的存档才带这一项：新档不带，玩家一眼能分辨来历
+      migratedFrom: store.migratedFrom > 0 ? store.migratedFrom : undefined,
+    },
+
+    // ---- 玩家身份 ----
     profile: {
       name: `存档${slotIndex() + 1}`,
       createdAt: strOr(store.createdAt, nowIso()),
-      lastPlayed: strOr(s.lastPlayed, ""),
     },
-    wallet: {
+
+    // ---- 钱 ----
+    money: {
+      // 完整十进制字符串：余额会到 1e25 量级，String() 在那里会输出 "1e+25"
       gold: toPlainDecimal(store.gold),
-      earned: toPlainDecimal(s.earnedGold),
     },
+
+    // ---- 车库 ----
     garage: {
       current: current ? current.id : "",
       owned,
       forms,
       vehicles,
     },
+
+    // ---- 主线 ----
     campaign: {
-      unlocked: Math.max(0, intOr(store.unlocked)),
-      sel: Math.max(0, intOr(store.selLevel)),
+      progress: {
+        unlocked: Math.max(0, intOr(store.unlocked)),
+        sel: Math.max(0, intOr(store.selLevel)),
+        // cleared / stars 是上面那个数组的**汇总读数**（通关数 / 总星数），
+        // 冗余存一份是为了打开存档时不必扫 432 项；数组本身才是事实来源。
+        cleared,
+        stars,
+        finaleSeg: Math.max(0, Math.min(FINALE_SEGS, intOr(p.finaleSeg))),
+        finaleDone: p.finaleDone === true,
+        invited: p.invited === true,
+      },
+      // ★ 逐关星级数组：**通关进度的事实来源**，432 项 0~3。
+      //   它必须存在 —— 丢掉它等于让玩家从零开始；上面 progress 里的
+      //   cleared / stars 只是它的汇总读数。
       stars: (store.stars || []).map(clampStar),
-      finaleSeg: Math.max(0, Math.min(FINALE_SEGS, intOr(p.finaleSeg))),
-      finaleDone: p.finaleDone === true,
-      invited: p.invited === true,
+      // 逐关成绩：records 是"通了多少次、最好多快、拿了多少金币"，
+      // 与 stars（通没通、几星）是两回事，更新时机也不同，所以分开放。
+      records: { ...(store.levelRecords || {}) },
     },
+
+    // ---- 排位（比赛面板里的排位档）----
     ranked: {
       rating: Math.max(0, intOr(p.rating)),
       wins: Math.max(0, intOr(p.wins)),
       losses: Math.max(0, intOr(p.losses)),
       promoClaimed: Math.max(0, intOr(p.promoClaimed)),
-      advanced: store.rankedAdvanced === true,
+      advanced: store.raceRanked === true || store.rankedAdvanced === true,
     },
-    // 宇宙联赛与排位赛**分开**记：两套阶梯的解锁规则不同，混在一起会互相污染
+
+    // ---- 宇宙联赛 ----
+    // 与排位**分开**记：两套阶梯的解锁规则不同，混在一起会互相污染
     space: {
-      rating: Math.max(0, intOr((store.space || {}).rating)),
-      records: { ...((store.space || {}).records || {}) },
-    },
-    // ★ 成绩段：每种成绩都记"试过几次 / 最好多少 / 上次什么时候"，
-    //   而不是只堆一个累计值 —— 只有累计值的话，玩家永远看不出"再刷一次有没有意义"。
-    records: {
-      levels: { ...(store.levelRecords || {}) },
-      races: { ...(store.raceRecords || {}) },
-      // ★ 只存"跑赢不掉"的那两项：最佳里程与达成时间。
-      //   局数与累计里程**不重复存** —— 它们已经在 lifetime.byMode.free 里，
-      //   两处都存就会出现两份事实来源，而派生时一个字段算错就静默写出 NaN
-      //   （JSON 里表现为 null，读回来变 0，成绩凭空消失）。
+      league: {
+        rating: Math.max(0, intOr(sp.rating)),
+        // 赛事键形如 "L2-B-1" = 联赛 2 / 分区乙 / 第 2 场
+        records: { ...(sp.records || {}) },
+      },
+      // 无限模式：只存"跑赢不掉"的两项。局数与累计里程在 lifetime.byMode.free 里，
+      // 重复存就会出现两份事实来源，而派生时算错一个字段就静默写成 null，
+      // 读回来变 0 —— 踩过一次。
       free: {
-        // ★ 两个来源都读：store.best 是 HUD / 无限模式面板在用的那份，
-        //   space.free.bestMeters 是本段自己的那份。取较大值而不是二选一 ——
-        //   只在一侧被写入时（老存档、手改档）也能保住纪录不丢。
-        bestMeters: Math.max(0, intOr(store.best), intOr((store.space.free || {}).bestMeters)),
-        bestAt: strOr((store.space.free || {}).bestAt, ""),
+        bestMeters: Math.max(0, intOr(store.best), intOr((sp.free || {}).bestMeters)),
+        bestAt: strOr((sp.free || {}).bestAt, ""),
       },
     },
+
+    // ---- 比赛记录（比赛面板里的普通档）----
+    races: { ...(store.raceRecords || {}) },
+
+    // ---- 终身累计 ----
     lifetime: {
-      runs: Math.max(0, intOr(s.totalRuns)),
-      meters: Math.max(0, intOr(s.totalMeters)),
-      seconds: Math.max(0, intOr(s.totalSeconds)),
-      lastPlayed: strOr(s.lastPlayed, ""),
-      byMode: sanitizeByMode(s.byMode),
+      totals: {
+        runs: Math.max(0, intOr(st.totalRuns)),
+        meters: Math.max(0, intOr(st.totalMeters)),
+        seconds: Math.max(0, intOr(st.totalSeconds)),
+      },
+      lastPlayed: strOr(st.lastPlayed, ""),
+      byMode: sanitizeByMode(st.byMode),
     },
+
+    // ---- 成就 ----
+    achievements: Array.isArray(store.achGot) ? store.achGot.slice() : [],
+
+    // ---- 设置 ----
     settings: { muted: store.muted === true },
   };
 }
 
-/** 存档文档 → store（读档唯一入口，逐字段校验） */
+/**
+ * 存档文档 → store（读档唯一入口，逐字段校验）。
+ *
+ * ★ **容错原则：宁可丢字段，不可丢整档。** 每一项都单独校验再赋值，
+ *   任何一项形状不对就退回默认值，其余照常读回 —— 坏存档不该让玩家从零开始。
+ * ★ 顺序有讲究：`byMode` 必须**先于** space.free 赋值，因为 free 的局数与
+ *   累计里程是从 byMode.free 派生的，顺序反了会派生出空值（静默变成 0）。
+ */
 export function applyDoc(doc) {
   blankStoreState();
-  if (!objOr(doc)) return false;
-  const g = objOr(doc.garage) || {};
-  const c = objOr(doc.campaign) || {};
-  const r = objOr(doc.ranked) || {};
-  const l = objOr(doc.lifetime) || {};
-  const sp = objOr(doc.space) || {};
+  const d = objOr(doc);
+  if (!d) return false;
+  const g = objOr(d.garage) || {};
+  const cp = objOr(objOr(d.campaign) || {}) ;
+  const c = objOr(cp.progress) || {};           // 主线的"进度"小组
+  const r = objOr(d.ranked) || {};
+  const lt = objOr(d.lifetime) || {};
+  const ltTotal = objOr(lt.totals) || {};      // 终身累计的"总数"小组
+  const sl = objOr(objOr(d.space) || {});
+  const league = objOr(sl.league) || {};       // 宇宙联赛
+  const free = objOr(sl.free) || {};           // 无限模式
 
-  store.createdAt = strOr((objOr(doc.profile) || {}).createdAt, "");
-  store.migratedFrom = intOr(doc.migratedFrom);
+  // ---- 存档自身 ----
+  store.createdAt = strOr((objOr(d.profile) || {}).createdAt, "");
+  store.migratedFrom = intOr((objOr(d.meta) || {}).migratedFrom);
 
-  store.gold = safeGold(fromPlainDecimal((objOr(doc.wallet) || {}).gold));
-  store.stat.earnedGold = safeGold(fromPlainDecimal((objOr(doc.wallet) || {}).earned));
+  // ---- 钱 ----
+  store.gold = safeGold(fromPlainDecimal((objOr(d.money) || {}).gold));
 
+  // ---- 车库 ----
   store.upgrades = sanitizeVehicles(g.vehicles);
   // 明细从 vehicles 里拆出来单独放一份：物理只读 upgrades，面板只读 garageMeta
   store.garageMeta = {};
@@ -383,7 +436,6 @@ export function applyDoc(doc) {
     const v = store.upgrades[id];
     store.garageMeta[id] = { odometerM: v.odometerM, runs: v.runs };
   }
-
   // 拥有列表：id → 下标。已经被精简掉的车自然消失，不需要任何额外处理
   store.ownedVehicles = [];
   for (const id of Array.isArray(g.owned) ? g.owned : []) {
@@ -391,57 +443,62 @@ export function applyDoc(doc) {
     if (index >= 0 && !store.ownedVehicles.includes(index)) store.ownedVehicles.push(index);
   }
   if (!store.ownedVehicles.length) store.ownedVehicles = [0];
-
   store.currentVehicle = indexOfVeh(strOr(g.current, ""));
   if (!store.ownedVehicles.includes(store.currentVehicle)) store.currentVehicle = store.ownedVehicles[0];
-
   store.ultra = {};
   for (const id in objOr(g.forms) || {}) {
     if (g.forms[id] === true && indexOfVeh(id) >= 0) store.ultra[id] = true;
   }
 
+  // ---- 主线 ----
   store.unlocked = Math.max(0, Math.min(LEVELS.length - 1, intOr(c.unlocked)));
   store.selLevel = Math.max(0, Math.min(LEVELS.length - 1, intOr(c.sel)));
-  store.stars = (Array.isArray(c.stars) ? c.stars.map(clampStar) : [])
+  // 逐关星级数组是通关进度的事实来源，缺了要从头再来 —— 单独校验并补齐到关卡总数
+  store.stars = (Array.isArray(cp.stars) ? cp.stars.map(clampStar) : [])
     .concat(new Array(LEVELS.length).fill(0)).slice(0, LEVELS.length);
-
+  store.levelRecords = sanitizeLevelRecords(cp.records);
   store.progress.finaleSeg = Math.max(0, Math.min(FINALE_SEGS, intOr(c.finaleSeg)));
   store.progress.finaleDone = c.finaleDone === true;
   store.progress.invited = c.invited === true;
+
+  // ---- 排位 ----
   store.progress.rating = Math.max(0, intOr(r.rating));
   store.progress.wins = Math.max(0, intOr(r.wins));
   store.progress.losses = Math.max(0, intOr(r.losses));
   store.progress.promoClaimed = Math.max(0, intOr(r.promoClaimed));
   store.rankedAdvanced = r.advanced === true;
 
-  store.space = { rating: Math.max(0, intOr(sp.rating)), records: sanitizeRecords(sp.records) };
-  const rec = objOr(doc.records) || {};
-  store.levelRecords = sanitizeLevelRecords(rec.levels);
-  store.raceRecords = sanitizeRaceRecords(rec.races);
-  // ★ 无限模式最佳里程：旧方案里有 bike_best，v5 最初重写时**漏掉了这个字段**，
-  //   于是 store.best 只活在内存里，刷新页面就归零（玩家报告的"无限模式成绩不记录"）。
-  const fr = objOr(rec.free) || {};
+  // ---- 终身累计 ----
+  store.stat.totalRuns = Math.max(0, intOr(ltTotal.runs));
+  store.stat.totalMeters = Math.max(0, intOr(ltTotal.meters));
+  store.stat.totalSeconds = Math.max(0, intOr(ltTotal.seconds));
+  store.stat.lastPlayed = strOr(lt.lastPlayed, "");
+  store.stat.byMode = sanitizeByMode(lt.byMode);
 
-  store.stat.totalRuns = Math.max(0, intOr(l.runs));
-  store.stat.totalMeters = Math.max(0, intOr(l.meters));
-  store.stat.totalSeconds = Math.max(0, intOr(l.seconds));
-  store.stat.lastPlayed = strOr(l.lastPlayed, "");
-  store.stat.byMode = sanitizeByMode(l.byMode);
-
-  // 放在 byMode 赋值**之后**：free 的局数与累计里程是从 byMode.free 派生的，
-  //   顺序反了就会派生出空对象里的 undefined，静默写成 0（成绩凭空消失）。
-  store.space.free = {
-    // ★ 注意括号：intOr 的参数必须是被取出来的**数字**，不是整个对象。
-    //   写成 intOr(obj).runs 时取的是数字的 .runs → undefined →
-    //   Math.max(0, undefined) = NaN → JSON 里写成 null，读回来变 0，成绩凭空消失。
-    runs: Math.max(0, intOr((((store.stat.byMode || {}).free) || {}).runs)),
-    bestMeters: Math.max(0, intOr(fr.bestMeters)),
-    totalMeters: Math.max(0, intOr((((store.stat.byMode || {}).free) || {}).meters)),
-    bestAt: strOr(fr.bestAt, ""),
+  // ---- 宇宙联赛 ----
+  store.space = {
+    rating: Math.max(0, intOr(league.rating)),
+    records: sanitizeRecords(league.records),
+    // 局数与累计里程从 byMode.free 派生（放在 byMode 赋值之后，见函数头注释）
+    free: {
+      runs: Math.max(0, intOr((((store.stat.byMode || {}).free) || {}).runs)),
+      bestMeters: Math.max(0, intOr(free.bestMeters)),
+      totalMeters: Math.max(0, intOr((((store.stat.byMode || {}).free) || {}).meters)),
+      bestAt: strOr(free.bestAt, ""),
+    },
   };
   store.best = store.space.free.bestMeters;
 
-  store.muted = (objOr(doc.settings) || {}).muted === true;
+  // ---- 比赛记录 ----
+  store.raceRecords = sanitizeRaceRecords(d.races);
+
+  // ---- 成就 ----
+  store.achGot = Array.isArray(d.achievements)
+    ? d.achievements.filter((x) => typeof x === "string")
+    : [];
+
+  // ---- 设置 ----
+  store.muted = (objOr(d.settings) || {}).muted === true;
   return true;
 }
 
@@ -502,35 +559,30 @@ function legacyDocFrom(map) {
   const prog = objOr(jsonOr(src[SAVE_KEYS.prog] || "{}", {})) || {};
   const stat = objOr(jsonOr(src[SAVE_KEYS.stat] || "{}", {})) || {};
   const current = legacyIdAt(src[SAVE_KEYS.veh]);
-
+  const cleared = stars.filter((v) => v >= 1).length;
+  const starSum = stars.reduce((n, v) => n + (v > 0 ? v : 0), 0);
   return {
-    app: SAVE_APP,
-    format: SAVE_FORMAT,
-    schema: CUR_SCHEMA,
-    savedAt: nowIso(),
-    migratedFrom: ver > 0 ? ver : LEGACY_MAX_VER,
-    profile: {
-      name: `存档${slotIndex() + 1}`,
-      createdAt: nowIso(),
-      lastPlayed: strOr(stat.lastPlayed, ""),
+    meta: {
+      app: SAVE_APP, format: SAVE_FORMAT, schema: CUR_SCHEMA, savedAt: nowIso(),
+      migratedFrom: ver > 0 ? ver : LEGACY_MAX_VER,
     },
-    wallet: {
-      gold: toPlainDecimal(gold),
-      earned: toPlainDecimal(safeGold(Number(stat.earnedGold) || 0)),
-    },
+    profile: { name: `存档${slotIndex() + 1}`, createdAt: nowIso() },
+    money: { gold: toPlainDecimal(gold) },
     garage: {
       current: current && owned.includes(current) ? current : owned[0],
-      owned,
-      forms,
-      vehicles,
+      owned, forms, vehicles,
     },
     campaign: {
-      unlocked: Math.max(0, intOr(src[SAVE_KEYS.unlocked])),
-      sel: Math.max(0, intOr(src[SAVE_KEYS.sel])),
+      progress: {
+        unlocked: Math.max(0, intOr(src[SAVE_KEYS.unlocked])),
+        sel: Math.max(0, intOr(src[SAVE_KEYS.sel])),
+        cleared, stars: starSum,
+        finaleSeg: Math.max(0, intOr(prog.finaleSeg)),
+        finaleDone: prog.finaleDone === true,
+        invited: prog.invited === true,
+      },
       stars,
-      finaleSeg: Math.max(0, intOr(prog.finaleSeg)),
-      finaleDone: prog.finaleDone === true,
-      invited: prog.invited === true,
+      records: {},
     },
     ranked: {
       rating: Math.max(0, intOr(src[SAVE_KEYS.rating] || prog.rating)),
@@ -539,19 +591,23 @@ function legacyDocFrom(map) {
       promoClaimed: Math.max(0, intOr(prog.promoClaimed)),
       advanced: false,
     },
-    space: { rating: 0, records: {} },
-    records: {
-      levels: {}, races: {},
+    space: {
+      league: { rating: 0, records: {} },
       // 旧方案的无限模式最佳里程在 bike_best 里，迁移时直接接过来，不能丢
       free: { bestMeters: Math.max(0, intOr(src[SAVE_KEYS.best])), bestAt: "" },
     },
+    races: {},
     lifetime: {
-      runs: Math.max(0, intOr(stat.totalRuns || stat.games)),
-      meters: Math.max(0, intOr(stat.totalMeters || stat.dist)),
-      seconds: Math.max(0, intOr(stat.totalSeconds || stat.time)),
+      totals: {
+        runs: Math.max(0, intOr(stat.totalRuns || stat.games)),
+        meters: Math.max(0, intOr(stat.totalMeters || stat.dist)),
+        seconds: Math.max(0, intOr(stat.totalSeconds || stat.time)),
+      },
       lastPlayed: strOr(stat.lastPlayed, ""),
       byMode: {},
     },
+    achievements: Array.isArray(jsonOr(src[SAVE_KEYS.ach] || "[]", []))
+      ? jsonOr(src[SAVE_KEYS.ach] || "[]", []).filter((x) => typeof x === "string") : [],
     settings: { muted: src[SAVE_KEYS.mute] === "1" || src[SAVE_KEYS.mute] === 1 },
   };
 }
@@ -559,16 +615,16 @@ function legacyDocFrom(map) {
 /** 当前槽是否存在旧方案数据（任一非文档键有值即算） */
 function hasLegacyData() {
   for (const k of ALL_KEYS) {
-    if (k === SAVE_KEYS.doc || k === SAVE_KEYS.ach) continue;
+    if (k === SAVE_KEYS.doc) continue;
     if (lsGet(k) !== null) return true;
   }
   return false;
 }
 
-/** 清掉旧方案的键（成就键 bike_ach 保留：它不在文档里，独立于方案演进） */
+/** 迁移成功后清掉旧方案的键（成就键 bike_ach 也清：内容已并入文档的 achievements） */
 function clearLegacyKeys() {
   for (const k of ALL_KEYS) {
-    if (k === SAVE_KEYS.doc || k === SAVE_KEYS.ach) continue;
+    if (k === SAVE_KEYS.doc) continue;
     lsRemove(k);
   }
 }
@@ -612,7 +668,11 @@ function sanitizeRaceRecords(raw) {
 
 export function readDoc() {
   const d = objOr(jsonOr(lsGet(SAVE_KEYS.doc), null));
-  return d && d.app === SAVE_APP ? d : null;
+  if (!d) return null;
+  // ★ app 住在 meta 分组里（结构化之后）—— 留在顶层会每次读档都判为无档，
+  //   玩家一刷新就回到初始状态，而且没有任何报错。旧位置一并认，纯属保险。
+  const app = (objOr(d.meta) || {}).app || d.app;
+  return app === SAVE_APP ? d : null;
 }
 function writeDoc(doc) {
   return lsSet(SAVE_KEYS.doc, JSON.stringify(doc));
@@ -636,9 +696,10 @@ export function loadSave() {
     if (doc) {
       applyDoc(doc);
     } else if (hasLegacyData()) {
+      // bike_ach 一并读进来：成就已经并入文档，迁移时要从它取值
       const legacy = {};
       for (const k of ALL_KEYS) {
-        if (k === SAVE_KEYS.doc || k === SAVE_KEYS.ach) continue;
+        if (k === SAVE_KEYS.doc) continue;
         const v = lsGet(k);
         if (v !== null) legacy[k] = v;
       }
@@ -682,9 +743,9 @@ export function saveProgress() {
 export function saveStat() {
   return save();
 }
+/** 成就已并入文档，这里只需要触发一次整体落盘 */
 export function saveAchList() {
-  // 成就清单仍单独存 bike_ach：它不在文档里，键也不再改动（历史兼容 + 体积小）
-  return lsSet(SAVE_KEYS.ach, JSON.stringify(store.achGot || []));
+  return save();
 }
 
 /** 结算落盘点：刷新阶梯派生态后立即写盘 */
@@ -869,7 +930,16 @@ export function getUp() {
   return store.upgrades[id] || (store.upgrades[id] = { engine: 0, tire: 0, frame: 0, susp: 0 });
 }
 
+/**
+ * 成就清单：**已经在文档的 achievements 里**，这里只在文档没有该字段时才
+ * 从旧键 bike_ach 补一次。
+ *
+ * ★ 不能无条件再读一遍 bike_ach：loadSave 的顺序是 applyDoc → loadAchList，
+ *   无条件读会把刚从文档读出来的成就**覆盖成旧键的内容** ——
+ *   而成就一旦并入文档就不再单独写那个键，于是每次刷新成就都会丢。
+ */
 export function loadAchList() {
+  if (Array.isArray(store.achGot)) return;
   const v = jsonOr(lsGet(SAVE_KEYS.ach) || "[]", []);
   store.achGot = Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
 }
@@ -995,20 +1065,20 @@ export function resetSave() {
 /** 从导入数据里解析进度概览（容错不抛异常），供确认前的对比展示 */
 export function summarizeSave(doc) {
   const d = objOr(doc) || {};
-  const c = objOr(d.campaign) || {};
-  const stars = Array.isArray(c.stars) ? c.stars : [];
+
   let total = 0;
   for (const s of stars) {
     const n = Number(s) || 0;
     if (n > 0) total += n;
   }
   const g = objOr(d.garage) || {};
+  const league = objOr(objOr(d.space) || {}).league;
   return {
     cleared: stars.filter((s) => Number(s) > 0).length,
     stars: total,
     rating: Math.max(0, intOr((objOr(d.ranked) || {}).rating)),
-    spaceRating: Math.max(0, intOr((objOr(d.space) || {}).rating)),
-    gold: safeGold(fromPlainDecimal((objOr(d.wallet) || {}).gold)),
+    spaceRating: Math.max(0, intOr(objOr(league) || {}).rating),
+    gold: safeGold(fromPlainDecimal((objOr(d.money) || {}).gold)),
     vehicles: Array.isArray(g.owned) ? g.owned.length : 0,
   };
 }

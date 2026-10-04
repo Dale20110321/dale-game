@@ -32,7 +32,6 @@ export function addGold(n) {
   // 累计收入（宇宙场金币任务 R3.5 的进度判据）：只增不减，跨局累计。
   // ★ 必须落盘 —— 任务门槛是 ¥8e8，玩家要靠几十局的收入才攒得到，
   //   刷新页面就归零的话任务永远完不成。存在 stat 里随 addStat→saveStat 一起写。
-  store.stat.earnedGold = safeGold((store.stat.earnedGold || 0) + n);
   save();
   if (store.gold >= 5000) checkAch("rich");
 }

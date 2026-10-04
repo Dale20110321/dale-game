@@ -130,8 +130,13 @@ export function spaceQuestState() {
   //   赛道金币），原门槛 ¥8 亿比**全部主线产出高两个数量级** ——
   //   也就是说主线通关根本推不动它，宇宙场对认真玩的人实际是永久锁死的。
   //   ¥5e7 ≈ 通关主线 + 若干场比赛，是"认真玩就能到"而不是"刷到吐"。
-  const need = 5e7;
-  const got = (store.stat && store.stat.earnedGold) || 0;
+  // ★ 判据是「通关 30 关」，由 stars 直接数出来 —— 不需要"累计金币收入"这种字段。
+  //   那个字段唯一的用途就是这一个判据：每次吃金币都要往存档里累加一个
+  //   会一直涨到 1e25 的数，而它答不了任何别的问题（玩家不关心历史总收入，
+  //   余额与车库明细已经覆盖了）。用它当任务进度，代价大、收益只有一处。
+  const need = 30;
+  let got = 0;
+  for (let i = 0; i < store.stars.length; i++) if ((store.stars[i] || 0) >= 1) got++;
   return {
     done: owned,
     hasQuest: !owned,

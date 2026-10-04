@@ -11,10 +11,12 @@ import { drawBoosts, drawCanisters, drawCoins, drawDeco, drawFlag, drawGates, dr
 import { drawParticles } from "./particles.js";
 import { drawBike } from "./bike.js";
 import { drawRacers } from "./racers.js";
+import { inCruiseLayer, drawCruiseBike, drawCruiseRacers, drawCruiseGround } from "./cruise.js";
 import { drawTrail } from "./trail.js";
 import { shakeOffset } from "./camera.js";
 import { drawHud } from "./hud.js";
 import { applyPostFx } from "./postfx.js";
+import { drawSpeedLines } from "./hud.js";
 
 /**
  * @param {number} [dt] 本渲染帧的真实时长（秒）。**渲染层里凡是"逐帧累加"的量
@@ -31,6 +33,20 @@ export function drawScene(dt = 1 / 60) {
   const bcy = cam.y;
   cam.x += off.x;
   cam.y += off.y;
+
+  // ★ 巡航层：缩放小到车只剩几个亚像素时，整层换画法（见 render/cruise.js 的说明）。
+  //   提前 return 掉世界层，是为了让那些 ctx.scale(1e-8) 下的亚像素路径
+  //   **根本不被执行** —— 那正是移动 GPU 上最慢的一段。
+  const cruise = inCruiseLayer();
+  if (cruise) {
+    drawCruiseGround();
+    drawCruiseRacers();
+    drawCruiseBike();
+    drawSpeedLines();
+    applyPostFx(store.time, dt);
+    if (store.state === "play" || store.state === "pause" || store.state === "ended") drawHud();
+    return;
+  }
 
   ctx.save();
   ctx.scale(cam.zoom, cam.zoom);

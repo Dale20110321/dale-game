@@ -106,8 +106,6 @@ export const store = {
     totalSeconds: 0,
     /** 最后游玩时间（ISO 字符串，空串表示尚未游玩） */
     lastPlayed: "",
-    /** 累计金币收入（只增不减）：宇宙场金币任务 R3.5 的进度判据 */
-    earnedGold: 0,
     /**
      * **分模式**统计：{ level|race|ranked|space|free : { runs, meters, seconds } }
      *

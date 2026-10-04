@@ -769,16 +769,16 @@ export function renderSpacePanel() {
       ${card({
         cls: "vehCard",
         icon: "☄️",
-        title: "累计赚取 " + abbrevNum(q.need, { yuan: true }),
-        sub: "完成后可获得基础宇宙车「星环」（价值 ¥100亿 · 极速 28,440 km/h）",
-        meta: `进度 ${abbrevNum(q.got)} / ${abbrevNum(q.need)}（${Math.round(q.progress * 100)}%）`,
+        title: "通关主线 " + q.need + " 关",
+        sub: "完成后可获得基础宇宙车「星环」（极速 28,440 km/h）",
+        meta: `进度 ${q.got} / ${q.need} 关（${Math.round(q.progress * 100)}%）`,
         body: progress(q.progress * 100, { label: "金币任务" }),
         interactive: q.got >= q.need,
         locked: q.got < q.need,
         attrs: q.got >= q.need ? 'data-act="spaceClaim"' : "",
       })}
       ${q.got < q.need
-        ? `<div class="panelNote">金币来自通关、赛道拾取、比赛名次与段位奖励。${pending ? "点击下方返回可稍后再来。" : ""}</div>`
+        ? `<div class="panelNote">任意一次**首次通关**都算数；重玩已通关的关卡不再重复计数。${pending ? "点击下方返回可稍后再来。" : ""}</div>`
         : `<div class="panelNote">✅ 条件已达成，点击上方卡片领取「星环」</div>`}
       <button class="btn backBtn" data-act="back">返回</button>`);
     return;
