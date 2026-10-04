@@ -33,6 +33,18 @@ const CAM_TAU = 0.11;
 const CAM_ZOOM_REF = 700;   // px/s ≈ 25 km/h，此附近不做任何缩放
 const CAM_ZOOM_GAMMA = 0.5;
 const CAM_ZOOM_MIN = 0.32; // 车身总长约 62px，在 0.32 下仍有 20px，肉眼可辨
+/**
+ * 高速时的**动态缩放下限**：保证"一帧位移"不超过屏幕宽度的 CAM_FRAME_SHARE。
+ *
+ * ★ 这是宇宙级车"看起来跑不出来"的直接原因：固定下限 0.32 把视野锁在 ±1km，
+ *   而无相 10 万 km/h 一帧（1/60s）就走 46,096px = **461 米**，一帧跨过屏幕
+ *   宽度的四分之一 —— 车不是在屏幕里"飞快"，而是直接闪出画面，玩家只看到空地。
+ *
+ *   缩放下限必须随速度放开：可见半宽 = (屏半宽)/zoom ≥ 一帧位移 × margin，
+ *   即 zoom ≤ (屏半宽)·60 / (v · margin)。
+ */
+const CAM_FRAME_MARGIN = 1.6; // 车停在屏幕约 62% 处，右侧留出余量
+const CAM_ZOOM_ABS_MIN = 1e-4; // 数值兜底（10 万 km/h 时算出 ~2.5e-3）
 const CAM_ZOOM_LERP = 0.05; // 缩放自身的逼近比例（用 dt 在下面折算）
 
 /** 本帧的车速（px/s，无符号）：用真实系统速度而不是 lerp 平滑过的 bike.speed */
@@ -54,7 +66,15 @@ function speedOf() {
 export function camZoomOf(v, base) {
   if (!(v > CAM_ZOOM_REF)) return base;
   const k = Math.pow(CAM_ZOOM_REF / v, CAM_ZOOM_GAMMA);
-  return Math.max(CAM_ZOOM_MIN, base * k);
+  // 取 base·k 与"保证一帧位移在屏内"的上限里**更小**的那个：
+  //   · 慢速时 base·k 更小 → 维持原有观感，且不低于 CAM_ZOOM_MIN（车身可辨）
+  //   · 高速时可见性上限更小 → 自动让位，车不会再闪出画面
+  // ★ 早期写成 max(下限, base·k) 是反的：10 万 km/h 时 base·k = 0.0222 远大于
+  //   上限 0.0104，下限机制根本没生效，车每帧走 46km 而屏内只有 2km。
+  const halfW = (view.W || 960) * 0.5;
+  const z = Math.max(CAM_ZOOM_MIN, base * k);
+  const visCap = (halfW * 60) / (v * CAM_FRAME_MARGIN);
+  return Math.max(CAM_ZOOM_ABS_MIN, Math.min(z, visCap));
 }
 
 /**
