@@ -63,6 +63,22 @@ export function fromPlainDecimal(s) {
   return Number.isFinite(n) ? n : 0;
 }
 
+/**
+ * 秒 → "m:ss" / "Xs"（本局用时、关卡三星时限）。
+ *
+ * ★ 放这里而不是留在 ui 层：结算卡的「本局用时」由 game/game.js 填值，
+ *   无限模式的结算 toast 也由 game 层拼 —— 而 game 不许 import ui。
+ *   两边各写一份必然漂移（一边 1:05 一边 65.0s），所以提到 utils 作单一出处。
+ *
+ * @param {number} sec 秒
+ * @returns {string}
+ */
+export function fmtClock(sec) {
+  const s = Math.max(0, Math.round(Number(sec) || 0));
+  const m = Math.floor(s / 60);
+  return m > 0 ? m + ":" + String(s % 60).padStart(2, "0") : s + "s";
+}
+
 // ============================================================
 //  数字缩写（R11.3）
 //

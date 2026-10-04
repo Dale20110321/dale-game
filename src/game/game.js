@@ -15,7 +15,7 @@ import { VEHICLES } from "../config/vehicles.js";
 import { store, bike, world } from "../core/store.js";
 import { key } from "../core/input.js";
 import { view } from "../core/canvas.js";
-import { clamp, goldNum } from "../core/utils.js";
+import { clamp, goldNum, fmtClock } from "../core/utils.js";
 import { showToast } from "../core/toast.js";
 import { playCrashSound } from "../core/audio.js";
 import { token } from "../config/ui-tokens.js";
@@ -506,7 +506,11 @@ function endFreeRun(reason) {
   // ★ 里程类成就在这里核对：单次纪录（无限之巅 / 光年之旅）与累计里程
   //   （环游 / 马拉松 / 深空行者）都是本局结算后才有的数。
   syncStateAch();
-  showToast(reason + " · 本次 " + dist + "m" + (record ? " 🏅 新纪录！" : ""), 1600);
+  // ★ 无限模式只弹 toast、不走结算卡（见下方注释），所以"本局用时"必须写在这里 ——
+  //   否则无限模式是全场唯一看不到用时的地方。
+  const secs = Math.max(0, store.time - store.run.levelStartTime - store.run.crashStall);
+  showToast(reason + " · " + dist + "m · " + fmtClock(secs) +
+    (record ? " · 🏅 新纪录！" : ""), 1600);
   setTimeout(runGuard(() => {
     store.state = "menu";
     presenter.toMenu();
@@ -533,13 +537,19 @@ function finishLevel() {
   const run = store.run;
   const L = courseAt(store.selLevel, store.mode);
   run.settling = true;
+  // ★ 本局用时在这里**一次算清、写给所有玩法**。
+  //   过去它只在闯关那一支赋值，比赛 / 排位 / 宇宙场三支都不写，
+  //   结果卡的「本局用时」就永远是「—」—— 玩家看到的不是"这项没做"，
+  //   而是"计时功能没了"。计时是每局都有���，不该按玩法分叉。
+  //   摔车昏迷（crashStall）不计入：那是惩罚，不该让"骑了多久"变长。
+  const elapsed = store.time - run.levelStartTime - run.crashStall;
   // 结算结果卡：由 presenter 注入到 ui 层渲染（game 不 import ui）
   const result = {
     title: "🏁 本局结束",
     stars: undefined,
     goldGain: 0,
     goldTotal: 0,
-    time: undefined,
+    time: elapsed,
     nextLabel: "下一关 →",
   };
   if (store.mode === "race" && !store.raceRanked) {
@@ -607,17 +617,17 @@ function finishLevel() {
       1800, won ? "success" : "warn"
     );
   } else if (store.mode === "level") {
-    // 计时惩罚（摔车）计入本关用时，直接影响三星时限。
-    // ★ 必须**先声明再用**：下面 noteLevelRun 那一行原本写在 const 之前，
-    //   于是每次普通关卡通关都抛 ReferenceError（TDZ），finishLevel 整个中断 ——
-    //   表现就是"骑过终点却不算过关"，星级、金币、解锁全都没写。
-    const elapsed = store.time - run.levelStartTime + run.penaltyTime;
+    // ★ 逐关记录与三星判定用的是**另一套口径**：elapsedScore = 全程墙钟 + 摔车时间惩罚。
+    //   与上面写给结果卡的 elapsed（纯骑行、不含昏迷）刻意不同 ——
+    //   展示给玩家的是"你骑了多久"，拿去评星的是"这一关总共花了多少代价"。
+    //   这个式子与三星门槛的标定口径逐字一致，别顺手改成 elapsed。
+    const elapsedScore = store.time - run.levelStartTime + run.penaltyTime;
     // 逐关记录：最佳用时 / 最佳金币在这里一次性写回
-    noteLevelRun(store.selLevel, { done: true, ms: elapsed * 1000, coins: run.coinGot });
+    noteLevelRun(store.selLevel, { done: true, ms: elapsedScore * 1000, coins: run.coinGot });
     const ratio = run.totalCoins > 0 ? run.coinGot / run.totalCoins : 1;
     let s = 1;
     if (ratio >= 0.7) s = 2;
-    if (elapsed < L.len / L.den3) s = 3; // 三星时限按关卡分层
+    if (elapsedScore < L.len / L.den3) s = 3; // 三星时限按关卡分层
     store.stars[store.selLevel] = Math.max(store.stars[store.selLevel] || 0, s);
     if (store.selLevel >= store.unlocked && store.selLevel < LEVELS.length - 1) {
       store.unlocked = store.selLevel + 1;
@@ -637,7 +647,6 @@ function finishLevel() {
     result.title = "🏁 通关";
     result.stars = s;
     result.goldGain = L.goldBase;
-    result.time = elapsed;
     result.nextLabel = store.selLevel < LEVELS.length - 1 ? "下一关 →" : "🏠 返回菜单";
     if (!run.hasCrashed) checkAch("noc");
     if (run.totalCoins > 0 && run.coinGot >= run.totalCoins) checkAch("coinall");
@@ -829,10 +838,15 @@ export function update(dt) {
     raceUpdate(dt);
     if (store.raceAI && store.raceAI.finish && !run.settling) {
       run.settling = true;
+      // ★ 这条路**不走结算卡**（900ms 后自动进下一场），所以"本局用时"必须
+      //   写进 toast —— 否则输掉一场比赛就是全场唯一看不到用时的地方，
+      //   玩家会以为计时功能又坏了。
+      const lost = fmtClock(Math.max(0, store.time - run.levelStartTime - run.crashStall));
       if (store.raceRanked) {
         settleRanked(false); // 对手先到终点 → 排位判负，立即结算段位分
+        showToast("😵 对手先到终点！本局 " + lost, 1400, "warn");
       } else {
-        showToast("😵 对手先到终点！");
+        showToast("😵 对手先到终点！本局 " + lost, 1400, "warn");
       }
       setTimeout(runGuard(() => nextLevel()), 900);
     }

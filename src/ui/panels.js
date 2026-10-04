@@ -17,7 +17,7 @@ import {
 } from "../config/levels.js";
 import { VEHICLES } from "../config/vehicles.js";
 import { store, uiHooks } from "../core/store.js";
-import { abbrevNum, goldNum } from "../core/utils.js";
+import { abbrevNum, goldNum, fmtClock } from "../core/utils.js";
 import {
   save, downloadSave, parseSave, importSave, resetSave,
   isStorageAvailable, availableFreeThemes, isAdvancedUnlocked, takeLoadError,
@@ -425,13 +425,6 @@ function firstLockedK(bi) {
 
 
 // ---------------- 格式化 ----------------
-
-/** 秒 → "m:ss" / "Xs"（关卡三星时限） */
-function fmtClock(sec) {
-  const s = Math.max(0, Math.round(Number(sec) || 0));
-  const m = Math.floor(s / 60);
-  return m > 0 ? m + ":" + String(s % 60).padStart(2, "0") : s + "s";
-}
 
 /** 米 → "km"（累计里程） */
 function fmtKm(m) {
