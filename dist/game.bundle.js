@@ -3685,7 +3685,7 @@ function blankStoreState() {
     promoClaimed: 0,
     freeThemes: []
   };
-  store.space = { rating: 0, records: {} };
+  store.space = { rating: 0, records: {}, free: { runs: 0, bestMeters: 0, totalMeters: 0, bestAt: "" } };
   store.levelRecords = {};
   store.raceRecords = {};
   store.stat = {
@@ -3745,7 +3745,7 @@ function sanitizeRecords(raw) {
     const o = objOr(src[key]);
     if (!o || !/^L\d+-[ABC]-\d+$/.test(key))
       continue;
-    out[key] = { runs: Math.max(0, intOr(o.runs)), wins: Math.max(0, intOr(o.wins)), best: Math.max(0, intOr(o.best)) };
+    out[key] = { runs: Math.max(0, intOr(o.runs)), wins: Math.max(0, intOr(o.wins)), best: Math.max(0, intOr(o.best)), lastAt: strOr(o.lastAt, "") };
   }
   return out;
 }
@@ -3819,7 +3819,11 @@ function buildDoc() {
     },
     records: {
       levels: { ...store.levelRecords || {} },
-      races: { ...store.raceRecords || {} }
+      races: { ...store.raceRecords || {} },
+      free: {
+        bestMeters: Math.max(0, intOr(store.best), intOr((store.space.free || {}).bestMeters)),
+        bestAt: strOr((store.space.free || {}).bestAt, "")
+      }
     },
     lifetime: {
       runs: Math.max(0, intOr(s.totalRuns)),
@@ -3881,11 +3885,19 @@ function applyDoc(doc) {
   const rec = objOr(doc.records) || {};
   store.levelRecords = sanitizeLevelRecords(rec.levels);
   store.raceRecords = sanitizeRaceRecords(rec.races);
+  const fr = objOr(rec.free) || {};
   store.stat.totalRuns = Math.max(0, intOr(l.runs));
   store.stat.totalMeters = Math.max(0, intOr(l.meters));
   store.stat.totalSeconds = Math.max(0, intOr(l.seconds));
   store.stat.lastPlayed = strOr(l.lastPlayed, "");
   store.stat.byMode = sanitizeByMode(l.byMode);
+  store.space.free = {
+    runs: Math.max(0, intOr(((store.stat.byMode || {}).free || {}).runs)),
+    bestMeters: Math.max(0, intOr(fr.bestMeters)),
+    totalMeters: Math.max(0, intOr(((store.stat.byMode || {}).free || {}).meters)),
+    bestAt: strOr(fr.bestAt, "")
+  };
+  store.best = store.space.free.bestMeters;
   store.muted = (objOr(doc.settings) || {}).muted === true;
   return true;
 }
@@ -3971,6 +3983,11 @@ function legacyDocFrom(map) {
       advanced: false
     },
     space: { rating: 0, records: {} },
+    records: {
+      levels: {},
+      races: {},
+      free: { bestMeters: Math.max(0, intOr(src[SAVE_KEYS.best])), bestAt: "" }
+    },
     lifetime: {
       runs: Math.max(0, intOr(stat.totalRuns || stat.games)),
       meters: Math.max(0, intOr(stat.totalMeters || stat.dist)),
@@ -4025,7 +4042,7 @@ function sanitizeRaceRecords(raw) {
     const o = objOr(src[k]);
     if (!o || !/^\d+-\d+$/.test(k))
       continue;
-    out[k] = { runs: Math.max(0, intOr(o.runs)), wins: Math.max(0, intOr(o.wins)), best: Math.max(0, intOr(o.best)) };
+    out[k] = { runs: Math.max(0, intOr(o.runs)), wins: Math.max(0, intOr(o.wins)), best: Math.max(0, intOr(o.best)), lastAt: strOr(o.lastAt, "") };
   }
   return out;
 }
@@ -4184,8 +4201,9 @@ function noteVehicleRun(id, meters) {
   return m;
 }
 function noteSpaceResult(key, place, won) {
-  const rec = store.space.records[key] || (store.space.records[key] = { runs: 0, wins: 0, best: 0 });
+  const rec = store.space.records[key] || (store.space.records[key] = { runs: 0, wins: 0, best: 0, lastAt: "" });
   rec.runs += 1;
+  rec.lastAt = nowIso();
   if (won)
     rec.wins += 1;
   if (place > 0 && (rec.best === 0 || place < rec.best))
@@ -4209,8 +4227,9 @@ function noteLevelRun(gi, o) {
 }
 function noteRaceRun(fmtIdx, ranked, place, won) {
   const k = intOr(fmtIdx) + "-" + (ranked ? 1 : 0);
-  const rec = store.raceRecords[k] || (store.raceRecords[k] = { runs: 0, wins: 0, best: 0 });
+  const rec = store.raceRecords[k] || (store.raceRecords[k] = { runs: 0, wins: 0, best: 0, lastAt: "" });
   rec.runs += 1;
+  rec.lastAt = nowIso();
   if (won)
     rec.wins += 1;
   if (place > 0 && (rec.best === 0 || place < rec.best))
@@ -6986,8 +7005,13 @@ function endFreeRun(reason) {
   let record = false;
   if (dist > store.best) {
     store.best = dist;
+    store.space.free.runs += 1;
+    store.space.free.bestMeters = dist;
+    store.space.free.bestAt = new Date().toISOString();
     save();
     record = true;
+  } else {
+    store.space.free.runs += 1;
   }
   store.state = "ended";
   store.run.settling = true;
@@ -11294,6 +11318,76 @@ function currentSummary() {
     gold: store.gold || 0
   };
 }
+function dossierHtml() {
+  const F = store.space.free || {};
+  const lv = store.levelRecords || {};
+  const race = store.raceRecords || {};
+  const sp = store.space.records || {};
+  let bestLv = null;
+  let fastest = 0;
+  let fewest = Infinity;
+  for (let gi = 0;gi < LEVELS.length; gi++) {
+    const r = lv[gi];
+    if (!r || !r.tries)
+      continue;
+    if (r.bestMs > 0 && (fastest === 0 || r.bestMs < fastest)) {
+      fastest = r.bestMs;
+      bestLv = gi;
+    }
+    if (r.tries < fewest)
+      fewest = r.tries;
+  }
+  const lvDone = Object.keys(lv).filter((k) => lv[k].bestMs > 0).length;
+  const raceRows = Object.keys(race).map((k) => {
+    const r = race[k];
+    const [f, t] = k.split("-");
+    const fName = (RACE_FORMATS[RACE_FORMAT_IDS[+f]] || {}).name || "赛制 " + f;
+    return [
+      fName + (t === "1" ? " · 排位" : ""),
+      r.runs + " 局",
+      r.best ? "最好第 " + r.best + " 名" : "未进过前三",
+      r.wins + " 胜",
+      r.lastAt ? fmtDate(r.lastAt).slice(5, 16) : "—"
+    ];
+  });
+  const spaceRows = Object.keys(sp).slice(0, 6).map((k) => {
+    const r = sp[k];
+    const parts = k.split("-");
+    const L = SPACE_LEAGUES.find((x) => x.id === parts[0]);
+    const D = SPACE_DIVS.find((x) => x.id === parts[1]);
+    const Ra = SPACE_RACES[+parts[2]];
+    return [
+      (L ? L.name : parts[0]) + " " + (D ? D.name : "") + "区 · " + (Ra ? Ra.name : ""),
+      r.runs + " 局",
+      r.best ? "最好第 " + r.best + " 名" : "—",
+      r.wins + " 胜",
+      r.lastAt ? fmtDate(r.lastAt).slice(5, 16) : "—"
+    ];
+  });
+  const rows = [];
+  rows.push([
+    "∞ 无限模式",
+    F.runs + " 局",
+    F.bestMeters ? "最佳 " + fmtKm(F.bestMeters) : "尚无纪录",
+    "累计 " + fmtKm(F.totalMeters),
+    F.bestAt ? fmtDate(F.bestAt).slice(0, 10) : "—"
+  ]);
+  if (bestLv !== null) {
+    rows.push([
+      "⛳ 关卡最快三星",
+      LEVELS[bestLv].name,
+      (fastest / 1000).toFixed(1) + " 秒",
+      "全 " + lvDone + " 关有记录",
+      "—"
+    ]);
+  }
+  rows.forEach((r) => raceRows.push(r));
+  spaceRows.forEach((r) => rows.push(r));
+  if (rows.length <= 1) {
+    return '<div class="brHead">\uD83D\uDDC2 详细档案</div>' + '<div class="panelNote">还没有成绩记录 —— 跑一局闯关或无限模式，这里就会记下用时、里程与名次。</div>';
+  }
+  return '<div class="brHead">\uD83D\uDDC2 详细档案 · 成绩明细</div>' + '<table class="dossier"><thead><tr><th>项目</th><th>次数</th><th>最佳</th><th>补充</th><th>时间</th></tr></thead><tbody>' + rows.map((r) => "<tr>" + r.map((c) => "<td>" + c + "</td>").join("") + "</tr>").join("") + "</tbody></table>";
+}
 var MODE_LABEL = { level: "闯关", race: "比赛", ranked: "排位", space: "宇宙联赛", free: "无限" };
 function modeStatHtml(st) {
   const by = st.byMode || {};
@@ -11348,7 +11442,7 @@ function renderSavePanel() {
     { label: "最后游玩", value: fmtDate(st.lastPlayed) },
     { label: "存档建立", value: fmtDate(store.createdAt) }
   ])}
-  ${modeStatHtml(st)}
+  ${dossierHtml()}${modeStatHtml(st)}
   ${stor ? "" : `<div class="panelNote">⚠️ 浏览器存储不可用（隐私模式 / 空间已满 / 被禁用）：本次无法保存进度，导出 / 导入 / 重置均不可用</div>`}
   <div class="brHead">\uD83C\uDF9A 画面设置 · 画质</div>
   <div class="tabs" role="tablist">${QUALITY.map((q) => `<button class="tab" role="tab" data-act="quality" data-q="${q}" aria-selected="${q === getQuality()}" aria-label="画质 ${QUALITY_LABEL[q]}">${QUALITY_LABEL[q]}</button>`).join("")}</div>

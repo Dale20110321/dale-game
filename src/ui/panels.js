@@ -1211,6 +1211,72 @@ function currentSummary() {
  * ★ 为什么值得单独摆一张表：全局的"总局数 / 总里程 / 总时长"只回答"我玩了多久"，
  *   玩家真正要判断的是"该继续刷哪里" —— 而那需要知道时间到底花在哪种玩法上。
  */
+/**
+ * 详细档案：把散落在存档各处的**成绩**汇到一屏。
+ *
+ * ★ 为什么单独做一块：v5 存档里成绩分属 campaign / ranked / space / records 四个分区，
+ *   而玩家想回答的却是同一个问题 —— "我在哪儿刷得最好"。这张表就是那个问题的答案，
+ *   也是"存档是不是真的记了东西"最直接的证据。
+ *   每一行都是"试过几次 / 最好多少 / 上次什么时候"，不是只有一个累计值。
+ */
+function dossierHtml() {
+  const F = store.space.free || {};
+  const lv = store.levelRecords || {};
+  const race = store.raceRecords || {};
+  const sp = store.space.records || {};
+
+  // 逐关：三星最快、最少尝试、最高金币
+  let bestLv = null;
+  let fastest = 0;
+  let fewest = Infinity;
+  for (let gi = 0; gi < LEVELS.length; gi++) {
+    const r = lv[gi];
+    if (!r || !r.tries) continue;
+    if (r.bestMs > 0 && (fastest === 0 || r.bestMs < fastest)) { fastest = r.bestMs; bestLv = gi; }
+    if (r.tries < fewest) fewest = r.tries;
+  }
+  const lvDone = Object.keys(lv).filter((k) => lv[k].bestMs > 0).length;
+
+  const raceRows = Object.keys(race).map((k) => {
+    const r = race[k];
+    const [f, t] = k.split("-");
+    const fName = (RACE_FORMATS[RACE_FORMAT_IDS[+f]] || {}).name || ("赛制 " + f);
+    return [fName + (t === "1" ? " · 排位" : ""), r.runs + " 局",
+      (r.best ? "最好第 " + r.best + " 名" : "未进过前三"),
+      r.wins + " 胜", r.lastAt ? fmtDate(r.lastAt).slice(5, 16) : "—"];
+  });
+
+  const spaceRows = Object.keys(sp).slice(0, 6).map((k) => {
+    const r = sp[k];
+    const parts = k.split("-");
+    const L = SPACE_LEAGUES.find((x) => x.id === parts[0]);
+    const D = SPACE_DIVS.find((x) => x.id === parts[1]);
+    const Ra = SPACE_RACES[+parts[2]];
+    return [(L ? L.name : parts[0]) + " " + (D ? D.name : "") + "区 · " + (Ra ? Ra.name : ""),
+      r.runs + " 局", (r.best ? "最好第 " + r.best + " 名" : "—"), r.wins + " 胜",
+      r.lastAt ? fmtDate(r.lastAt).slice(5, 16) : "—"];
+  });
+
+  const rows = [];
+  rows.push(["∞ 无限模式", F.runs + " 局",
+    F.bestMeters ? "最佳 " + fmtKm(F.bestMeters) : "尚无纪录",
+    "累计 " + fmtKm(F.totalMeters), F.bestAt ? fmtDate(F.bestAt).slice(0, 10) : "—"]);
+  if (bestLv !== null) {
+    rows.push(["⛳ 关卡最快三星", LEVELS[bestLv].name,
+      (fastest / 1000).toFixed(1) + " 秒", "全 " + lvDone + " 关有记录", "—"]);
+  }
+  rows.forEach((r) => raceRows.push(r));
+  spaceRows.forEach((r) => rows.push(r));
+  if (rows.length <= 1) {
+    return '<div class="brHead">🗂 详细档案</div>' +
+      '<div class="panelNote">还没有成绩记录 —— 跑一局闯关或无限模式，这里就会记下用时、里程与名次。</div>';
+  }
+  return '<div class="brHead">🗂 详细档案 · 成绩明细</div>' +
+    '<table class="dossier"><thead><tr><th>项目</th><th>次数</th><th>最佳</th><th>补充</th><th>时间</th></tr></thead><tbody>' +
+    rows.map((r) => "<tr>" + r.map((c) => "<td>" + c + "</td>").join("") + "</tr>").join("") +
+    "</tbody></table>";
+}
+
 const MODE_LABEL = { level: "闯关", race: "比赛", ranked: "排位", space: "宇宙联赛", free: "无限" };
 function modeStatHtml(st) {
   const by = st.byMode || {};
@@ -1271,7 +1337,7 @@ export function renderSavePanel() {
     { label: "最后游玩", value: fmtDate(st.lastPlayed) },
     { label: "存档建立", value: fmtDate(store.createdAt) },
   ])}
-  ${modeStatHtml(st)}
+  ${dossierHtml()}${modeStatHtml(st)}
   ${stor ? "" : `<div class="panelNote">⚠️ 浏览器存储不可用（隐私模式 / 空间已满 / 被禁用）：本次无法保存进度，导出 / 导入 / 重置均不可用</div>`}
   <div class="brHead">🎚 画面设置 · 画质</div>
   <div class="tabs" role="tablist">${QUALITY.map((q) =>

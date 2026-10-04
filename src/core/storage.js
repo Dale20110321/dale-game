@@ -204,7 +204,7 @@ function blankStoreState() {
     branchCleared: [], finaleDone: false, finaleSeg: 0, invited: false,
     rating: 0, wins: 0, losses: 0, peak: false, promoClaimed: 0, freeThemes: [],
   };
-  store.space = { rating: 0, records: {} };
+  store.space = { rating: 0, records: {}, free: { runs: 0, bestMeters: 0, totalMeters: 0, bestAt: "" } };
   store.levelRecords = {};
   store.raceRecords = {};
   store.stat = {
@@ -254,13 +254,20 @@ function sanitizeRecords(raw) {
     const o = objOr(src[key]);
     // 赛事键的形状固定为 "联赛下标-分区-赛次"，越界的键一律丢弃
     if (!o || !/^L\d+-[ABC]-\d+$/.test(key)) continue;
-    out[key] = { runs: Math.max(0, intOr(o.runs)), wins: Math.max(0, intOr(o.wins)), best: Math.max(0, intOr(o.best)) };
+    out[key] = { runs: Math.max(0, intOr(o.runs)), wins: Math.max(0, intOr(o.wins)), best: Math.max(0, intOr(o.best)), lastAt: strOr(o.lastAt, "") };
   }
   return out;
 }
 
 /** store → 存档文档（唯一序列化出口） */
 export function buildDoc() {
+  // ★ 先把两个记同一件事的字段对齐：store.best（HUD 与无限模式面板在读）
+  //   与 store.space.free.bestMeters（records.free 在读）。它们历史上是分开的，
+  //   于是"写盘时内存态不一致、读盘后却一致"，成绩看起来像凭空跳了一下。
+  //   在唯一的序列化出口做对齐，任何调用方都不必记得手动同步。
+  store.space.free = store.space.free || { runs: 0, bestMeters: 0, totalMeters: 0, bestAt: "" };
+  store.space.free.bestMeters = Math.max(0, intOr(store.best), intOr(store.space.free.bestMeters));
+  store.best = store.space.free.bestMeters;
   const vehicles = {};
   const owned = [];
   for (const index of store.ownedVehicles || []) {
@@ -325,9 +332,22 @@ export function buildDoc() {
       rating: Math.max(0, intOr((store.space || {}).rating)),
       records: { ...((store.space || {}).records || {}) },
     },
+    // ★ 成绩段：每种成绩都记"试过几次 / 最好多少 / 上次什么时候"，
+    //   而不是只堆一个累计值 —— 只有累计值的话，玩家永远看不出"再刷一次有没有意义"。
     records: {
       levels: { ...(store.levelRecords || {}) },
       races: { ...(store.raceRecords || {}) },
+      // ★ 只存"跑赢不掉"的那两项：最佳里程与达成时间。
+      //   局数与累计里程**不重复存** —— 它们已经在 lifetime.byMode.free 里，
+      //   两处都存就会出现两份事实来源，而派生时一个字段算错就静默写出 NaN
+      //   （JSON 里表现为 null，读回来变 0，成绩凭空消失）。
+      free: {
+        // ★ 两个来源都读：store.best 是 HUD / 无限模式面板在用的那份，
+        //   space.free.bestMeters 是本段自己的那份。取较大值而不是二选一 ——
+        //   只在一侧被写入时（老存档、手改档）也能保住纪录不丢。
+        bestMeters: Math.max(0, intOr(store.best), intOr((store.space.free || {}).bestMeters)),
+        bestAt: strOr((store.space.free || {}).bestAt, ""),
+      },
     },
     lifetime: {
       runs: Math.max(0, intOr(s.totalRuns)),
@@ -398,12 +418,28 @@ export function applyDoc(doc) {
   const rec = objOr(doc.records) || {};
   store.levelRecords = sanitizeLevelRecords(rec.levels);
   store.raceRecords = sanitizeRaceRecords(rec.races);
+  // ★ 无限模式最佳里程：旧方案里有 bike_best，v5 最初重写时**漏掉了这个字段**，
+  //   于是 store.best 只活在内存里，刷新页面就归零（玩家报告的"无限模式成绩不记录"）。
+  const fr = objOr(rec.free) || {};
 
   store.stat.totalRuns = Math.max(0, intOr(l.runs));
   store.stat.totalMeters = Math.max(0, intOr(l.meters));
   store.stat.totalSeconds = Math.max(0, intOr(l.seconds));
   store.stat.lastPlayed = strOr(l.lastPlayed, "");
   store.stat.byMode = sanitizeByMode(l.byMode);
+
+  // 放在 byMode 赋值**之后**：free 的局数与累计里程是从 byMode.free 派生的，
+  //   顺序反了就会派生出空对象里的 undefined，静默写成 0（成绩凭空消失）。
+  store.space.free = {
+    // ★ 注意括号：intOr 的参数必须是被取出来的**数字**，不是整个对象。
+    //   写成 intOr(obj).runs 时取的是数字的 .runs → undefined →
+    //   Math.max(0, undefined) = NaN → JSON 里写成 null，读回来变 0，成绩凭空消失。
+    runs: Math.max(0, intOr((((store.stat.byMode || {}).free) || {}).runs)),
+    bestMeters: Math.max(0, intOr(fr.bestMeters)),
+    totalMeters: Math.max(0, intOr((((store.stat.byMode || {}).free) || {}).meters)),
+    bestAt: strOr(fr.bestAt, ""),
+  };
+  store.best = store.space.free.bestMeters;
 
   store.muted = (objOr(doc.settings) || {}).muted === true;
   return true;
@@ -504,6 +540,11 @@ function legacyDocFrom(map) {
       advanced: false,
     },
     space: { rating: 0, records: {} },
+    records: {
+      levels: {}, races: {},
+      // 旧方案的无限模式最佳里程在 bike_best 里，迁移时直接接过来，不能丢
+      free: { bestMeters: Math.max(0, intOr(src[SAVE_KEYS.best])), bestAt: "" },
+    },
     lifetime: {
       runs: Math.max(0, intOr(stat.totalRuns || stat.games)),
       meters: Math.max(0, intOr(stat.totalMeters || stat.dist)),
@@ -564,7 +605,7 @@ function sanitizeRaceRecords(raw) {
   for (const k in src) {
     const o = objOr(src[k]);
     if (!o || !/^\d+-\d+$/.test(k)) continue;
-    out[k] = { runs: Math.max(0, intOr(o.runs)), wins: Math.max(0, intOr(o.wins)), best: Math.max(0, intOr(o.best)) };
+    out[k] = { runs: Math.max(0, intOr(o.runs)), wins: Math.max(0, intOr(o.wins)), best: Math.max(0, intOr(o.best)), lastAt: strOr(o.lastAt, "") };
   }
   return out;
 }
@@ -778,8 +819,9 @@ export function noteVehicleRun(id, meters) {
  * @param {number} place 最终名次（1 起；0 = 未完赛）
  */
 export function noteSpaceResult(key, place, won) {
-  const rec = store.space.records[key] || (store.space.records[key] = { runs: 0, wins: 0, best: 0 });
+  const rec = store.space.records[key] || (store.space.records[key] = { runs: 0, wins: 0, best: 0, lastAt: "" });
   rec.runs += 1;
+  rec.lastAt = nowIso();
   if (won) rec.wins += 1;
   if (place > 0 && (rec.best === 0 || place < rec.best)) rec.best = place;
   return rec;
@@ -813,8 +855,9 @@ export function noteLevelRun(gi, o) {
  */
 export function noteRaceRun(fmtIdx, ranked, place, won) {
   const k = intOr(fmtIdx) + "-" + (ranked ? 1 : 0);
-  const rec = store.raceRecords[k] || (store.raceRecords[k] = { runs: 0, wins: 0, best: 0 });
+  const rec = store.raceRecords[k] || (store.raceRecords[k] = { runs: 0, wins: 0, best: 0, lastAt: "" });
   rec.runs += 1;
+  rec.lastAt = nowIso();
   if (won) rec.wins += 1;
   if (place > 0 && (rec.best === 0 || place < rec.best)) rec.best = place;
   return rec;

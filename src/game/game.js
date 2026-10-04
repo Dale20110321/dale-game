@@ -478,8 +478,13 @@ function endFreeRun(reason) {
   let record = false;
   if (dist > store.best) {
     store.best = dist;
+    store.space.free.runs += 1;
+    store.space.free.bestMeters = dist;
+    store.space.free.bestAt = new Date().toISOString();
     save();
     record = true;
+  } else {
+    store.space.free.runs += 1;
   }
   store.state = "ended";
   store.run.settling = true;

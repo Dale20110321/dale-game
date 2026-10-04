@@ -1174,3 +1174,13 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 /* 主页面顶部的最终任务卡（锁定时也显示进度，给出终极目标感） */
 .finaleTile { width: 100%; }
 .finaleTile .cardHead { width: 100%; }
+
+
+/* 详细档案表：成绩明细。列宽固定，让"最佳"那一列在一屏里对齐可扫 */
+.dossier { width: 100%; border-collapse: collapse; margin: var(--space-2) 0; font-size: var(--font-caption-size); }
+.dossier th { text-align: left; color: var(--text-lo); font-weight: 600; padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--glass-border); white-space: nowrap; }
+.dossier td { padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--scrim); color: var(--text-mid); }
+.dossier td:first-child { color: var(--text-hi); }
+.dossier td:nth-child(3) { color: var(--gold); font-variant-numeric: tabular-nums; }
+.dossier td:last-child { color: var(--text-lo); white-space: nowrap; }

@@ -62,6 +62,11 @@ bike_rating / bike_prog / bike_stat / bike_ultra / bike_sel / …
   },
   "campaign": { "unlocked": 431, "sel": 12, "stars": [ … 432 项 … ],
                 "finaleSeg": 0, "finaleDone": true, "invited": true },
+  "records": {                                 // ← 成绩段：每项都是"次数 / 最佳 / 上次时间"
+    "levels": { "0": { "tries": 7, "bestMs": 42300, "bestCoins": 34, "lastAt": "…" } },
+    "races":  { "1-0": { "runs": 9, "wins": 6, "best": 1, "lastAt": "…" } },   // 赛制-档位
+    "free":   { "bestMeters": 9876500, "bestAt": "…" }                        // 无限模式最佳里程
+  },
   "ranked":   { "rating": 1350, "wins": 7, "losses": 2, "promoClaimed": 1350, "advanced": false },
   "space":    { "rating": 480, "records": { "L2-B-1": { "runs": 9, "wins": 6, "best": 1 } } },
   "lifetime": { "runs": 132, "meters": 123456, "seconds": 7321, "lastPlayed": "…",
@@ -76,6 +81,10 @@ bike_rating / bike_prog / bike_stat / bike_ultra / bike_sel / …
 2. **金币存完整十进制字符串**。余额会到 1e25 量级，`String()` 在那个量级输出 `"1e+25"`，任何按十进制读的路径都会解析成另一个数（本项目历史上因此丢过档）。
 3. 每次写入 = **一次** `localStorage.setItem`，内容是整份文档。
 4. `migratedFrom` 记录来源版本号，玩家能从存档里看出来历。
+5. **成绩段（`records`）只存"跑赢不掉"的东西**：最佳值 + 达成时间 + 次数。
+   凡是能从别处无歧义派生的量一律不存（无限模式的局数与累计里程就在
+   `lifetime.byMode.free` 里，重复存就会出现两份事实来源，而派生时算错一个字段
+   就静默写成 `null`，读回来变 0，成绩凭空消失 —— 踩过一次，见下面第 5 节）。
 
 ## 4. 迁移路径（当前仍在跑）
 
@@ -94,6 +103,19 @@ bike_rating / bike_prog / bike_stat / bike_ultra / bike_sel / …
 旧下标 → 车辆 id 的对照表是 `LEGACY_VEHICLE_IDS`，记录 2026-10 精简**之前**的 33 辆车顺序。被精简掉的车的数据随迁移一并丢弃（它们已经不存在了，没有别的去处）。
 
 导入（`parseSave` / `importSave`）**同时接受两种格式**：`format: 2`（文档）与 `format: 1`（裸键），后者当场转成文档。玩家存了好几年的老导出文件不会作废。
+
+## 4.5 写这份文档时踩过的两个坑（都表现为"成绩自己消失了"）
+
+1. **括号错位**：`intOr(obj).runs` 取的是数字的 `.runs` → `undefined`
+   → `Math.max(0, undefined)` = `NaN` → `JSON.stringify` 写成 `null`
+   → 读回来 `intOr(null)` = 0。**表现是纪录归零，且没有任何报错。**
+   凡是 `intOr(...)` 后面还跟着 `.字段`，确认括号包的是**字段本身**。
+2. **派生早于来源**：`applyDoc` 里先算 `space.free.runs`（从 `stat.byMode.free` 派生），
+   后赋值 `stat.byMode` —— 派生的对象还是空的，于是静默得到 0。
+   **凡是"从 X 派生"的赋值，必须排在 X 的赋值之后。**
+
+另外 `store.best` 与 `store.space.free.bestMeters` 记的是同一件事。
+现在统一在 `buildDoc()` 这个唯一的序列化出口对齐，任何调用方都不必手动同步。
 
 ## 5. ⚠️ 下一个开发周期：把兼容层删掉
 
