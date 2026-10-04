@@ -24,3 +24,7 @@ tmp_*.mjs
 tmp_*.js
 tmp_*.txt
 tmp_*.png
+
+# 审查 agent 的实测脚本（写在仓库根而非 tmp/），不应进版本库
+.audit-*/
+.audit-*.mjs
