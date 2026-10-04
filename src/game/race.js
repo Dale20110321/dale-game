@@ -12,7 +12,7 @@
 //  · 排位赛（ranked）：基准 rankedAIScale(rating, advanced)×den3，不带追赶——
 //    段位赛是纯粹的配速检验，段位越高越接近、乃至超过三星节奏。
 import { START_X, RATING_PEAK, RATING_TOP, RACE_FORMATS, PLAYER_TEAM, RIVAL_TEAM, racePlaceOf, buildRacers } from "../config/constants.js";
-import { courseAt, spaceAIScale, spaceAIJitter, SPACE_TIERS, spaceTierOf } from "../config/levels.js";
+import { courseAt, spaceAIJitter, spaceDefOf } from "../config/levels.js";
 import { store, bike } from "../core/store.js";
 import { groundInfo } from "../physics/terrain.js";
 import { emitParticles } from "../render/particles.js";
@@ -85,6 +85,12 @@ export function raceFormat() {
   return (id && RACE_FORMATS[id]) || RACE_FORMATS.duel;
 }
 
+/** 面板上玩家选中的赛制（与 raceFormat 分离，见 store 的注释） */
+export function raceFormatPick() {
+  const id = store.raceFormatPick;
+  return (id && RACE_FORMATS[id]) ? id : "duel";
+}
+
 /**
  * 决定胜负的那个对手（纯函数）：非团赛取全场最靠前者，团赛取**对手队**最靠前者。
  * game.js / HUD 都只看这一个对象，所以"6 人场"不需要改任何下游判定逻辑。
@@ -115,7 +121,9 @@ export function racePlace(list, playerX) {
  */
 export function raceInit(format, keepFormat) {
   const f = format && RACE_FORMATS[format] ? format : "duel";
-  if (!keepFormat) store.raceFormat = f;
+  store.raceFormat = f;
+  // keepFormat 只保护"面板上的选择"，不保护"本局生效的赛制" —— 后者必须跟着本局走
+  if (!keepFormat) store.raceFormatPick = f;
   const built = buildRacers(f);
   store.racers = built.r;
   store.raceAI = raceDecider(store.racers);
@@ -160,34 +168,45 @@ export function raceUpdate(dt) {
 }
 
 /**
- * 宇宙场 AI（R3.3 / R3.4）。
+ * 宇宙联赛 AI。
  *
- * ★ 与普通比赛的关键差别：配速由 `spaceAIScale(玩家实际极速, 分级)` 解算，
- *   **不看 den3**（den3 在宇宙场等于该分级的基准速度，是"赛道长度"的定义，
- *   不是"对手该多快"的定义）。Lv0 玩家看到的是几百 km/h 量级的 AI，
- *   Lv500 玩家看到的是接近 50,000 km/h 的 AI。
- * ★ 无追赶修正：宇宙场是配速检验，追赶会让"分级"失去意义。
+ * ★ 配速 = **联赛参考配速 × 分区倍率**（spaceDefOf().ai），是一个绝对数，
+ *   与玩家当前车速、表盘标称值**完全无关**。
+ *   旧实现是"玩家实际极速 × aiK"，于是 AI 始终贴着玩家的表盘上限跑：
+ *   aiK=0.97 听起来必赢，但实车在坡道上永远到不了标称值，
+ *   结果就是玩家报告的"加满速都追不上"。现在赢不赢只看两个数的大小关系。
+ * ★ 无追赶修正：追赶会让"分区"失去意义（甲区就该比丙区好打）。
  */
+/**
+ * 宇宙联赛对手的加速时间常数（/s）：越大起步越慢。
+ *
+ * ★ 取 0.6 ≈ 玩家 omega 形态推力伺服（OMEGA_SERVO_ACC = 0.55）的同一量级。
+ *   两边起步时间对等，"谁先冲出去"才是油门与线路的结果，而不是初始速度的赠品。
+ */
+const SPACE_AI_ACC = 0.6;
+
 export function spaceUpdate(dt) {
   const list = store.racers;
   if (!list || !list.length) return;
-  const tier = SPACE_TIERS[spaceTierOf()] || SPACE_TIERS[0];
-  const base = spaceAIScale(store.phys.topSpeed, tier);
-  // ★ 每个对手在该分级基准上再叠一层 ±7% 随机（用户要求"对手速度随机一点"）。
-  //   抖动按 (本局 seed, 对手序号) 决定，所以同一局内每人的配速恒定
-  //   （不会每帧乱跳、看起来像抽搐），但换一局就换一批快慢组合。
-  //   bias 仍参与相乘：它是车手之间的稳定个体差异，与本局的随机抖动正交。
+  const base = spaceDefOf().ai;
+  // 每个对手在基准配速上再叠一层 ±7% 随机：同一局内每人的配速恒定（不每帧乱跳），
+  // 换一局换一批快慢组合，让"能不能超过去"成为实时博弈而不是开局就定死的名次。
   const seed = store.run.seed || 0;
   for (const ai of list) {
     if (ai.finish) continue;
     if (groundInfo(ai.x).y === Infinity) continue;
     const want = spaceAIJitter(base, ai.ix || 0, seed) * ai.bias;
-    ai.spd += (want - ai.spd) * Math.min(1, dt * 3);
+    // ★ 对手**也要花时间加速到配速**，不能一步到位。
+    //   玩家开 omega 形态时推力伺服的时间常数约 1/0.55 秒，从静止到巡航要 ~4 秒；
+    //   而旧实现给对手 dt×3（≈1/3 秒就满速），于是开局几秒对手必然领先 ——
+    //   宇宙联赛一场只有 40 秒起步，这个"白送的优势"足以吃掉整场比赛。
+    //   取 0.6 与玩家的 OMEGA_SERVO_ACC(0.55) 对齐：起步是博弈，不是赠品。
+    ai.spd += (want - ai.spd) * Math.min(1, dt * SPACE_AI_ACC);
     ai.x += ai.spd * dt;
     if (store.finishX !== Infinity && ai.x >= store.finishX) {
       ai.finish = true;
       const gy = groundInfo(store.finishX);
-      if (gy !== Infinity) {
+      if (gy.y !== Infinity) {
         emitParticles(store.finishX, gy.y - 20, 16, { color: token("danger"), spd: 3, life: 30, size: 4, grav: 0.03 });
       }
     }

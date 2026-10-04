@@ -3,7 +3,7 @@
 import { ACHS, safeGold } from "../config/constants.js";
 import { LEVELS } from "../config/levels.js";
 import { store } from "../core/store.js";
-import { save, saveAchList, saveStat } from "../core/storage.js";
+import { save, saveAchList } from "../core/storage.js";
 import { showToast } from "../core/toast.js";
 import { playAchSound } from "../core/audio.js";
 
@@ -33,7 +33,6 @@ export function addGold(n) {
   // ★ 必须落盘 —— 任务门槛是 ¥8e8，玩家要靠几十局的收入才攒得到，
   //   刷新页面就归零的话任务永远完不成。存在 stat 里随 addStat→saveStat 一起写。
   store.stat.earnedGold = safeGold((store.stat.earnedGold || 0) + n);
-  saveStat();
   save();
   if (store.gold >= 5000) checkAch("rich");
 }

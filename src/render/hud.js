@@ -26,15 +26,13 @@ import { getQuality } from "./postfx.js";
  * 1V1 / 排位赛返回空串 —— 那两种只有两个人的对决，名次没有信息量。
  */
 function placeTag() {
-  // ★ 宇宙场也要名次：它固定 5 人阵容，"第 N / 6 名"是玩家唯一能看到的
-  //   与对手的差距反馈（spaceUpdate 里 AI 已按 90% 玩家极速推进）。
-  //   但它**不能读 store.raceFormat** —— 那是玩家在比赛面板选的赛制，
-  //   宇宙场是借 melee 阵容（见 race.js 的 raceInit 第二参数）。
-  const isSpace = store.mode === "space";
-  if (store.mode !== "race" && !isSpace) return "";
-  const f = isSpace
-    ? RACE_FORMATS.melee
-    : (RACE_FORMATS[store.raceFormat] || RACE_FORMATS.duel);
+  // ★ 宇宙联赛也要名次，而且**直接读 store.raceFormat**：
+  //   宇宙联赛的每场赛事自带赛制（短距 1V1 / 群雄 6 人 / 长程 3v3），
+  //   raceInit 已把本局生效的赛制写进 store.raceFormat（面板上的选择存在
+  //   另一个字段 raceFormatPick，两者不再共用，见 store.js 的注释）。
+  //   旧实现这里写死 melee，于是跑接力时 HUD 报"第 N / 6 名"——数的是人数，团赛该报队名次。
+  if (store.mode !== "race" && store.mode !== "space") return "";
+  const f = RACE_FORMATS[store.raceFormat] || RACE_FORMATS.duel;
   if (f.riders < 2) return "";
   const p = racePlaceOf(store.racers || [], (bike.rear.x + bike.front.x) / 2, f);
   if (f.team) {
@@ -268,9 +266,9 @@ function drawInfoCard(r) {
   }
   if ((store.mode === "race" || store.mode === "ranked" || store.mode === "space") && store.raceAI) {
     const lead = (bike.rear.x + bike.front.x) / 2 - store.raceAI.x;
-    const txt = lead >= 0
-      ? "领先 " + Math.round(toM(lead)) + "m"
-      : "落后 " + Math.round(toM(-lead)) + "m";
+    // ★ 宇宙联赛的领先量动辄上亿米，toM 直读会渲染成 12 位数字把整条信息栏撑爆，
+    //   所以一律走 abbrevNum（与车库/商店同一条紧凑口径）。
+    const txt = (lead >= 0 ? "领先 " : "落后 ") + abbrevNum(Math.round(toM(Math.abs(lead)))) + "m";
     bx += badgeText(txt, bx, r.y + 1, token("glass-fill-strong"), lead >= 0 ? token("success") : token("danger")) + 4;
     // 多人赛 / 团赛：光看"领先落后"不知道场上有几个人，名字次才看得出超没超过去
     const ps = placeTag();

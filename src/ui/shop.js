@@ -5,7 +5,7 @@ import {
 } from "../config/constants.js";
 import { VEHICLES } from "../config/vehicles.js";
 import { store } from "../core/store.js";
-import { abbrevNum } from "../core/utils.js";
+import { abbrevNum, goldNum } from "../core/utils.js";
 import { getUp, save } from "../core/storage.js";
 import { playCoinSound, initAudio } from "../core/audio.js";
 import { applyUpgrades } from "../physics/bike.js";
@@ -78,7 +78,7 @@ export function renderShop() {
   //   下面所有"是否满级"的判断都读它，不要直接用全局 MAX_LV。
   const ML = maxLvOf(VEHICLES[store.currentVehicle]);
   const goldEl = document.getElementById("shopGold");
-  if (goldEl) goldEl.textContent = abbrevNum(store.gold);
+  if (goldEl) goldEl.textContent = goldNum(store.gold);
   const vehNow = VEHICLES[store.currentVehicle];
   const st = document.getElementById("shopTitle");
   if (st) st.textContent = "🛠 升级 " + VEHICLES[store.currentVehicle].icon + " " + VEHICLES[store.currentVehicle].name;
@@ -99,7 +99,7 @@ export function renderShop() {
         if (got) {
           ultraEl.textContent = v.ultra.icon + " 特殊模式「" + v.ultra.name + "」已开启 · " + v.ultra.desc + fxLine(v);
         } else if (full4) {
-          ultraEl.textContent = "⭐ 已全部升满！到车库花 " + abbrevNum(v.ultra.cost) + " 🪙 解锁「" + v.ultra.name + "」" + fxLine(v);
+          ultraEl.textContent = "⭐ 已全部升满！到车库花 " + goldNum(v.ultra.cost) + " 🪙 解锁「" + v.ultra.name + "」" + fxLine(v);
         } else {
           ultraEl.textContent = "🔒 全部升级升到 Lv" + ML + " 后可解锁特殊模式「" + v.ultra.name + "」：" + v.ultra.desc + fxLine(v);
         }
@@ -148,7 +148,7 @@ export function renderShop() {
       btn.style.opacity = 0.5;
     } else {
       const c = upCostOf(VEHICLES[store.currentVehicle], lv + 1);
-      btn.textContent = "升级 " + abbrevNum(c) + " 🪙";
+      btn.textContent = "升级 " + goldNum(c) + " 🪙";
       btn.disabled = store.gold < c;
       btn.style.opacity = 1;
     }
@@ -168,7 +168,7 @@ export function renderShop() {
         const lv = u[k] || 0;
         for (let i = lv + 1; i <= ML; i++) need += upCostOf(vehNow, i);
       }
-      allBtn.textContent = "⚡ 一键升满（还需 " + abbrevNum(need) + " 🪙）";
+      allBtn.textContent = "⚡ 一键升满（还需 " + goldNum(need) + " 🪙）";
       allBtn.disabled = store.gold < need;
       allBtn.classList.remove("done");
     }
@@ -272,7 +272,7 @@ function buyUpgradeAll() {
   const after = previewStats(veh, u);
   const moved = Object.keys(after).filter((n) => after[n] !== before[n]);
   const gotFull = ["engine", "tire", "frame", "susp"].every((k) => (u[k] || 0) >= ML);
-  const parts = ["买 " + bought + " 级 · 🪙-" + abbrevNum(spent)];
+  const parts = ["买 " + bought + " 级 · 🪙-" + goldNum(spent)];
   for (const k of ["engine", "tire", "frame", "susp"]) {
     if (u[k] !== beforeLv[k]) parts.push(UP_LABEL[k] + " Lv" + beforeLv[k] + "→Lv" + u[k]);
   }

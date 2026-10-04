@@ -259,6 +259,81 @@ function drawLance(T, a, A, L, W, k, q) {
 }
 
 /**
+ * 光锥（cv8 纯白）：九道**向后收束**的锥面，越远越窄越亮。
+ *
+ * ★ 为什么是唯一一种"会聚"的画法：其余八种画法一律从尾根向外散开
+ *   （电弧散、日冕炸、余烬飘、涡旋收……），因为它们的物理原型都是"物质被抛下"。
+ *   光速不该看起来像一团炸开的火 —— 它该看起来像一个**正在合拢的锥**：
+ *   玩家看着自己的车把身后的光收细收亮，那正是"追上了光"的视觉说法。
+ *   所以这里半宽随 t 递减（1 − 0.82t），而亮度递增。
+ */
+function drawCone(T, a, A, L, W, k, q) {
+  const n = Math.max(3, Math.round(T.count * q));
+  const steps = 12;
+  for (let i = 0; i < n; i++) {
+    const s = T.seed + i * 2.399;
+    // 各锥面在尾根张开一个固定角度，越远越靠拢 —— 这就是"锥"
+    const ang = -0.5 + (1.0 * i) / Math.max(1, n - 1);
+    ctx.beginPath();
+    for (let j = 0; j <= steps; j++) {
+      const t = j / steps;
+      const x = A - t * L;
+      // 收束：半宽从 W 线性收到 W×0.18，并叠一点随相位的呼吸，避免死板
+      const w = W * (1 - 0.82 * t) * (0.9 + 0.1 * Math.sin(ph * 1.7 + s));
+      const y = Math.tan(ang) * w + nz(t * 2 + ph * 2.4, s) * W * 0.12;
+      if (j === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    glowStroke(T.glow, W * 0.3, a * 0.13, W * 0.1, a * 0.5);
+    // 芯线更细但更亮，且不收束（0.92 而非 0.18）—— 外焰收、芯不收才读得出"光柱"
+    glowStroke(T.core, W * 0.08, a * 0.3, W * 0.04, a * 0.9);
+  }
+}
+
+/**
+ * 弦裂（cv9 品红）：两道平行的断裂面，彼此**剪切错开**并缓慢换位。
+ *
+ * ★ 全场唯一的"成对"画法：其余八种都是单束、放射或环，本质是"一个东西"；
+ *   而十倍光速的设定是"空间本身被撕开一条缝" —— 缝一定有两条边，
+ *   而且这两条边必须**互相错开**才读得出是被撕的（对齐了就只是一条粗带）。
+ *   剪切量随相位缓慢换向，于是这条缝看起来在呼吸而不是在抖。
+ */
+function drawRift(T, a, A, L, W, k, q) {
+  const n = Math.max(2, Math.round(T.count * q));
+  const shear = Math.sin(ph * 0.9) * 0.6;   // 两条边的剪切量（-0.6 ~ +0.6）
+  for (let s = 0; s < 2; s++) {
+    // s=0 是上边、s=1 是下边；剪切量反向，于是相位变化时两条边互相穿过
+    const off = (s === 0 ? -1 : 1) * W * 0.75 + shear * W * (s === 0 ? 1 : -1);
+    ctx.beginPath();
+    const steps = 10;
+    for (let j = 0; j <= steps; j++) {
+      const t = j / steps;
+      const x = A - t * L;
+      // 越远越薄（缝在合拢），但不完全闭合，末端留一点厚度
+      const y = off * (1 - t * 0.72) + nz(t * 1.6 + ph * 2 + s * 3, T.seed + s) * W * 0.22;
+      if (j === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    glowStroke(T.glow, W * 0.36, a * 0.15, W * 0.12, a * 0.55);
+    glowStroke(T.core, W * 0.09, a * 0.26, W * 0.045, a * 0.85);
+  }
+  // 缝里的碎屑：只在两条边之间飘，数量少，避免读成"第三条边"
+  const m = Math.max(2, Math.round(n));
+  for (let i = 0; i < m; i++) {
+    const s = T.seed + i * 1.77;
+    const t = (((i * 0.413 + ph * 0.19 + T.seed) % 1) + 1) % 1;
+    const x = A - t * L;
+    const y = nz(t * 2.2 + ph * 3, s) * W * 0.5 + shear * W * (1 - t) * 0.5;
+    const r = Math.max(0.4, W * 0.1 * (1 - t * 0.55));
+    ctx.fillStyle = T.core;
+    ctx.globalAlpha = a * 0.65 * (1 - t * 0.6);
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, 7);
+    ctx.fill();
+  }
+}
+
+/**
  * 陨星 / 彗尾层（七台共用骨架，颜色与头冠形状取自各自的 TRAIL 规格）。
  *
  * ★ 为什么是"交叉淡入"而不是"到阈值换画法"：见 constants.js 的 TRAIL_METEOR_LO。
@@ -364,6 +439,8 @@ export function drawTrail(dt = 1 / 60) {
     case "ripple": drawRipple(T, kE, A, L, W, k, q); break;
     case "vortex": drawVortex(T, kE, A, L, W, k, q); break;
     case "lance": drawLance(T, kE, A, L, W, k, q); break;
+    case "cone": drawCone(T, kE, A, L, W, k, q); break;
+    case "rift": drawRift(T, kE, A, L, W, k, q); break;
     default: drawArc(T, kE, A, L, W, k, q); break; // arc 兼作兜底
   }
   drawMeteor(T, m, W, L);

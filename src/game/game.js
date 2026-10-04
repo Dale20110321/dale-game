@@ -5,17 +5,24 @@ import {
   RATING_MIN, RANK_GAIN_BASE, RANK_GAIN_BASE_ADV, RATING_LOSS, RATING_LOSS_ADVANCED,
   rankName, rankStars, rankPromoReward, rankDelta, rankGold,
   RACE_FORMATS, RACE_PLACE_GOLD } from "../config/constants.js";
-import { LEVELS, levelAt, courseAt, segmentThemeAt, variantRule, FINALE_INDEX, FINALE, FINALE_SEGS, MODE_SPACE, SPACE_TIERS, setSpaceTier, spaceTierOf, spaceCourse, pinSpaceCourse } from "../config/levels.js";
+import {
+  LEVELS, levelAt, courseAt, segmentThemeAt, variantRule, FINALE_INDEX, FINALE, FINALE_SEGS,
+  MODE_SPACE, SPACE_LEAGUES, SPACE_DIVS, SPACE_RACES, setSpaceRace, spaceDivOf, spaceRaceOf,
+  spaceLeagueOf, spaceDefOf, spaceCourse, pinSpaceCourse, spaceRatingDelta,
+} from "../config/levels.js";
 import { THEMES } from "../config/themes.js";
 import { VEHICLES } from "../config/vehicles.js";
 import { store, bike, world } from "../core/store.js";
 import { key } from "../core/input.js";
 import { view } from "../core/canvas.js";
-import { clamp } from "../core/utils.js";
+import { clamp, goldNum } from "../core/utils.js";
 import { showToast } from "../core/toast.js";
 import { playCrashSound } from "../core/audio.js";
 import { token } from "../config/ui-tokens.js";
-import { save, addStat, settleProgress, isAdvancedUnlocked } from "../core/storage.js";
+import {
+  save, addStat, settleProgress, isAdvancedUnlocked,
+  noteVehiclePurchase, noteVehicleRun, noteSpaceResult,
+} from "../core/storage.js";
 import { groundInfo, groundY, safeSpot } from "../physics/terrain.js";
 import { applyUpgrades, bikeVx, crash, resetBike, stepPhysics, ignoresHazardLimit } from "../physics/bike.js";
 import { initPhysicsEvents } from "../physics/events.js";
@@ -117,11 +124,13 @@ const QUEST_VEHICLE = "cv1";
 export function spaceQuestState() {
   const idx = VEHICLES.findIndex((v) => v.id === QUEST_VEHICLE);
   const owned = (store.ownedVehicles || []).includes(idx);
-  // 任务条件：累计金币收入达到 ¥8e8
-  // —— 起步车（驮马）四项升满是 ¥28,240，全通 432 关约 ¥213 万，
-  //    所以 ¥8e8 是一个"认真玩几十关才能达成、但不需要刷到吐"的门槛，
-  //    相对新的入门宇宙车价 ¥1e10 只占 8%，仍是最早期目标。
-  const need = 8e8;
+  // 任务条件：累计金币收入达到 ¥5e7
+  //
+  // ★ 从 8e8 降到 5e7：432 关全通只能攒到约 ¥500 万（goldBase 700~2500/关 +
+  //   赛道金币），原门槛 ¥8 亿比**全部主线产出高两个数量级** ——
+  //   也就是说主线通关根本推不动它，宇宙场对认真玩的人实际是永久锁死的。
+  //   ¥5e7 ≈ 通关主线 + 若干场比赛，是"认真玩就能到"而不是"刷到吐"。
+  const need = 5e7;
   const got = (store.stat && store.stat.earnedGold) || 0;
   return {
     done: owned,
@@ -209,9 +218,9 @@ function beginRun() {
   // 排位赛永远是单挑；普通比赛按玩家在面板上选的赛制（1V1 / 多人 / 团赛）
   if (store.mode === "ranked") raceInit("duel");
   else if (store.mode === "race") raceInit(store.raceFormat);
-  // 宇宙场：5 位对手同场（多人竞技的阵容），配速另算（见 race.js 的 spaceUpdate）。
+  // 宇宙联赛：阵容取**该场赛事自己的赛制**（短距=1V1 / 群雄=6人 / 长程=3v3）。
   // 第二个参数 true = 借阵容但不改玩家在比赛面板选的赛制。
-  else if (store.mode === MODE_SPACE) raceInit("melee", true);
+  else if (store.mode === MODE_SPACE) raceInit(spaceDefOf().fmt, true);
   resumeFinaleCheckpoint();
   store.state = "play";
   presenter.hideOverlay();
@@ -346,17 +355,20 @@ export function startGame(m, lv, opt) {
     if (store.mode === "free") freeInit(opt && opt.theme);
     else {
       if (store.mode === MODE_SPACE) {
-        // ★ 顺序：定分级 → **重算极速** → 钉住赛道 → buildLevel。
+        // ★ 顺序：定场次 → 重算极速 → 钉住赛道 → buildLevel。
         //
-        //   1) 分级不传时**沿用本局的上次选择**，而不是回落 0 ——
-        //      旧代码写 setSpaceTier((opt && opt.tier) || 0)，
-        //      而 restart() 不传 opt，于是"在终极级跑到一半按 R"会被重置成
-        //      「易」级的另一条赛道（10M px），进度与分级双双错位且无任何提示。
-        //   2) applyUpgrades() 必须在算长度**之前**跑：赛道长度 = 玩家极速 × 360s，
-        //      而极速由车辆 / 升级 / 形态决定。顺序反了会拿旧极速算长度。
-        setSpaceTier(opt && opt.tier !== undefined ? opt.tier : spaceTierOf());
+        //   1) 三级下标不传时**沿用本局的上次选择**：restart() 不传 opt，
+        //      若回落 0，"在丙区打到一半按 R"会被重置成甲区另一条赛道，进度与名次双双错位。
+        //   2) 赛道长度现在只由联赛 × 分区 × 赛次决定，**与玩家极速无关**，
+        //      所以 applyUpgrades() 不再参与长度计算 —— 但仍要跑，
+        //      因为 store.phys.topSpeed 是配速面板与"能不能赢"的判据。
+        setSpaceRace(
+          opt && opt.league !== undefined ? opt.league : spaceLeagueOf(),
+          opt && opt.div !== undefined ? opt.div : spaceDivOf(),
+          opt && opt.race !== undefined ? opt.race : spaceRaceOf(),
+        );
         applyUpgrades();
-        pinSpaceCourse(spaceCourse(spaceTierOf(), store.phys.topSpeed));
+        pinSpaceCourse(spaceCourse(spaceLeagueOf(), spaceDivOf(), spaceRaceOf()));
       }
       buildLevel();
     }
@@ -468,7 +480,10 @@ function endFreeRun(reason) {
     runs: 1,
     meters: dist,
     seconds: Math.max(0, store.time - store.run.levelStartTime),
+    mode: "free",
   });
+  const freeVeh = VEHICLES[store.currentVehicle];
+  if (freeVeh) noteVehicleRun(freeVeh.id, dist);
   showToast(reason + " · 本次 " + dist + "m" + (record ? " 🏅 新纪录！" : ""), 1600);
   setTimeout(runGuard(() => {
     store.state = "menu";
@@ -541,14 +556,28 @@ function finishLevel() {
     showToast((won ? "🏆 排位胜利 🪙+" : "🏳 排位失利 🪙+") + gain, 900, won ? "success" : "warn");
     result.nextLabel = "继续 →";
   } else if (store.mode === MODE_SPACE) {
-    // 宇宙场结算（R3.6）：收益随分级递增，不受名次影响（本地 AI 模拟，无联网对抗）
-    const tier = SPACE_TIERS[spaceTierOf()] || SPACE_TIERS[0];
-    const gold = tier.gold;
-    addGold(gold);
-    result.goldGain = gold;
-    result.title = `${tier.icon} 宇宙场 · ${tier.name}`;
+    // 宇宙联赛结算：金币**只跟场次有关**（人人拿满，完赛就有 —— 输了也有，
+    //   否则新分区里反复试错会被惩罚到不敢试）；联赛段位分才跟名次有关。
+    const def = spaceDefOf();
+    const fmt = RACE_FORMATS[def.fmt] || RACE_FORMATS.duel;
+    const place = racePlace(store.racers, bike.rear.x);
+    const p = fmt.team ? place[0] : place;
+    const total = fmt.team ? 2 : fmt.riders + 1;
+    const won = p === 1;
+    addGold(def.gold);
+    const delta = spaceRatingDelta(def.leagueIdx, def.divIdx, won);
+    store.space.rating = Math.max(0, store.space.rating + delta);
+    noteSpaceResult(def.key, p, won);
+    settleProgress();
+    result.goldGain = def.gold;
+    result.place = p;
+    result.placeTotal = total;
+    result.title = `${def.icon} 宇宙联赛 · ${fmt.team ? "我方" + (won ? "获胜" : "惜败") : "第 " + p + " / " + total + " 名"}`;
     result.nextLabel = "继续 →";
-    showToast(`🌌 宇宙场「${tier.name}」完成 · 🪙+${gold}`, 1400, "success");
+    showToast(
+      `🌌 ${def.name} 完成 · 第 ${p}/${total} 名 · 🪙+${goldNum(def.gold)} · 联赛分 ${delta >= 0 ? "+" : ""}${delta} → ${store.space.rating}`,
+      1800, won ? "success" : "warn"
+    );
   } else if (store.mode === "level") {
     // 计时惩罚（摔车）计入本关用时，直接影响三星时限
     const elapsed = store.time - run.levelStartTime + run.penaltyTime;
@@ -583,12 +612,17 @@ function finishLevel() {
     // 通关结算：刷新阶梯派生态（支线通关 / 邀请 / 登顶）并立即写盘
     settleProgress();
   }
-  // 累计统计：本局 +1 次、里程按 100px=1m 换算、时长为本局有效游玩时间
+  // 累计统计：本局 +1 次、里程按 100px=1m 换算、时长为本局有效游玩时间。
+  // mode 一并记进 byMode（v5 新增的分模式统计），并给当前车记一程里程。
+  const runMeters = toM(store.finishX);
   addStat({
     runs: 1,
-    meters: toM(store.finishX),
+    meters: runMeters,
     seconds: Math.max(0, store.time - run.levelStartTime),
+    mode: store.mode,
   });
+  const curVeh = VEHICLES[store.currentVehicle];
+  if (curVeh) noteVehicleRun(curVeh.id, runMeters);
   result.goldTotal = store.gold;
   // 有结果卡渲染器时交给它（玩家自选下一关/返回）；否则回退到定时自动推进
   if (typeof presenter.presentResult === "function") presenter.presentResult(result);

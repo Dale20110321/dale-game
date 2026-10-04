@@ -10,6 +10,7 @@ import { drawTerrain } from "./terrain.js";
 import { drawBoosts, drawCanisters, drawCoins, drawDeco, drawFlag, drawGates, drawHazards, drawJumps } from "./entities.js";
 import { drawParticles } from "./particles.js";
 import { drawBike } from "./bike.js";
+import { drawRacers } from "./racers.js";
 import { drawTrail } from "./trail.js";
 import { shakeOffset } from "./camera.js";
 import { drawHud } from "./hud.js";
@@ -43,6 +44,8 @@ export function drawScene(dt = 1 / 60) {
   drawCoins(cam.x, cam.y);
   drawCanisters(cam.x, cam.y);
   drawFlag(cam.x, cam.y, store.finishX);
+  // 对手画在玩家**之前**：这样玩家超过去时车身自然压住对手，遮挡关系才对
+  drawRacers(cam.x, cam.y);
   drawBikeShadow();
   if (store.state === "play" || store.state === "ended" || store.state === "pause") {
     // 拖尾在车**之前**画：能量属于车尾，画在车之后会盖住骑手与车架。

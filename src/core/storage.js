@@ -1,49 +1,54 @@
 // localStorage 存档读写 + 每辆车的升级数据访问 + 进度阶梯 / 累计统计 / 导入导出
-// 键名与历史版本完全一致（见 constants.SAVE_KEYS），保证老存档不丢。
 //
-// 容错纪律：
-//  · 所有读写都经过 lsGet / lsSet / lsRemove 包装；localStorage 抛异常（隐私模式 / 配额满 /
-//    被禁用）时把模块级 available 置 false 并吞掉异常，游戏仍可正常游玩。
-//  · 任一 bike_* 键缺失或 JSON 损坏 → 回退默认值，不崩溃。
+// ★ **v5 结构化存档**（现行唯一事实来源）：整份进度写进**一个**键 `dale_save`，
+//   形如 { app, format, schema, savedAt, profile, wallet, garage, campaign,
+//   ranked, space, lifetime, settings }。
+//   旧的 bike_* 裸键方案已弃用，读档时自动迁移一次并把旧键清掉
+//   （见 migrateLegacy 与 docs/SAVE_FORMAT_DEPRECATION.md）。
+//
+//  ★ 三条设计约束（改之前先读完）：
+//   1. **车库按 vehicle id 索引，绝不用数组下标**。下标会因为删车 / 重排整体前移，
+//      按下标存的"拥有列表"会集体指向别的车 —— 本项目在 v5 之前正是这么存的，
+//      所以这次删掉 8 台车必须与 id 化改造同时落地，缺一不可。
+//   2. **金币存完整十进制字符串**。余额会超过 1e21（九台宇宙车全部资产约 2.5e25），
+//      String() 在那个量级输出 "1e+25"，任何按十进制读的路径都会解析成另一个数。
+//   3. 所有读写都经过 rawGet/rawSet 包装；localStorage 抛异常（隐私模式 / 配额满 /
+//      被禁用）时把模块级 available 置 false 并吞掉异常，游戏仍可正常游玩。
 import {
-  SAVE_KEYS, MAX_LV, maxLvOf, RATING_ADVANCED, RATING_PEAK, SAVE_APP, SAVE_FORMAT,
-  safeGold,
+  SAVE_KEYS, MAX_LV, maxLvOf, RATING_ADVANCED, RATING_PEAK,
+  SAVE_APP, SAVE_FORMAT, SAVE_SCHEMA, safeGold,
 } from "../config/constants.js";
 import { VEHICLES } from "../config/vehicles.js";
 import { LEVELS, BRANCHES, LEVELS_PER_BRANCH, FINALE_SEGS } from "../config/levels.js";
 import { store } from "./store.js";
 import { toPlainDecimal, fromPlainDecimal } from "./utils.js";
 
+/** 现行文档 schema 版本（constants.SAVE_SCHEMA 是它的单一事实来源） */
+export const CUR_SCHEMA = SAVE_SCHEMA;
 /**
- * 当前存档结构版本：
- *   2 = 货币换算；3 = "20 关 → 72 关" 迁移；4 = "72 关 → 432 关" 迁移（36 场景 × 12 关）
+ * 旧 bike_* 方案能有的最高 bike_v。
+ * 迁移后写进 doc.migratedFrom，玩家能从存档里一眼看出"这份是从第几代搬过来的"。
  */
-export const CUR_VER = 4;
+const LEGACY_MAX_VER = 4;
 
 /** 全部受管理的存档键（导入/导出/重置都基于这份清单） */
 const ALL_KEYS = Object.values(SAVE_KEYS);
 
-// ---------------- localStorage 统一包装（可降级） ----------------
-let available = true;
-
-/** localStorage 是否可用（隐私模式 / 配额满 / 被禁用时返回 false，供 UI 查询） */
-export function isStorageAvailable() {
-  return available;
-}
-
-// ---------------- 多存档槽（存档1 / 存档2 …） ----------------
-/**
- * ★ 槽 0 **沿用原来的 `bike_*` 键名**，槽 1+ 用 `dale_s{N}_` 前缀。
- *   这样老存档原地变成「存档1」，既不丢数据，也不需要任何迁移代码；
- *   导出/重置/导入的键清单也只作用于当前槽，不会误伤别的槽。
- *   `dale_slot` / `dale_slots` 是槽位元数据，**刻意不以 bike_ 开头** ——
- *   否则会被 listSaveKeys() 当成存档数据一起导出/清掉。
- */
+/** 多存档槽上限 */
 export const MAX_SLOTS = 6;
 /** 槽位元数据键（**刻意不走 sk()**：它们不属于任何槽，是全局的） */
 const META_KEYS = { slot: "dale_slot", slots: "dale_slots" };
 
-/** 绕过槽映射的裸存取 —— 只给槽位元数据 / 跨槽查看用 */
+/** localStorage 是否可用（隐私模式 / 配额满 / 被禁用时返回 false，供 UI 查询） */
+let available = true;
+export function isStorageAvailable() {
+  return available;
+}
+
+const nowIso = () => new Date().toISOString();
+
+// ---------------- 裸存取（可降级） ----------------
+
 function rawGet(k) {
   try {
     return localStorage.getItem(k);
@@ -55,55 +60,740 @@ function rawGet(k) {
 function rawSet(k, v) {
   try {
     localStorage.setItem(k, v);
+    return true;
   } catch (e) {
     available = false;
+    return false;
   }
 }
 function rawRemove(k) {
   try {
     localStorage.removeItem(k);
+    return true;
   } catch (e) {
     available = false;
+    return false;
   }
 }
 
-/** 当前槽（0 起）；持久化在 dale_slot */
+// ---------------- 槽位路由 ----------------
+//
+// ★ 槽 0 用裸键名，其余带 `dale_s{N}_` 前缀。老存档（槽 0 的 bike_*）迁移后
+//   原位变成「存档1」，不需要额外的数据搬运。
 function slotIndex() {
   const n = store.slot | 0;
   return n >= 0 && n < MAX_SLOTS ? n : 0;
 }
-/** 某个指定槽的真实 localStorage 键（槽 0 无前缀，其余带 dale_s{N}_ 前缀） */
 function slotKey(n, k) {
   return n === 0 ? k : `dale_s${n}_${k}`;
 }
-/** 把逻辑存档键映射到当前槽的真实 localStorage 键 */
-function sk(k) {
-  return slotKey(slotIndex(), k);
+function lsGet(k) {
+  return rawGet(slotKey(slotIndex(), k));
 }
-/** 某个指定槽的某项数据（不依赖当前槽） */
-function slotGet(n, k) {
-  return rawGet(slotKey(n, k));
+function lsSet(k, v) {
+  return rawSet(slotKey(slotIndex(), k), v);
+}
+function lsRemove(k) {
+  return rawRemove(slotKey(slotIndex(), k));
 }
 
-/** 槽位元数据：[{name, updatedAt, cleared}]，单独存在 dale_slots */
-function readSlots() {
-  const raw = rawGet(META_KEYS.slots);
-  if (!raw) return [];
+// ---------------- 校验小工具 ----------------
+
+/** 安全解析 JSON，失败返回 fallback */
+function jsonOr(raw, fallback) {
   try {
     const v = JSON.parse(raw);
-    return Array.isArray(v) ? v.slice(0, MAX_SLOTS) : [];
+    return v === null || v === undefined ? fallback : v;
   } catch (e) {
-    return [];
+    return fallback;
   }
 }
-function writeSlots(list) {
-  rawSet(META_KEYS.slots, JSON.stringify(list.slice(0, MAX_SLOTS)));
+
+/**
+ * 安全取整：非有限值 / 布尔 / null 一律返回 0。
+ *
+ * ★ 布尔必须显式排除：Number(true) === 1，会把一个坏字段读成"胜场 1 场"。
+ */
+function intOr(v) {
+  if (typeof v === "boolean" || v === null || v === undefined) return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.trunc(n) : 0;
 }
-/** 该槽是否已被使用过（存过任一存档键即算用过） */
+function strOr(v, fallback) {
+  return typeof v === "string" && v ? v : fallback;
+}
+function objOr(v) {
+  return v && typeof v === "object" && !Array.isArray(v) ? v : null;
+}
+
+/**
+ * 把任意值夹成合法的升级等级。
+ *
+ * ★ 坏存档会让**物理直接算出 NaN**，而不只是"数值难看"：
+ *   deriveHandling 算 `1 + 0.020 * up.engine`，engine 若是 "a" / undefined，
+ *   topSpeed / torquePeak 全变 NaN → 车推不动而 state 仍显示 play。
+ */
+function clampLv(v, maxLv) {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(maxLv || MAX_LV, n));
+}
+/** 把任意值夹成 0..3 的星级 */
+function clampStar(v) {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) && n > 0 ? Math.min(3, n) : 0;
+}
+
+/** 车辆 id → VEHICLES 下标；-1 = 该车已从游戏里删掉 */
+function indexOfVeh(id) {
+  return VEHICLES.findIndex((v) => v.id === id);
+}
+
+/**
+ * 逐车记录的**空模板**。
+ *
+ * boughtAt / formAt / odometerM / runs 是 v5 新增的明细字段：升级等级答不了
+ * "这台车我什么时候买的、骑了多少公里"，而这些问题只有逐车留痕才答得上来。
+ */
+function blankVehMeta(id) {
+  return {
+    id,
+    engine: 0, tire: 0, frame: 0, susp: 0,
+    boughtAt: "", formAt: "", odometerM: 0, runs: 0,
+  };
+}
+
+// ============================================================
+//  旧方案（bike_* 下标索引）的下标 → id 对照表
+//
+//  ★ 这是**迁移专用**的常量，用完即可废弃：v5 之后车库按 id 存，
+//    再删任何一台车都不会影响存档，因此永远不需要再更新这张表。
+//    顺序 = 2026-10 精简之前的 VEHICLES 数组顺序（当时 33 辆）。
+// ============================================================
+const LEGACY_VEHICLE_IDS = [
+  "trail", "sport", "mud", "volt", "ghost", "fort", "photon", "singularity",
+  "cv1", "cv2", "cv3", "cv4", "cv5", "cv6", "cv7",
+  "commuter", "dirt", "storm", "reef", "canyon", "aurora", "sandstorm", "magma",
+  "glacier", "monsoon", "obsidian", "titan", "solstice", "vanguard", "phantom",
+  "eclipse", "nova", "oblivion",
+];
+/** 旧下标 → 现存车辆 id；该车已被精简掉则返回 null（它的数据就此丢弃） */
+function legacyIdAt(index) {
+  const id = LEGACY_VEHICLE_IDS[intOr(index)];
+  return id && indexOfVeh(id) >= 0 ? id : null;
+}
+
+// ============================================================
+//  文档 ↔ store
+// ============================================================
+
+/** 把 store 复位成一份全新的空存档（resetSave / applyDoc(null) / 读档兜底共用） */
+function blankStoreState() {
+  store.gold = 0;
+  store.unlocked = 0;
+  store.selLevel = 0;
+  store.stars = new Array(LEVELS.length).fill(0);
+  store.ownedVehicles = [0];
+  store.currentVehicle = 0;
+  store.upgrades = {};
+  store.ultra = {};
+  store.garageMeta = {};
+  store.muted = false;
+  store.achGot = [];
+  store.createdAt = "";
+  store.progress = {
+    branchCleared: [], finaleDone: false, finaleSeg: 0, invited: false,
+    rating: 0, wins: 0, losses: 0, peak: false, promoClaimed: 0, freeThemes: [],
+  };
+  store.space = { rating: 0, records: {} };
+  store.stat = {
+    totalRuns: 0, totalMeters: 0, totalSeconds: 0, lastPlayed: "",
+    earnedGold: 0, byMode: {},
+  };
+}
+
+/** 校验"每车一份"的容器：只保留形状正确且**车辆仍存在**的条目 */
+function sanitizeVehicles(raw) {
+  const out = {};
+  const src = objOr(raw);
+  if (!src) return out;
+  for (const veh of VEHICLES) {
+    const rec = objOr(src[veh.id]);
+    if (!rec) continue;
+    const ml = maxLvOf(veh);
+    out[veh.id] = {
+      ...blankVehMeta(veh.id),
+      engine: clampLv(rec.engine, ml), tire: clampLv(rec.tire, ml),
+      frame: clampLv(rec.frame, ml), susp: clampLv(rec.susp, ml),
+      boughtAt: strOr(rec.boughtAt, ""), formAt: strOr(rec.formAt, ""),
+      odometerM: Math.max(0, intOr(rec.odometerM)), runs: Math.max(0, intOr(rec.runs)),
+    };
+  }
+  return out;
+}
+function sanitizeByMode(raw) {
+  const out = {};
+  const src = objOr(raw);
+  if (!src) return out;
+  for (const key of ["level", "race", "ranked", "space", "free"]) {
+    const o = objOr(src[key]);
+    if (!o) continue;
+    out[key] = {
+      runs: Math.max(0, intOr(o.runs)),
+      meters: Math.max(0, intOr(o.meters)),
+      seconds: Math.max(0, intOr(o.seconds)),
+    };
+  }
+  return out;
+}
+function sanitizeRecords(raw) {
+  const out = {};
+  const src = objOr(raw);
+  if (!src) return out;
+  for (const key in src) {
+    const o = objOr(src[key]);
+    // 赛事键的形状固定为 "联赛下标-分区-赛次"，越界的键一律丢弃
+    if (!o || !/^L\d+-[ABC]-\d+$/.test(key)) continue;
+    out[key] = { runs: Math.max(0, intOr(o.runs)), wins: Math.max(0, intOr(o.wins)), best: Math.max(0, intOr(o.best)) };
+  }
+  return out;
+}
+
+/** store → 存档文档（唯一序列化出口） */
+export function buildDoc() {
+  const vehicles = {};
+  const owned = [];
+  for (const index of store.ownedVehicles || []) {
+    const veh = VEHICLES[index];
+    if (!veh || owned.includes(veh.id)) continue;
+    owned.push(veh.id);
+    const up = store.upgrades[veh.id] || {};
+    const meta = store.garageMeta[veh.id] || {};
+    vehicles[veh.id] = {
+      ...blankVehMeta(veh.id),
+      engine: clampLv(up.engine, maxLvOf(veh)), tire: clampLv(up.tire, maxLvOf(veh)),
+      frame: clampLv(up.frame, maxLvOf(veh)), susp: clampLv(up.susp, maxLvOf(veh)),
+      boughtAt: strOr(meta.boughtAt, ""), formAt: strOr(meta.formAt, ""),
+      odometerM: Math.max(0, intOr(meta.odometerM)), runs: Math.max(0, intOr(meta.runs)),
+    };
+  }
+  const forms = {};
+  for (const id in store.ultra || {}) {
+    if (store.ultra[id] === true && indexOfVeh(id) >= 0) forms[id] = true;
+  }
+  const p = store.progress || {};
+  const s = store.stat || {};
+  const current = VEHICLES[store.currentVehicle];
+  return {
+    app: SAVE_APP,
+    format: SAVE_FORMAT,
+    schema: CUR_SCHEMA,
+    savedAt: nowIso(),
+    // 只有"从旧方案搬过来"的存档才带这个字段：新档不带，玩家一眼能分辨来历
+    migratedFrom: store.migratedFrom > 0 ? store.migratedFrom : undefined,
+    profile: {
+      name: `存档${slotIndex() + 1}`,
+      createdAt: strOr(store.createdAt, nowIso()),
+      lastPlayed: strOr(s.lastPlayed, ""),
+    },
+    wallet: {
+      gold: toPlainDecimal(store.gold),
+      earned: toPlainDecimal(s.earnedGold),
+    },
+    garage: {
+      current: current ? current.id : "",
+      owned,
+      forms,
+      vehicles,
+    },
+    campaign: {
+      unlocked: Math.max(0, intOr(store.unlocked)),
+      sel: Math.max(0, intOr(store.selLevel)),
+      stars: (store.stars || []).map(clampStar),
+      finaleSeg: Math.max(0, Math.min(FINALE_SEGS, intOr(p.finaleSeg))),
+      finaleDone: p.finaleDone === true,
+      invited: p.invited === true,
+    },
+    ranked: {
+      rating: Math.max(0, intOr(p.rating)),
+      wins: Math.max(0, intOr(p.wins)),
+      losses: Math.max(0, intOr(p.losses)),
+      promoClaimed: Math.max(0, intOr(p.promoClaimed)),
+      advanced: store.rankedAdvanced === true,
+    },
+    // 宇宙联赛与排位赛**分开**记：两套阶梯的解锁规则不同，混在一起会互相污染
+    space: {
+      rating: Math.max(0, intOr((store.space || {}).rating)),
+      records: { ...((store.space || {}).records || {}) },
+    },
+    lifetime: {
+      runs: Math.max(0, intOr(s.totalRuns)),
+      meters: Math.max(0, intOr(s.totalMeters)),
+      seconds: Math.max(0, intOr(s.totalSeconds)),
+      lastPlayed: strOr(s.lastPlayed, ""),
+      byMode: sanitizeByMode(s.byMode),
+    },
+    settings: { muted: store.muted === true },
+  };
+}
+
+/** 存档文档 → store（读档唯一入口，逐字段校验） */
+export function applyDoc(doc) {
+  blankStoreState();
+  if (!objOr(doc)) return false;
+  const g = objOr(doc.garage) || {};
+  const c = objOr(doc.campaign) || {};
+  const r = objOr(doc.ranked) || {};
+  const l = objOr(doc.lifetime) || {};
+  const sp = objOr(doc.space) || {};
+
+  store.createdAt = strOr((objOr(doc.profile) || {}).createdAt, "");
+  store.migratedFrom = intOr(doc.migratedFrom);
+
+  store.gold = safeGold(fromPlainDecimal((objOr(doc.wallet) || {}).gold));
+  store.stat.earnedGold = safeGold(fromPlainDecimal((objOr(doc.wallet) || {}).earned));
+
+  store.upgrades = sanitizeVehicles(g.vehicles);
+  // 明细从 vehicles 里拆出来单独放一份：物理只读 upgrades，面板只读 garageMeta
+  store.garageMeta = {};
+  for (const id in store.upgrades) {
+    const v = store.upgrades[id];
+    store.garageMeta[id] = { boughtAt: v.boughtAt, formAt: v.formAt, odometerM: v.odometerM, runs: v.runs };
+  }
+
+  // 拥有列表：id → 下标。已经被精简掉的车自然消失，不需要任何额外处理
+  store.ownedVehicles = [];
+  for (const id of Array.isArray(g.owned) ? g.owned : []) {
+    const index = indexOfVeh(id);
+    if (index >= 0 && !store.ownedVehicles.includes(index)) store.ownedVehicles.push(index);
+  }
+  if (!store.ownedVehicles.length) store.ownedVehicles = [0];
+
+  store.currentVehicle = indexOfVeh(strOr(g.current, ""));
+  if (!store.ownedVehicles.includes(store.currentVehicle)) store.currentVehicle = store.ownedVehicles[0];
+
+  store.ultra = {};
+  for (const id in objOr(g.forms) || {}) {
+    if (g.forms[id] === true && indexOfVeh(id) >= 0) store.ultra[id] = true;
+  }
+
+  store.unlocked = Math.max(0, Math.min(LEVELS.length - 1, intOr(c.unlocked)));
+  store.selLevel = Math.max(0, Math.min(LEVELS.length - 1, intOr(c.sel)));
+  store.stars = (Array.isArray(c.stars) ? c.stars.map(clampStar) : [])
+    .concat(new Array(LEVELS.length).fill(0)).slice(0, LEVELS.length);
+
+  store.progress.finaleSeg = Math.max(0, Math.min(FINALE_SEGS, intOr(c.finaleSeg)));
+  store.progress.finaleDone = c.finaleDone === true;
+  store.progress.invited = c.invited === true;
+  store.progress.rating = Math.max(0, intOr(r.rating));
+  store.progress.wins = Math.max(0, intOr(r.wins));
+  store.progress.losses = Math.max(0, intOr(r.losses));
+  store.progress.promoClaimed = Math.max(0, intOr(r.promoClaimed));
+  store.rankedAdvanced = r.advanced === true;
+
+  store.space = { rating: Math.max(0, intOr(sp.rating)), records: sanitizeRecords(sp.records) };
+
+  store.stat.totalRuns = Math.max(0, intOr(l.runs));
+  store.stat.totalMeters = Math.max(0, intOr(l.meters));
+  store.stat.totalSeconds = Math.max(0, intOr(l.seconds));
+  store.stat.lastPlayed = strOr(l.lastPlayed, "");
+  store.stat.byMode = sanitizeByMode(l.byMode);
+
+  store.muted = (objOr(doc.settings) || {}).muted === true;
+  return true;
+}
+
+// ============================================================
+//  旧 bike_* 方案 → v5 文档（自动迁移）
+// ============================================================
+
+/** 旧方案的升级数据里，四项等级在哪 */
+function legacyLevelsOf(upRaw, id, veh) {
+  // 早期还有"全局单一升级"的扁平格式（{engine,tire,frame,susp}），一并兜住
+  const rec = objOr(upRaw) ? (objOr(upRaw[id]) || upRaw) : {};
+  const ml = maxLvOf(veh);
+  return {
+    engine: clampLv(rec.engine, ml), tire: clampLv(rec.tire, ml),
+    frame: clampLv(rec.frame, ml), susp: clampLv(rec.susp, ml),
+  };
+}
+
+/**
+ * 由旧方案的一组原始键值构造 v5 文档（纯函数，不碰 localStorage）。
+ *
+ * @param {object} map  旧键 → 原始字符串值
+ * @returns {object|null} v5 文档；map 里没有任何 bike_* 键时返回 null
+ */
+function legacyDocFrom(map) {
+  const src = objOr(map);
+  if (!src) return null;
+  const keys = Object.keys(src).filter((k) => k.indexOf("bike_") === 0);
+  if (!keys.length) return null;
+
+  const ver = intOr(src[SAVE_KEYS.ver]);
+  // 版本 0/1 = 最早那代，金币的单位换过（详见下方 buildDoc 注释里那条历史）
+  let gold = safeGold(fromPlainDecimal(src[SAVE_KEYS.gold]));
+  if (ver < 2) gold *= 10;
+
+  const ownedRaw = jsonOr(src[SAVE_KEYS.owned] || "[0]", [0]);
+  const upRaw = jsonOr(src[SAVE_KEYS.up] || "{}", {});
+  const owned = [];
+  const vehicles = {};
+  for (const index of (Array.isArray(ownedRaw) ? ownedRaw : [0]).map(intOr)) {
+    const id = legacyIdAt(index);
+    if (!id || owned.includes(id)) continue;
+    owned.push(id);
+    vehicles[id] = { ...blankVehMeta(id), ...legacyLevelsOf(upRaw, id, VEHICLES[indexOfVeh(id)]) };
+  }
+  if (!owned.length) owned.push(VEHICLES[0].id);
+
+  const forms = {};
+  const ultraRaw = objOr(jsonOr(src[SAVE_KEYS.ultra] || "{}", {})) || {};
+  for (const id in ultraRaw) {
+    if (ultraRaw[id] === true && indexOfVeh(id) >= 0) forms[id] = true;
+  }
+
+  const starsRaw = jsonOr(src[SAVE_KEYS.stars] || "[]", []);
+  const stars = (Array.isArray(starsRaw) ? starsRaw : []).map(clampStar)
+    .concat(new Array(LEVELS.length).fill(0)).slice(0, LEVELS.length);
+
+  const prog = objOr(jsonOr(src[SAVE_KEYS.prog] || "{}", {})) || {};
+  const stat = objOr(jsonOr(src[SAVE_KEYS.stat] || "{}", {})) || {};
+  const current = legacyIdAt(src[SAVE_KEYS.veh]);
+
+  return {
+    app: SAVE_APP,
+    format: SAVE_FORMAT,
+    schema: CUR_SCHEMA,
+    savedAt: nowIso(),
+    migratedFrom: ver > 0 ? ver : LEGACY_MAX_VER,
+    profile: {
+      name: `存档${slotIndex() + 1}`,
+      createdAt: nowIso(),
+      lastPlayed: strOr(stat.lastPlayed, ""),
+    },
+    wallet: {
+      gold: toPlainDecimal(gold),
+      earned: toPlainDecimal(safeGold(Number(stat.earnedGold) || 0)),
+    },
+    garage: {
+      current: current && owned.includes(current) ? current : owned[0],
+      owned,
+      forms,
+      vehicles,
+    },
+    campaign: {
+      unlocked: Math.max(0, intOr(src[SAVE_KEYS.unlocked])),
+      sel: Math.max(0, intOr(src[SAVE_KEYS.sel])),
+      stars,
+      finaleSeg: Math.max(0, intOr(prog.finaleSeg)),
+      finaleDone: prog.finaleDone === true,
+      invited: prog.invited === true,
+    },
+    ranked: {
+      rating: Math.max(0, intOr(src[SAVE_KEYS.rating] || prog.rating)),
+      wins: Math.max(0, intOr(prog.wins)),
+      losses: Math.max(0, intOr(prog.losses)),
+      promoClaimed: Math.max(0, intOr(prog.promoClaimed)),
+      advanced: false,
+    },
+    space: { rating: 0, records: {} },
+    lifetime: {
+      runs: Math.max(0, intOr(stat.totalRuns || stat.games)),
+      meters: Math.max(0, intOr(stat.totalMeters || stat.dist)),
+      seconds: Math.max(0, intOr(stat.totalSeconds || stat.time)),
+      lastPlayed: strOr(stat.lastPlayed, ""),
+      byMode: {},
+    },
+    settings: { muted: src[SAVE_KEYS.mute] === "1" || src[SAVE_KEYS.mute] === 1 },
+  };
+}
+
+/** 当前槽是否存在旧方案数据（任一非文档键有值即算） */
+function hasLegacyData() {
+  for (const k of ALL_KEYS) {
+    if (k === SAVE_KEYS.doc || k === SAVE_KEYS.ach) continue;
+    if (lsGet(k) !== null) return true;
+  }
+  return false;
+}
+
+/** 清掉旧方案的键（成就键 bike_ach 保留：它不在文档里，独立于方案演进） */
+function clearLegacyKeys() {
+  for (const k of ALL_KEYS) {
+    if (k === SAVE_KEYS.doc || k === SAVE_KEYS.ach) continue;
+    lsRemove(k);
+  }
+}
+
+// ============================================================
+//  读写主路径
+// ============================================================
+
+/** 读当前槽的文档（校验 app 与形状；不合格视为"没有存档"） */
+export function readDoc() {
+  const d = objOr(jsonOr(lsGet(SAVE_KEYS.doc), null));
+  return d && d.app === SAVE_APP ? d : null;
+}
+function writeDoc(doc) {
+  return lsSet(SAVE_KEYS.doc, JSON.stringify(doc));
+}
+
+/**
+ * 读档：优先新文档；没有就读旧方案并**就地迁移**（用户要求"访问过就自动升级"）。
+ */
+export function loadSave() {
+  try {
+    const persisted = parseInt(rawGet(META_KEYS.slot) || "0", 10);
+    store.slot = Number.isFinite(persisted) && persisted >= 0 && persisted < MAX_SLOTS ? persisted : 0;
+
+    // ★ 旧版的 bike_trial 后门（每次读档都把**全部**车辆置为已拥有 + 满级 + 形态全开）
+    //   就是"买了车之后新车也自动拥有、而且是满级"这个故障的根因：
+    //   它每次加载都无条件覆盖车库，玩家任何购车/升级结果都会被下一次刷新抹掉。
+    //   直接连键带效果一起删除 —— 详见 docs/SAVE_FORMAT_DEPRECATION.md。
+    if (lsGet("bike_trial") !== null) lsRemove("bike_trial");
+
+    const doc = readDoc();
+    if (doc) {
+      applyDoc(doc);
+    } else if (hasLegacyData()) {
+      const legacy = {};
+      for (const k of ALL_KEYS) {
+        if (k === SAVE_KEYS.doc || k === SAVE_KEYS.ach) continue;
+        const v = lsGet(k);
+        if (v !== null) legacy[k] = v;
+      }
+      const migrated = legacyDocFrom(legacy);
+      if (migrated) {
+        applyDoc(migrated);
+        writeDoc(migrated);
+        clearLegacyKeys();
+      } else {
+        resetSave();
+      }
+    } else {
+      resetSave();
+    }
+    loadAchList();
+    refreshProgress();
+    touchSlotMeta(slotIndex(), clearedCountOfCurrent());
+  } catch (e) {
+    blankStoreState();
+  }
+}
+
+/**
+ * 写盘（唯一落盘出口）。旧实现要写 12 个 bike_* 键，现在一次 JSON 写一整份文档。
+ */
+export function save() {
+  const ok = writeDoc(buildDoc());
+  if (ok) touchSlotMeta(slotIndex(), clearedCountOfCurrent());
+  return ok;
+}
+export function saveAll() {
+  return save();
+}
+/**
+ * 下面三个是**历史 API 兼容层**：v5 之后整份文档一起写，它们不再各自持有数据。
+ * 保留导出是因为 game/progress.js 等处仍在按"改了某项就落盘"的语义调用它们。
+ */
+export function saveProgress() {
+  return save();
+}
+export function saveStat() {
+  return save();
+}
+export function saveAchList() {
+  // 成就清单仍单独存 bike_ach：它不在文档里，键也不再改动（历史兼容 + 体积小）
+  return lsSet(SAVE_KEYS.ach, JSON.stringify(store.achGot || []));
+}
+
+/** 结算落盘点：刷新阶梯派生态后立即写盘 */
+export function settleProgress() {
+  refreshProgress();
+  save();
+  return store.progress;
+}
+
+/** 重读进度已由 loadSave 一并完成；保留导出是为了 main.js 现有的调用顺序 */
+export function loadProgress() {
+  return refreshProgress();
+}
+export function loadStat() {
+  return store.stat;
+}
+
+// ============================================================
+//  进度阶梯：纯函数
+// ============================================================
+
+/** 由星级数组推导"已通关支线下标" */
+export function deriveBranchCleared() {
+  const out = [];
+  for (let b = 0; b < BRANCHES.length; b++) {
+    let all = true;
+    for (let k = 0; k < LEVELS_PER_BRANCH; k++) {
+      if (!(store.stars[b * LEVELS_PER_BRANCH + k] > 0)) { all = false; break; }
+    }
+    if (all) out.push(b);
+  }
+  return out;
+}
+
+/** "已通关场景"下标数组（无限模式自由选图用） */
+export function availableFreeThemes() {
+  const out = [];
+  for (const b of deriveBranchCleared()) {
+    const t = BRANCHES[b] ? BRANCHES[b].theme : b;
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
+/** 高级排位赛准入（rating ≥ 1200） */
+export function isAdvancedUnlocked(rating) {
+  return (Number(rating) || 0) >= RATING_ADVANCED;
+}
+
+/**
+ * 阶梯解锁判定（纯函数，不修改入参）。
+ * 支线通关 / 最终任务邀请 / 高级赛 / 登顶全部由这里派生，store.progress 只存事实。
+ */
+export function deriveUnlocks(progress, stars) {
+  const p = objOr(progress) || {};
+  const arr = Array.isArray(stars) ? stars : [];
+  const allCleared = LEVELS.length > 0 && arr.length >= LEVELS.length &&
+    arr.slice(0, LEVELS.length).every((s) => s >= 1);
+  const rating = Math.max(0, intOr(p.rating));
+  return {
+    allCleared,
+    finaleUnlocked: allCleared,
+    finaleDone: p.finaleDone === true,
+    invited: p.finaleDone === true || p.invited === true,
+    advancedUnlocked: isAdvancedUnlocked(rating),
+    peak: p.peak === true || rating >= RATING_PEAK,
+  };
+}
+/** 登顶后把"已通关支线对应的场景"写入 freeThemes；未登顶时清空 */
+export function syncFreeThemes() {
+  if (!store.progress.peak) {
+    store.progress.freeThemes = [];
+    return store.progress.freeThemes;
+  }
+  store.progress.freeThemes = availableFreeThemes();
+  return store.progress.freeThemes;
+}
+/** 把阶梯派生态写回 store.progress（只改内存，落盘由调用方决定） */
+export function refreshProgress() {
+  const d = deriveUnlocks(store.progress, store.stars);
+  store.progress.branchCleared = deriveBranchCleared();
+  if (d.finaleDone) store.progress.finaleDone = true;
+  if (d.invited) store.progress.invited = true;
+  if (d.peak) store.progress.peak = true;
+  syncFreeThemes();
+  return store.progress;
+}
+
+// ============================================================
+//  累计统计 / 车库明细 / 联赛成绩
+// ============================================================
+
+/**
+ * 累计统计累加。
+ * @param {{runs?:number,meters?:number,seconds?:number,mode?:string}} o
+ *   mode 传入时**额外**累加到 stat.byMode[mode] —— v5 新增的分模式统计，
+ *   用来回答"我在排位赛上到底花了多少时间"，扁平累加值答不了。
+ */
+export function addStat({ runs = 0, meters = 0, seconds = 0, mode = "" } = {}) {
+  const st = store.stat;
+  const r = Math.max(0, Number(runs) || 0);
+  const m = Math.max(0, Number(meters) || 0);
+  const s = Math.max(0, Number(seconds) || 0);
+  st.totalRuns += r;
+  st.totalMeters += m;
+  st.totalSeconds += s;
+  st.lastPlayed = nowIso();
+  if (mode) {
+    const b = st.byMode[mode] || (st.byMode[mode] = { runs: 0, meters: 0, seconds: 0 });
+    b.runs += r;
+    b.meters += m;
+    b.seconds += s;
+  }
+  saveStat();
+  return st;
+}
+
+/** 取（并惰性建立）某辆车的明细 */
+function metaOf(id) {
+  return store.garageMeta[id] || (store.garageMeta[id] = { boughtAt: "", formAt: "", odometerM: 0, runs: 0 });
+}
+/** 购车时打点：只记第一次（重复调用不会覆盖已记录的购入时间） */
+export function noteVehiclePurchase(id) {
+  const m = metaOf(id);
+  if (!m.boughtAt) m.boughtAt = nowIso();
+  return m;
+}
+/** 解锁形态时打点 */
+export function noteVehicleForm(id) {
+  metaOf(id).formAt = nowIso();
+}
+/** 每局结算时累加这台车的里程与场次 */
+export function noteVehicleRun(id, meters) {
+  const m = metaOf(id);
+  m.runs += 1;
+  m.odometerM += Math.max(0, Math.round(Number(meters) || 0));
+  return m;
+}
+/**
+ * 记录一场宇宙联赛赛事的成绩。
+ * @param {string} key 赛事键（"L2-B-1" = 联赛 2 / 分区乙 / 第 1 场）
+ * @param {number} place 最终名次（1 起；0 = 未完赛）
+ */
+export function noteSpaceResult(key, place, won) {
+  const rec = store.space.records[key] || (store.space.records[key] = { runs: 0, wins: 0, best: 0 });
+  rec.runs += 1;
+  if (won) rec.wins += 1;
+  if (place > 0 && (rec.best === 0 || place < rec.best)) rec.best = place;
+  return rec;
+}
+
+// ---------------- 升级数据访问 ----------------
+
+/** 读取当前车辆的升级等级（没有则惰性初始化） */
+export function getUp() {
+  const veh = VEHICLES[store.currentVehicle];
+  const id = veh ? veh.id : VEHICLES[0].id;
+  return store.upgrades[id] || (store.upgrades[id] = { engine: 0, tire: 0, frame: 0, susp: 0 });
+}
+
+export function loadAchList() {
+  const v = jsonOr(lsGet(SAVE_KEYS.ach) || "[]", []);
+  store.achGot = Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+}
+
+// ============================================================
+//  多存档槽
+// ============================================================
+
+function readSlots() {
+  const v = jsonOr(rawGet(META_KEYS.slots), []);
+  return Array.isArray(v) ? v.slice(0, MAX_SLOTS) : [];
+}
+function writeSlots(v) {
+  rawSet(META_KEYS.slots, JSON.stringify(v.slice(0, MAX_SLOTS)));
+}
 function slotUsed(n) {
-  return slotGet(n, SAVE_KEYS.gold) !== null || slotGet(n, SAVE_KEYS.stars) !== null;
+  if (rawGet(slotKey(n, SAVE_KEYS.doc)) !== null) return true;
+  for (const k of ALL_KEYS) {
+    if (k === SAVE_KEYS.doc) continue;
+    if (rawGet(slotKey(n, k)) !== null) return true;
+  }
+  return false;
 }
-/** 汇总槽位列表（供面板渲染）：未启用的槽显示为"空" */
+export function currentSlot() {
+  return slotIndex();
+}
+/** 汇总槽位列表（面板渲染用）：未启用的槽显示为"空" */
 export function listSlots() {
   const meta = readSlots();
   const out = [];
@@ -112,7 +802,7 @@ export function listSlots() {
     const m = meta[n] || {};
     out.push({
       index: n,
-      name: used ? (m.name || `存档${n + 1}`) : `存档${n + 1}`,
+      name: m.name || `存档${n + 1}`,
       used,
       active: n === slotIndex(),
       updatedAt: m.updatedAt || "",
@@ -120,6 +810,11 @@ export function listSlots() {
     });
   }
   return out;
+}
+function clearedCountOfCurrent() {
+  let n = 0;
+  for (const s of store.stars) if (s >= 1) n++;
+  return n;
 }
 /** 记录当前槽的元信息（存档时顺带写，省一次额外遍历） */
 function touchSlotMeta(n, cleared) {
@@ -133,14 +828,8 @@ function touchSlotMeta(n, cleared) {
   };
   writeSlots(meta);
 }
-/** 当前槽下标（UI 用） */
-export function currentSlot() {
-  return slotIndex();
-}
-/**
- * 切换存档槽：先把当前槽落盘，再载入目标槽。
- * 目标槽是空的 → 初始化为一份全新存档（等同于第一次进游戏）。
- */
+
+/** 切换存档槽：先把当前槽落盘，再载入目标槽。目标槽为空 = 一份全新存档 */
 export function switchSlot(n) {
   n = n | 0;
   if (n < 0 || n >= MAX_SLOTS) return false;
@@ -149,24 +838,15 @@ export function switchSlot(n) {
   rawSet(META_KEYS.slot, String(n));
   store.slot = n;
   loadSave();
-  loadAchList();
-  loadProgress();
-  touchSlotMeta(n, clearedCountOfCurrent());
   return true;
 }
 /** 新建一个空槽（占用下一个未使用的槽位）并切过去 */
 export function createSlot() {
-  const used = listSlots().filter((s) => s.used);
-  if (used.length >= MAX_SLOTS) return -1;
-  let target = -1;
-  for (let n = 0; n < MAX_SLOTS; n++) if (!slotUsed(n)) { target = n; break; }
+  if (listSlots().filter((s) => s.used).length >= MAX_SLOTS) return -1;
+  const target = listSlots().findIndex((s) => !s.used);
   if (target < 0) return -1;
   switchSlot(target);
-  resetSave();               // 落一份干净的初始存档
-  const meta = readSlots();
-  while (meta.length < MAX_SLOTS) meta.push({});
-  meta[target] = { name: `存档${target + 1}`, updatedAt: new Date().toISOString().slice(0, 10), cleared: 0 };
-  writeSlots(meta);
+  resetSave();
   return target;
 }
 /** 删除某个槽（当前槽不能删，删了会失去落盘目标） */
@@ -174,19 +854,15 @@ export function deleteSlot(n) {
   n = n | 0;
   if (n < 0 || n >= MAX_SLOTS || n === slotIndex()) return false;
   for (const k of ALL_KEYS) rawRemove(slotKey(n, k));
-  // ★ 槽 0 沿用裸 bike_* 键名，其中可能有历史遗留 / 手工塞进来的键（不在 ALL_KEYS 里）。
-  //   只删 ALL_KEYS 会让「存档1」删不掉 —— 数据还在，槽位永远显示"已用"。
+  // 槽 0 还可能有历史遗留 / 手工塞进来的键（不在 ALL_KEYS 里），不删就会让槽位永远显示"已用"
   if (n === 0) {
     try {
-      if (typeof localStorage.length === "number" && typeof localStorage.key === "function") {
-        // 先收集再删：边遍历边 removeItem 会让后面的下标全部错位。
-        const dead = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k && k.indexOf("bike_") === 0) dead.push(k);
-        }
-        for (const k of dead) rawRemove(k);
+      const dead = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k.indexOf("bike_") === 0 || k === SAVE_KEYS.doc)) dead.push(k);
       }
+      for (const k of dead) rawRemove(k);
     } catch (e) {
       available = false;
     }
@@ -197,19 +873,118 @@ export function deleteSlot(n) {
   writeSlots(meta);
   return true;
 }
-function clearedCountOfCurrent() {
-  let n = 0;
-  const raw = slotGet(slotIndex(), SAVE_KEYS.stars);
-  try {
-    const v = JSON.parse(raw || "[]");
-    if (Array.isArray(v)) for (const s of v) if (s >= 1) n++;
-  } catch (e) { /* 坏数据按 0 计 */ }
-  return n;
+
+/** 清空当前槽并恢复初始状态（存档面板的"重置存档"） */
+export function resetSave() {
+  applyDoc(null);
+  store.createdAt = nowIso();
+  writeDoc(buildDoc());
+  clearLegacyKeys();
+  saveAchList();
+  touchSlotMeta(slotIndex(), 0);
+  return true;
 }
+
+// ============================================================
+//  导入 / 导出
+// ============================================================
+
+/** 从导入数据里解析进度概览（容错不抛异常），供确认前的对比展示 */
+export function summarizeSave(doc) {
+  const d = objOr(doc) || {};
+  const c = objOr(d.campaign) || {};
+  const stars = Array.isArray(c.stars) ? c.stars : [];
+  let total = 0;
+  for (const s of stars) {
+    const n = Number(s) || 0;
+    if (n > 0) total += n;
+  }
+  const g = objOr(d.garage) || {};
+  return {
+    cleared: stars.filter((s) => Number(s) > 0).length,
+    stars: total,
+    rating: Math.max(0, intOr((objOr(d.ranked) || {}).rating)),
+    spaceRating: Math.max(0, intOr((objOr(d.space) || {}).rating)),
+    gold: safeGold(fromPlainDecimal((objOr(d.wallet) || {}).gold)),
+    vehicles: Array.isArray(g.owned) ? g.owned.length : 0,
+  };
+}
+
+/**
+ * 校验导入文本。**同时接受两种格式**：
+ *   format 2 = v5 文档（现行）；format 1 = 旧的 bike_* 裸键（弃用但仍可导入，
+ *   导入时当场转成 v5 文档，玩家存了多年的老导出文件不会作废）。
+ */
+export function parseSave(text) {
+  let obj;
+  try {
+    obj = JSON.parse(text);
+  } catch (e) {
+    return { ok: false, error: "存档内容不是合法 JSON" };
+  }
+  if (!objOr(obj) || obj.app !== SAVE_APP) {
+    return { ok: false, error: "不是本游戏的存档" };
+  }
+  let data = null;
+  if (obj.format === SAVE_FORMAT) data = objOr(obj.doc) || objOr(obj.data);
+  else if (obj.format === 1) data = legacyDocFrom(obj.data);
+  if (!data) return { ok: false, error: "存档数据非法" };
+  return { ok: true, data, summary: summarizeSave(data) };
+}
+
+/** 导出为格式化 JSON 文本（供下载与测试断言） */
+export function exportSave() {
+  return JSON.stringify({ app: SAVE_APP, format: SAVE_FORMAT, doc: buildDoc() }, null, 2);
+}
+
+/** 触发浏览器下载。测试环境没有 Blob / URL / document → 优雅降级返回 false */
+export function downloadSave() {
+  try {
+    if (typeof Blob === "undefined" || typeof URL === "undefined" ||
+        typeof URL.createObjectURL !== "function" || typeof document === "undefined") {
+      return false;
+    }
+    const blob = new Blob([exportSave()], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = saveFileName();
+    if (typeof a.click === "function") a.click();
+    if (typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(url);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/** 导出文件名：dale-bike-save-<YYYYMMDD-HHmm>.json */
+function saveFileName(d = new Date()) {
+  const p = (n) => String(n).padStart(2, "0");
+  return (
+    "dale-bike-save-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+    "-" + p(d.getHours()) + p(d.getMinutes()) + ".json"
+  );
+}
+
+/**
+ * 导入并**立即生效**：直接覆盖当前槽的文档。
+ * 入参是 parseSave 返回的 data（v5 文档）或 parseSave 的完整返回值。
+ */
+export function importSave(data) {
+  const doc = data && data.data ? data.data : data;
+  if (!objOr(doc)) return { ok: false, error: "存档数据非法" };
+  applyDoc(doc);
+  save();
+  return { ok: true, data: doc };
+}
+
+// ============================================================
+//  自动保存
+// ============================================================
 
 /** 探测 localStorage 是否可写（写-读-清，抛异常则标记为不可用） */
 function probeStorage() {
-  const k = "__dale_probe__"; // 不以 bike_ 开头，避免被导入/导出采集
+  const k = "__dale_probe__"; // 不以 bike_ / dale_save 开头，避免被导出采集
   try {
     const prev = localStorage.getItem(k);
     localStorage.setItem(k, "1");
@@ -219,345 +994,9 @@ function probeStorage() {
   }
 }
 
-function lsGet(k) {
-  try {
-    return localStorage.getItem(sk(k));
-  } catch (e) {
-    available = false;
-    return null;
-  }
-}
-
-function lsSet(k, v) {
-  try {
-    localStorage.setItem(sk(k), v);
-    return true;
-  } catch (e) {
-    available = false;
-    return false;
-  }
-}
-
-function lsRemove(k) {
-  try {
-    localStorage.removeItem(sk(k));
-    return true;
-  } catch (e) {
-    available = false;
-    return false;
-  }
-}
-
-/** 安全地解析 JSON，失败返回 fallback */
-function jsonOr(raw, fallback) {
-  try {
-    const v = JSON.parse(raw);
-    return v === null || v === undefined ? fallback : v;
-  } catch (e) {
-    return fallback;
-  }
-}
-
 /**
- * 安全地解析存档里的数值，失败返回 0。
- *
- * ★ 必须用 `Number()` 而不是 `parseInt()`，这是实测到的丢档 bug 的正解：
- *   · 余额 ≥ 1e21 时 `String(v)` 写成指数记数法 `"1e+21"`，
- *     `parseInt("1e+21", 10)` 返回 **1** —— 玩家的两千亿凭空变成 1 金币。
- *     `Number("1e+21")` 则正确返回 1e21。
- *   · 余额是 `Infinity` / `NaN` 时落盘原文是 `"Infinity"` / `"NaN"`，
- *     `parseInt` 得 NaN → 兜底 **0**，刷新即清零（这正是玩家遇到的症状）。
- *     这里对非有限值一律返回 0，并且写入侧还有 `safeGold` 提前拦一道。
- */
-function intOr(v) {
-  // ★ 布尔必须显式排除：Number(true) === 1，会把一个坏档位读成"胜场 1 场"。
-  //   （parseInt 对这点是对的，改用 Number 时不补这一句就回归了。）
-  if (typeof v === "boolean" || v === null || v === undefined) return 0;
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.trunc(n) : 0;
-}
-
-/**
- * 把任意值夹成合法的升级等级：非整数 / NaN / 越界 / 负数 一律回落到夹紧后的值。
- *
- * ★ 坏存档会让**物理直接算出 NaN**，而不只是"数值难看"：
- *   deriveHandling 算 `1 + 0.020 * up.engine`，engine 若是 undefined / "a" / 负数，
- *   topSpeed / torquePeak / brakePeak 全变 NaN → applyUpgrades 写进 store.phys，
- *   之后车推不动、速度恒 0，而 store.state 仍显示 play —— 玩家看着"在玩"却完全无法操控。
- *   所以这里对**四个字段逐一**校验，而不是只判断对象存不存在。
- */
-function clampLv(v, maxLv) {
-  const n = Math.round(Number(v));
-  if (!Number.isFinite(n)) return 0;
-  const hi = maxLv || MAX_LV;
-  return Math.max(0, Math.min(hi, n));
-}
-
-/** 把任意值夹成 0..3 的星级 */
-function clampStar(v) {
-  const n = Math.round(Number(v));
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.min(3, n);
-}
-
-/** 校验"每车一份升级"的容器：只保留形状正确的条目 */
-function sanitizeUpgrades(u) {
-  const out = {};
-  if (!u || typeof u !== "object" || Array.isArray(u)) return out;
-  for (const veh of VEHICLES) {
-    const rec = u[veh.id];
-    if (!rec || typeof rec !== "object" || Array.isArray(rec)) continue;
-    const ml = maxLvOf(veh);
-    out[veh.id] = {
-      engine: clampLv(rec.engine, ml),
-      tire: clampLv(rec.tire, ml),
-      frame: clampLv(rec.frame, ml),
-      susp: clampLv(rec.susp, ml),
-    };
-  }
-  return out;
-}
-
-/** 读取当前车辆的升级等级（没有则初始化） */
-export function getUp() {
-  const id = VEHICLES[store.currentVehicle].id;
-  if (!store.upgrades[id]) {
-    store.upgrades[id] = { engine: 0, tire: 0, frame: 0, susp: 0 };
-  }
-  return store.upgrades[id];
-}
-
-export function loadAchList() {
-  const raw = lsGet(SAVE_KEYS.ach);
-  const v = jsonOr(raw || "[]", []);
-  store.achGot = Array.isArray(v) ? v : [];
-}
-
-export function saveAchList() {
-  lsSet(SAVE_KEYS.ach, JSON.stringify(store.achGot));
-}
-
-/**
- * 主存档写盘（gold / up / unlocked / stars / veh / owned / mute / best）。
- * 同时落盘进度阶梯 / 段位分 / 累计统计：通关结算、解锁关卡/场景、购车、
- * 升级、成就、段位变化等既有落盘点都走这里，因此一处委托即可全覆盖。
- */
-export function save() {
-  // 写盘前先夹紧 + 取整，再走 BigInt 十进制展开。
-  // ★ 不能用 String()：余额会超过 1e21（宇宙级资产合计 2.43e22），
-  //   String 在那个量级会输出 "1e+21" 这样的指数记数法，读回来就是另一个数。
-  store.gold = safeGold(store.gold);
-  lsSet(SAVE_KEYS.gold, toPlainDecimal(store.gold));
-  lsSet(SAVE_KEYS.up, JSON.stringify(store.upgrades));
-  lsSet(SAVE_KEYS.unlocked, store.unlocked);
-  lsSet(SAVE_KEYS.stars, JSON.stringify(store.stars));
-  lsSet(SAVE_KEYS.veh, store.currentVehicle);
-  lsSet(SAVE_KEYS.owned, JSON.stringify(store.ownedVehicles));
-  lsSet(SAVE_KEYS.mute, store.muted ? "1" : "0");
-  lsSet(SAVE_KEYS.best, store.best);
-  lsSet(SAVE_KEYS.ultra, JSON.stringify(store.ultra || {}));
-  lsSet(SAVE_KEYS.sel, store.selLevel || 0);
-  saveProgress();
-  touchSlotMeta(slotIndex(), clearedCountOfCurrent());
-}
-
-// ---------------- 进度阶梯：纯函数 ----------------
-
-/** 由星级数组推导"已通关支线下标"（纯函数：星级是唯一事实来源） */
-function clearedBranchesOf(stars) {
-  const arr = Array.isArray(stars) ? stars : [];
-  const out = [];
-  for (let bi = 0; bi < BRANCHES.length; bi++) {
-    let all = true;
-    for (let k = 0; k < LEVELS_PER_BRANCH; k++) {
-      if (!(arr[bi * LEVELS_PER_BRANCH + k] > 0)) { all = false; break; }
-    }
-    if (all) out.push(bi);
-  }
-  return out;
-}
-
-/** 由 store.stars 推导"已通关支线下标" */
-export function deriveBranchCleared() {
-  return clearedBranchesOf(store.stars);
-}
-
-/**
- * "已通关场景"推导（纯函数）：某支线 12 关全部 ≥1 星 → 该支线绑定的场景可选。
- * 支线的场景下标与支线下标 1:1（BRANCHES[i].theme === i），因此返回的是场景下标数组。
- * 只依赖星级，不含登顶判定（登顶是"能否选图"的准入，由 syncFreeThemes / freeInit 单独把关）。
- */
-export function availableFreeThemes(stars) {
-  const out = [];
-  for (const bi of clearedBranchesOf(stars)) {
-    const b = BRANCHES[bi];
-    const th = b ? b.theme : bi;
-    if (!out.includes(th)) out.push(th);
-  }
-  return out;
-}
-
-/** 高级排位赛准入（rating ≥ 1200）——纯函数，便于测试 */
-export function isAdvancedUnlocked(rating) {
-  return (Number(rating) || 0) >= RATING_ADVANCED;
-}
-
-/**
- * 阶梯解锁判定（纯函数，不修改入参）。
- * @param {object} progress store.progress 形态的对象
- * @param {number[]} stars 全部关卡的星级数组
- * @returns {{allCleared:boolean, finaleUnlocked:boolean, finaleDone:boolean,
- *            invited:boolean, advancedUnlocked:boolean, peak:boolean}}
- *  · 全部关卡通关（每关星级 ≥1）→ finaleUnlocked = true
- *  · 最终任务通关 → finaleDone = true 且 invited = true
- *  · rating ≥ RATING_ADVANCED(1200) → advancedUnlocked = true
- *  · rating ≥ RATING_PEAK(3300) → peak = true（登顶后永久保持）
- */
-export function deriveUnlocks(progress, stars) {
-  const p = progress && typeof progress === "object" ? progress : {};
-  const arr = Array.isArray(stars) ? stars : [];
-  let allCleared = LEVELS.length > 0;
-  for (let i = 0; i < LEVELS.length; i++) {
-    if (!(arr[i] >= 1)) { allCleared = false; break; }
-  }
-  const done = p.finaleDone === true;
-  const rating = Math.max(0, intOr(p.rating));
-  return {
-    allCleared,
-    finaleUnlocked: allCleared,
-    finaleDone: done,
-    invited: done || p.invited === true,
-    advancedUnlocked: isAdvancedUnlocked(rating),
-    peak: p.peak === true || rating >= RATING_PEAK,
-  };
-}
-
-/**
- * 把阶梯派生态写回 store.progress（支线通关 / 最终任务邀请 / 登顶永久化 / 自由选图）。
- * 只改内存，不落盘（由调用方决定何时 saveProgress）。
- */
-export function refreshProgress() {
-  const P = store.progress;
-  P.branchCleared = deriveBranchCleared();
-  const d = deriveUnlocks(P, store.stars);
-  if (d.finaleDone) P.finaleDone = true;
-  if (d.invited) P.invited = true;
-  if (d.peak) P.peak = true;
-  syncFreeThemes();
-  return P;
-}
-
-/**
- * 登顶后把"已通关支线对应的场景"写入 freeThemes（无限模式自由选图用）。
- * 未登顶时不动（保持 empty）。
- */
-export function syncFreeThemes() {
-  const P = store.progress;
-  if (!P.peak) {
-    P.freeThemes = [];
-    return P.freeThemes;
-  }
-  P.freeThemes = availableFreeThemes(store.stars);
-  return P.freeThemes;
-}
-
-// ---------------- 进度 / 段位 / 累计统计 读写 ----------------
-
-/** 读 bike_stat（缺失或损坏 → 全 0 / 空串） */
-export function loadStat() {
-  const raw = lsGet(SAVE_KEYS.stat);
-  const s = jsonOr(raw || "null", null);
-  const o = s && typeof s === "object" && !Array.isArray(s) ? s : {};
-  store.stat.totalRuns = Math.max(0, intOr(o.totalRuns !== undefined ? o.totalRuns : o.games));
-  store.stat.totalMeters = Math.max(0, Number(o.totalMeters !== undefined ? o.totalMeters : o.dist) || 0);
-  store.stat.totalSeconds = Math.max(0, Number(o.totalSeconds !== undefined ? o.totalSeconds : o.time) || 0);
-  store.stat.lastPlayed = typeof o.lastPlayed === "string" ? o.lastPlayed : "";
-  // 累计收入（宇宙场金币任务的进度判据）：只增不减，老存档缺该键 → 0
-  store.stat.earnedGold = Math.max(0, Number(o.earnedGold) || 0);
-  return store.stat;
-}
-
-/** 写 bike_stat */
-export function saveStat() {
-  lsSet(SAVE_KEYS.stat, JSON.stringify(store.stat));
-}
-
-/** 写进度阶梯 / 段位分 / 累计统计（三个新增键） */
-export function saveProgress() {
-  lsSet(SAVE_KEYS.prog, JSON.stringify(store.progress));
-  lsSet(SAVE_KEYS.rating, String(store.progress.rating));
-  saveStat();
-}
-
-/** 结算落盘点：刷新阶梯派生态后立即写盘（通关 / 段位变化 / 解锁时调用） */
-export function settleProgress() {
-  refreshProgress();
-  saveProgress();
-  return store.progress;
-}
-
-/**
- * 读 bike_prog / bike_rating / bike_stat。
- * 任一键缺失或 JSON 损坏 → 该字段回退默认值（不崩溃）。
- * 支线通关 / 邀请 / 登顶以派生态兜底（手工改档 / 导入后仍自洽）。
- */
-export function loadProgress() {
-  const P = store.progress;
-  const prog = jsonOr(lsGet(SAVE_KEYS.prog) || "null", null);
-  const o = prog && typeof prog === "object" && !Array.isArray(prog) ? prog : {};
-
-  P.finaleDone = o.finaleDone === true;
-  // 终局关断点（R1.3）：老存档没有这个字段 → 0 = 从第一段开始，行为与旧版一致。
-  // 夹到 [0, 段数]：手工改档 / 导入的脏数据不能让断点指到不存在的段。
-  P.finaleSeg = Math.max(0, Math.min(FINALE_SEGS, intOr(o.finaleSeg)));
-  P.invited = o.invited === true;
-  P.wins = Math.max(0, intOr(o.wins));
-  P.losses = Math.max(0, intOr(o.losses));
-  P.peak = o.peak === true;
-  P.rating = Math.max(0, intOr(lsGet(SAVE_KEYS.rating)));
-  // 升段奖励的水位线：只涨不跌。老存档没有这个字段 → 0，表示"之前都没领过"，
-  // 下一次跨段会把历史该拿的一次性奖励一次性补齐（而不是白送，是把欠的账结清）。
-  P.promoClaimed = Math.max(0, intOr(o.promoClaimed));
-  // 水位线不该低于当前段位分：否则老玩家每赢一局都会被判成"新跨段"反复领同一段的钱
-  if (P.promoClaimed < P.rating) P.promoClaimed = P.rating;
-
-  loadStat();
-
-  // 派生兜底：最终任务通关 → 已邀请；rating 达标 → 登顶
-  P.branchCleared = deriveBranchCleared();
-  const d = deriveUnlocks(P, store.stars);
-  if (d.invited) P.invited = true;
-  if (d.peak) P.peak = true;
-  P.freeThemes = Array.isArray(o.freeThemes)
-    ? o.freeThemes.filter((n) => Number.isInteger(n) && n >= 0)
-    : [];
-  syncFreeThemes();
-  return P;
-}
-
-/** 累计统计：{ totalRuns, totalMeters(m), totalSeconds(s) } 累加并刷新 lastPlayed */
-export function addStat({ runs = 0, meters = 0, seconds = 0 } = {}) {
-  const st = store.stat;
-  st.totalRuns += Math.max(0, Number(runs) || 0);
-  st.totalMeters += Math.max(0, Number(meters) || 0);
-  st.totalSeconds += Math.max(0, Number(seconds) || 0);
-  st.lastPlayed = new Date().toISOString();
-  saveStat();
-  return st;
-}
-
-/** 兜底写盘：主存档 + 进度/段位/统计（骑行中每 30 秒节流调用 / 切后台时调用） */
-export function saveAll() {
-  save();
-  saveProgress();
-}
-
-/**
- * 接线自动保存：由 main.js 在首屏调用一次。
- *  · 先探测 localStorage 可用性（探测键不以 bike_ 开头，不污染导出内容）
- *  · 骑行中每 intervalMs（默认 30s）兜底写盘
- *  · visibilitychange 切到后台时立即写盘
- * 返回定时器句柄（浏览器为 number；Node 下已 unref，不阻塞进程退出）。
+ * 接线自动保存：骑行中每 intervalMs 兜底写盘 + 切后台立即写盘。
+ * 返回定时器句柄（Node 下已 unref，不阻塞进程退出）。
  */
 let autoSaveTimer = null;
 export function initAutoSave(intervalMs = 30000) {
@@ -574,365 +1013,6 @@ export function initAutoSave(intervalMs = 30000) {
     if (autoSaveTimer && typeof autoSaveTimer.unref === "function") autoSaveTimer.unref();
   }
   return autoSaveTimer;
-}
-
-// ---------------- 老存档迁移（20 关 → 72 关） ----------------
-
-/**
- * 判断是否为"旧关卡数"星级数组（比当前关卡数少，且少到只可能是 20 或 72）。
- *
- * ★ 不能只看"长度小于当前总数"：那种写法会把玩家**故意截断**的坏档也当成老档，
- *   按索引重排后星级会错位。必须显式枚举历史关卡数。
- */
-const LEGACY_LEVEL_COUNTS = [20, 72];
-function isLegacyStars(arr) {
-  if (!Array.isArray(arr) || arr.length === 0) return false;
-  // ≤20 的都算 1~20 代的存档（早期版本存过不满 20 关的中间态，实测存档确实存在 6 项的）；
-  // 另加历史上确有其事的 72 关总数。21 这类"从没有过的长度"不迁移。
-  return arr.length <= 20 || LEGACY_LEVEL_COUNTS.includes(arr.length);
-}
-
-/** 星级数组里最后一个有星的下标（无则 -1） */
-function highestStarred(arr) {
-  let hi = -1;
-  for (let i = 0; i < arr.length; i++) if (arr[i] > 0) hi = i;
-  return hi;
-}
-
-export function loadSave() {
-  try {
-    // 先确定当前槽：**以持久化的 dale_slot 为准**（刷新后回到上次在玩的那个存档），
-    // 越界/损坏回落到存档1。后面的 lsGet/lsSet 全部按它路由。
-    const persisted = parseInt(rawGet(META_KEYS.slot) || "0", 10);
-    store.slot = Number.isFinite(persisted) && persisted >= 0 && persisted < MAX_SLOTS ? persisted : 0;
-    // 金币夹到 ≥0：与 unlocked / sel / rating 的处理对齐。
-    // 否则 bike_gold="-500" 会让 store.gold = -500（-500 是 truthy，`|| 0` 拦不住）。
-    // 金币读回走 fromPlainDecimal（BigInt 十进制解析）。
-    // ★ 不能用 intOr/parseInt：余额量级已到 1e22，
-    //   且旧存档里可能残留 String() 写下的指数记数法（"1e+21"）——
-    //   parseInt("1e+21") === 1，那正是历史上丢档的机制。fromPlainDecimal 两者都兜住。
-    store.gold = safeGold(fromPlainDecimal(lsGet(SAVE_KEYS.gold)));
-
-    const u = jsonOr(lsGet(SAVE_KEYS.up) || "{}", {});
-    if (u && u.engine !== undefined) {
-      // 旧格式（全局单一升级）→ 迁移到当前默认车辆名下
-      const id = VEHICLES[store.currentVehicle].id;
-      store.upgrades = {};
-      store.upgrades[id] = {
-        engine: clampLv(u.engine, maxLvOf(VEHICLES[store.currentVehicle])),
-        tire: clampLv(u.tire, maxLvOf(VEHICLES[store.currentVehicle])),
-        frame: clampLv(u.frame, maxLvOf(VEHICLES[store.currentVehicle])),
-        susp: clampLv(u.susp, maxLvOf(VEHICLES[store.currentVehicle])),
-      };
-    } else {
-      // ★ 这里原来是把整个对象原样赋给 store.upgrades（只判断"是不是对象"）。
-      //   坏值如 {"trail":5} / {"trail":"x"} / {"trail":{"engine":"a"}} 会一路进到
-      //   getUp() → deriveHandling()，算出 NaN 的 topSpeed，车直接推不动而 state 仍是 play。
-      //   与上面 bike_owned 的注释是同一类故障，必须逐字段校验。
-      store.upgrades = sanitizeUpgrades(u);
-    }
-
-    store.unlocked = Math.max(
-      0,
-      Math.min(LEVELS.length - 1, parseInt(lsGet(SAVE_KEYS.unlocked) || "0", 10) || 0)
-    );
-
-    // 当前关卡下标：此前只活在内存，刷新后 HUD / 排位赛面板会显示"第 1 关"
-    store.selLevel = Math.max(
-      0,
-      Math.min(LEVELS.length - 1, parseInt(lsGet(SAVE_KEYS.sel) || "0", 10) || 0)
-    );
-
-    const rawStars = jsonOr(lsGet(SAVE_KEYS.stars) || "[]", []);
-    // ★ 逐元素夹到 0..3 的整数：坏数组 ["a",1,-1,1.5,99] 原样透传后，
-    //   summarizeSave 会按 99★ 汇总、地图上也会显示成 99 星。
-    const starsArr = (Array.isArray(rawStars) ? rawStars : []).map(clampStar);
-
-    store.currentVehicle = parseInt(lsGet(SAVE_KEYS.veh) || "0", 10) || 0;
-
-    const owned = jsonOr(lsGet(SAVE_KEYS.owned) || "[0]", [0]);
-    // 过滤越界/非整数的车辆下标：坏存档（如 bike_owned="[5]"）会让 VEHICLES[i] 变成
-    // undefined，随后 applyUpgrades() 读 .id 抛错 —— 抛点在模块顶层，整个 bundle 死掉、
-    // 且坏值已写进内存态，玩家反复刷新都是白屏，只能手动清 localStorage。
-    store.ownedVehicles = (Array.isArray(owned) ? owned : [0])
-      .map((i) => parseInt(i, 10))
-      .filter((i) => Number.isInteger(i) && i >= 0 && i < VEHICLES.length);
-    if (!store.ownedVehicles.length) store.ownedVehicles = [0];
-    if (!store.ownedVehicles.includes(store.currentVehicle)) {
-      store.currentVehicle = store.ownedVehicles[0];
-    }
-    if (!(store.currentVehicle >= 0 && store.currentVehicle < VEHICLES.length)) {
-      store.currentVehicle = 0;
-    }
-
-    store.muted = lsGet(SAVE_KEYS.mute) === "1";
-    store.best = parseInt(lsGet(SAVE_KEYS.best) || "0", 10) || 0;
-
-    const ultraRaw = jsonOr(lsGet(SAVE_KEYS.ultra) || "{}", {});
-    store.ultra = (ultraRaw && typeof ultraRaw === "object" && !Array.isArray(ultraRaw)) ? ultraRaw : {};
-
-    const ver = parseInt(lsGet(SAVE_KEYS.ver) || "0", 10) || 0;
-
-    // 版本 1 → 2：历史货币换算（只执行一次，保留原有逻辑）
-    if (ver < 2) {
-      store.gold *= 10;
-    }
-
-    // 版本 2 → 4：关卡数结构迁移（20 → 72 → 432，只执行一次，由 bike_v 守护）
-    // 旧第 i 关的全局索引仍是 i，因此星级按索引原样映射；解锁不回退；星级补齐 0。
-    let migrated = false;
-    let stars = starsArr;
-    if (ver < CUR_VER && isLegacyStars(starsArr)) {
-      migrated = true;
-      stars = starsArr.slice(0, LEVELS.length);
-      const hi = highestStarred(stars);
-      if (store.unlocked < hi + 1) {
-        store.unlocked = Math.min(LEVELS.length - 1, hi + 1);
-      }
-    }
-    while (stars.length < LEVELS.length) stars.push(0);
-    store.stars = stars;
-
-    // 版本号落后 → 落盘迁移结果并提升到当前版本（只写一次）
-    if (ver < CUR_VER) {
-      if (migrated) store.progress.branchCleared = deriveBranchCleared();
-      lsSet(SAVE_KEYS.ver, String(CUR_VER));
-      // ★ 必须**先 loadProgress 再 save**。
-      //   save() 内部委托 saveProgress()，会把 store.progress.rating / stat 原样写回；
-      //   而此刻这些字段还是模块初始的 0 —— 直接 save 会把玩家攒下的段位分与
-      //   累计统计**清零**。（实测：baseline rating=1350，迁移后读回 0。）
-      //   读一次再写，迁移就只改它该改的（星级数组 / 解锁进度 / 版本号）。
-      loadProgress();
-      save();
-    }
-
-    // 特殊模式体验包（localStorage 键 bike_trial=1）：每次加载都把
-    // "满级的全部车辆 + 全部特殊模式 + 200 万金币"备好，供直接体验终极模式。
-    // 玩家游玩/覆盖存档无妨——下次进入自动恢复；删除该键即回归正常规则。
-    if (lsGet("bike_trial") === "1") {
-      store.ownedVehicles = VEHICLES.map((v, i) => i);
-      if (store.gold < 2000000) store.gold = 2000000;
-      for (const v of VEHICLES) {
-        if (!v.ultra) continue;
-        const id = v.id;
-        if (!store.upgrades[id]) store.upgrades[id] = { engine: 0, tire: 0, frame: 0, susp: 0 };
-        const ml = maxLvOf(v);
-        store.upgrades[id].engine = ml;
-        store.upgrades[id].tire = ml;
-        store.upgrades[id].frame = ml;
-        store.upgrades[id].susp = ml;
-        store.ultra[v.id] = true;
-      }
-      if (!store.ownedVehicles.includes(store.currentVehicle)) store.currentVehicle = 1;
-    }
-  } catch (e) {
-    /* 存档损坏时用默认值继续 */
-  }
-}
-
-// ---------------- 存档导入 / 导出 ----------------
-
-/** 需要纳入导入/导出的键：受管理的键 + localStorage 里实际存在的其它 bike_ 前缀键 */
-/**
- * 当前槽用到的全部存档键（**逻辑键名**，不带槽前缀）。
- *
- * ★ 多槽之后，导入/导出/重置必须**只作用于当前槽**：
- *   旧实现把 localStorage 里所有 bike_* 键都扫进来，那会把别的槽一起导出/清掉。
- *   现在只认「槽 0 的裸 bike_* 键」+「当前槽前缀的那一组」，
- *   槽元数据（dale_slot/dale_slots）本来就不以 bike_ 开头，天然被排除。
- */
-function listSaveKeys() {
-  const n = slotIndex();
-  const set = new Set(ALL_KEYS);
-  try {
-    if (typeof localStorage.length === "number" && typeof localStorage.key === "function") {
-      const prefix = n === 0 ? "bike_" : `dale_s${n}_bike_`;
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k) continue;
-        if (n === 0) {
-          if (k.indexOf("bike_") === 0) set.add(k);
-        } else if (k.indexOf(prefix) === 0) {
-          set.add(k.slice(`dale_s${n}_`.length)); // 剥掉槽前缀，还原成逻辑键
-        }
-      }
-    }
-  } catch (e) {
-    available = false;
-  }
-  return Array.from(set);
-}
-
-/** 汇总当前 localStorage 中全部 bike_ 键（原样字符串，不做字段级解析） */
-export function exportSave() {
-  const data = {};
-  for (const k of listSaveKeys()) {
-    const v = lsGet(k);
-    if (v !== null && v !== undefined) data[k] = v;
-  }
-  return { app: SAVE_APP, format: SAVE_FORMAT, savedAt: new Date().toISOString(), data };
-}
-
-/** 导出文件名：dale-bike-save-<YYYYMMDD-HHmm>.json */
-function saveFileName(d = new Date()) {
-  const p = (n) => String(n).padStart(2, "0");
-  return (
-    "dale-bike-save-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
-    "-" + p(d.getHours()) + p(d.getMinutes()) + ".json"
-  );
-}
-
-/**
- * 触发浏览器下载导出文件。
- * 测试环境没有 Blob / URL / document → 优雅降级并返回 false。
- */
-export function downloadSave() {
-  try {
-    if (typeof Blob === "undefined" || typeof URL === "undefined" ||
-      typeof URL.createObjectURL !== "function" || typeof document === "undefined") {
-      return false;
-    }
-    const blob = new Blob([JSON.stringify(exportSave(), null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = saveFileName();
-    if (typeof a.click === "function") a.click();
-    if (typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(url);
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
-
-/** 对象里是否含有直接的 bike_ 键 */
-function hasBikeKey(obj) {
-  return Object.keys(obj).some((k) => k.indexOf("bike_") === 0);
-}
-
-/** 从"完整导出对象 / parseSave 结果 / 裸 data 映射"里取出键值映射（容错） */
-function pickDataMap(data) {
-  if (!data || typeof data !== "object" || Array.isArray(data)) return {};
-  // 完整导出对象 or parseSave 结果：都带 .data
-  if (data.data && typeof data.data === "object" && !Array.isArray(data.data) && !hasBikeKey(data)) {
-    return data.data;
-  }
-  return data;
-}
-
-/**
- * 校验导入文本：JSON 可解析 / app 匹配 / format 受支持 / data 为非数组对象。
- * 校验失败**不写入任何键**，返回 { ok:false, error }。
- */
-export function parseSave(text) {
-  let obj;
-  try {
-    obj = JSON.parse(text);
-  } catch (e) {
-    return { ok: false, error: "存档内容不是合法 JSON" };
-  }
-  if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
-    return { ok: false, error: "存档根对象非法" };
-  }
-  if (obj.app !== SAVE_APP) {
-    return { ok: false, error: "不是本游戏的存档（app 不符）" };
-  }
-  if (obj.format !== SAVE_FORMAT) {
-    return { ok: false, error: "不支持的存档格式：" + obj.format };
-  }
-  const data = obj.data;
-  if (!data || typeof data !== "object" || Array.isArray(data)) {
-    return { ok: false, error: "存档数据非法" };
-  }
-  return { ok: true, data, summary: summarizeSave(data) };
-}
-
-/** 从导入数据中解析进度概览（通关数 / 总星数 / 段位分 / 金币），容错不抛异常 */
-export function summarizeSave(data) {
-  const map = pickDataMap(data);
-  const starsRaw = jsonOr(map[SAVE_KEYS.stars], []);
-  const stars = Array.isArray(starsRaw) ? starsRaw : [];
-  let cleared = 0;
-  let totalStars = 0;
-  for (const s of stars) {
-    const n = Number(s) || 0;
-    if (n > 0) { cleared++; totalStars += n; }
-  }
-  return {
-    cleared,
-    stars: totalStars,
-    rating: Math.max(0, intOr(map[SAVE_KEYS.rating])),
-    // 导入预览里的金币同样走 fromPlainDecimal：导入文件可能是旧版用 String()
-  // 写下的指数记数法，intOr 虽能读回但这里保持与正式读档同一条口径。
-  gold: safeGold(fromPlainDecimal(map[SAVE_KEYS.gold])),
-  };
-}
-
-/**
- * 整体写回存档：先移除现有全部 bike_ 键，再写入 data 中的 bike_ 键，
- * 然后重新执行读档与迁移（loadSave + loadProgress），返回结果供界面刷新。
- * 入参可以是 parseSave 返回的 { data } / 完整导出对象 / 裸 data 映射。
- */
-export function importSave(data) {
-  const map = pickDataMap(data);
-  const entries = Object.entries(map).filter(
-    ([k, v]) => typeof k === "string" && k.indexOf("bike_") === 0 && v !== null && v !== undefined
-  );
-  if (!entries.length) return { ok: false, error: "存档不含任何 bike_ 键" };
-
-  for (const k of listSaveKeys()) lsRemove(k);
-  for (const [k, v] of entries) lsSet(k, String(v));
-
-  // ★ 导入的文件若**没有** bike_v，loadSave() 会把它当成版本 0，
-  //   于是走 "v1→v2 货币换算" 把金币 **×10**：导入对话框预览 500，落地变 5000。
-  //   （本项目自己导出的文件永远带 bike_v="3"，所以只有手改过的/外来的文件会踩到。）
-  //   显式导入 = 用户已经挑定了这份数据，不该再被二次解释；
-  //   而文件**自带** bike_v 的老存档仍照常迁移，两者不冲突。
-  if (!Object.prototype.hasOwnProperty.call(map, SAVE_KEYS.ver)) {
-    lsSet(SAVE_KEYS.ver, String(CUR_VER));
-  }
-
-  loadSave();
-  loadAchList();
-  loadProgress();
-  return { ok: true, data: map };
-}
-
-/** 清空全部 bike_ 键并恢复初始状态（仅第 1 关解锁），供存档面板"重置存档"用 */
-export function resetSave() {
-  for (const k of listSaveKeys()) lsRemove(k);
-
-  store.gold = 0;
-  store.unlocked = 0;
-  // ★ selLevel 也要归零：漏掉它的话 save() 会把"上次选中的关卡"原样写回 bike_sel，
-  //   于是"重置存档"后刷新页面仍停在原来那一关，而不是初始的第 1 关。
-  store.selLevel = 0;
-  store.stars = new Array(LEVELS.length).fill(0);
-  store.best = 0;
-  store.ownedVehicles = [0];
-  store.currentVehicle = 0;
-  store.upgrades = {};
-  store.ultra = {};
-  store.muted = false;
-  store.achGot = [];
-  store.progress = {
-    branchCleared: [],
-    finaleDone: false,
-    finaleSeg: 0,
-    invited: false,
-    rating: 0,
-    wins: 0,
-    losses: 0,
-    peak: false,
-    promoClaimed: 0,
-    freeThemes: [],
-  };
-  store.stat = { totalRuns: 0, totalMeters: 0, totalSeconds: 0, lastPlayed: "" };
-
-  save(); // 内部委托 saveProgress()，一并落盘进度/段位/统计
-  saveAchList();
-  lsSet(SAVE_KEYS.ver, String(CUR_VER));
-  return true;
 }
 
 export { RATING_ADVANCED, RATING_PEAK };

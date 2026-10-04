@@ -78,7 +78,54 @@ export function fromPlainDecimal(s) {
 // ============================================================
 
 /**
- * 把大数缩写成可读形式。
+ * 指数的步进档位：1 / 3 / 9 / 27 …（每档 ×3）。
+ *
+ * ★ 为什么不用 1/2/5：那是"工程记数法"，读起来像说明书。3 的幂让每一步都是
+ *   一个完整数量级的跳跃，玩家扫一眼就知道"又翻了几档"。
+ */
+function sciExp(a) {
+  return Math.floor(Math.log(a) / Math.log(3));
+}
+
+/** 科学计数法格式化一个正的非零数（mant 的位数由 d 决定） */
+function sciBody(a, d) {
+  const e = sciExp(a);
+  const mant = a / Math.pow(3, e);
+  // 精度守卫：log 误差可能让 mant 跨过 1.0 或 0.999…，那样会显示成 "1.00e0" 紧接 "0.33e1"
+  const norm = mant >= 9.9995 ? [a / Math.pow(3, e + 1), e + 1]
+    : mant < 0.99995 ? [mant * 3, e - 1]
+      : [mant, e];
+  const m = norm[0];
+  return m.toFixed(d) + "×10^" + norm[1];
+}
+
+/**
+ * 金币专用格式化：**统一科学计数法**（用户要求）。
+ *
+ * ★ 为什么金币不再用「万 / 亿」：中文量词在 1e12 之后就只能写成
+ *   "24 亿亿亿" 这种没人读的串，而本作的金币跨度是 0 → 1e25（横跨 25 个数量级）。
+ *   一律走科学计数，量级对比是线性的 —— 5.00×10^18 和 5.00×10^21 一眼看出差 1000 倍。
+ *
+ * 阈值：< 10000 走千分位（¥600 / ¥2,840 这类小额本来就该一眼可数），
+ *   ≥ 10000 一律科学计数。
+ *
+ * @param {number} n 数值（非有限值原样返回）
+ * @param {object} [o]
+ * @param {boolean} [o.yuan] 前缀加 ¥
+ * @param {number} [o.d] 有效小数位（默认 2）
+ */
+export function goldNum(n, o) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return String(n);
+  const sign = v < 0 ? "-" : "";
+  const a = Math.abs(v);
+  const pre = o && o.yuan ? "¥" : "";
+  if (a < 1e4) return pre + sign + Math.round(a).toLocaleString("en-US");
+  return pre + sign + sciBody(a, (o && o.d) || 2);
+}
+
+/**
+ * 把大数缩写成可读形式（非金币用途：里程、次数、星级等）。
  * @param {number} n 数值（非有限值原样返回）
  * @param {object} [o]
  * @param {boolean} [o.yuan] 前缀加 ¥
@@ -108,12 +155,8 @@ export function abbrevNum(n, o) {
     const yi = a / 1e8;
     return pre + sign + (yi < 10 ? fixed(yi, 2) : yi < 1000 ? fixed(yi, 1) : String(Math.floor(yi))) + "亿";
   }
-  // ≥1e12：科学计数，保留 3 位有效数字（3.4e18 而不是 3.42e18 —— 卡片里够读即可）
-  let e = Math.floor(Math.log10(a));
-  // 精度守卫：log10 在 1e12 附近可能算出 11.999…，导致 e 取小一档
-  const mant = a / Math.pow(10, e);
-  if (mant >= 9.9995) { e += 1; }
-  return pre + sign + fixed(mant, 2) + "e" + e;
+  // ≥1e12：交给科学计数（与 goldNum 同一套实现，两边不会各写一份算法）
+  return pre + sign + sciBody(a, 2);
 }
 
 /**

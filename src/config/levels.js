@@ -1081,176 +1081,231 @@ export const RACE_COURSE = (() => {
 /** 最终任务的全局索引（= LEVELS.length）：LEVELS 之后的一个逻辑关卡 */
 export const FINALE_INDEX = LEVELS.length;
 
-// ---------------- 宇宙场（R3） ----------------
+// ---------------- 宇宙联赛 ----------------
 /** 宇宙场模式标识（store.mode 的第 5 个取值） */
 export const MODE_SPACE = "space";
 
+// ============================================================
+//  三层结构：联赛（6） × 分区（甲/乙/丙） × 赛事（3）
+//
+//  ★ 为什么是三层而不是原来的一层"5 个难度分级"：
+//   原来的分级**没有任何递进关系** —— 五张卡片并列，解锁靠"能不能跑赢 AI"，
+//   而 AI 配速又是玩家自己的极速 × 一个倍率，于是每一级对每辆车都是同一个难度。
+//   玩家看到的不是阶梯，是五道门后面一模一样的房间。
+//   现在改成排位赛那套：**分区按联赛段位分解锁**，同一个联赛里三档的对手强度
+//   明确递增（0.60 → 0.74 → 0.86），分区里再挂三种赛制，
+//   于是"打哪一场"变成一次真选择（短距拼爆发 / 群雄拼名次 / 长程拼耐力）。
+//
+// ★ 为什么**按段位分解锁、不按车解锁**（用户明确要求）：
+//   按车解锁会让"买了新车"直接等于"解锁了新内容"，那是在卖车而不是给游戏分层。
+//   按段位分解锁，进度只由玩家自己的表现推进 —— 买不起车只是暂时跑不快，
+//   不会把整块玩法锁死在门外。
+//
+// ★ 为什么对手配速是**联赛的固定值**，而不是玩家极速的百分比：
+//   旧口径（spaceAIScale = 玩家极速 × aiK）有两个致命问题：
+//     1) aiK 一律 < 1 听起来"必赢"，但那是对**表盘标称极速**而言；
+//        实车在坡道上永远跑不到标称值，于是 aiK=0.97 的对手实际快过玩家的可达速度
+//        —— 这正是"加满速都追不上"那个故障的来源。
+//     2) 赛道长度也按玩家极速缩放（len = 极速 × 360s × lenK），
+//        顶档车一局是 5.4e14 px、面板写着"30 分钟"，实测要开一整天。
+//   现在：配速 = 联赛参考配速 × 分区倍率（两个都是绝对数，与玩家无关），
+//   长度 = 联赛参考配速 × 分区时长 × 赛次倍率。
+//   于是「任何车进任何分区，跑完的墙钟时长都落在 30~122 秒」，
+//   而"够不够快跑赢"变成一个明面上的数字对数字 —— 面板直接把它显示出来。
+// ============================================================
+
 /**
- * 5 个难度分级的定义表（R3.2）。
+ * 6 个联赛。每个联赛给出一个**参考配速**（km/h），是这个联赛所有对手的速度基准。
  *
- * | 分级 | 难度取向 | 关卡时长 |
- * |---|---|---|
- * | 易   | 长直坡、地形平缓 | 6 分钟 |
- * | 中   | 中等起伏 | 6 分钟 |
- * | 难   | 起伏加剧 | 6 分钟 |
- * | 极难 | 陡坡密布 | 6 分钟 |
- * | 终极 | 全地形 | 6 分钟 |
- *
- * ★ **长度按玩家实际极速缩放**（实施时修订，原 R3.2 写的是固定 10/50/100/250/500 Mpx）：
- *   `len = 玩家极速 × 360s`，于是**任何车进任何分级都刚好跑满 6 分钟**。
- *
- *   为什么必须改：AI 配速早就改成"玩家极速 ×0.9"了（见 spaceAIScale），
- *   长度却还钉在"某台参考车 × 6 分钟"上，两者直接打架 ——
- *   实测入门宇宙车跑终极级需要数小时，面板却写着"6 分钟"。
- *   玩家看到的是"6 分钟"，实际要开一整天。
- *   另一条路是给分级加车辆门槛，但那样入门车只能进「易」级，
- *   宇宙场对它几乎没用武之地（而它恰恰是任务换来的第一台车）。
- *
- *   分级的难度改由**地形**承担：segs（分段数）与 slopeDeg（坡度上限）逐级递增，
- *   越高的分级坡越陡、段落切换越频繁 —— 这才是"难"的正确载体。
+ * ★ 参考配速的档位刻意对齐车辆阶梯（cv1 28,440 → cv9 10,792,528,488 km/h）：
+ *   参考配速落在某台车"形态满级极速"的 1%~1.5% 附近，那台车开形态就能稳赢本联赛，
+ *   而只升了一半级就会输 —— 于是"升满级"始终是推进的唯一解法。
  *
  * ★ 可用的太空场景下标：themes.js 里 `bg.space === true` 的 4 个
- *   （3 月面 / 11 极夜星空 / 24 冰晶湖 / 34 观星台），
- *   它们都自带视差天体（earth / moon / ringed），R3.1 不需要新写渲染代码。
- * ★ kmh 只用于**面板上的对照文案**（"参考配速"），不参与长度与 AI 计算。
+ *   （3 月面 / 11 极夜星空 / 24 冰晶湖 / 34 观星台），它们自带视差天体。
  */
-export const SPACE_TIERS = [
-  // lenK = 赛道长度倍率（相对"6 分钟基准"）；aiK = 对手配速倍率（相对玩家极速）
-  // ★ 两个都逐级递增：越难 = 赛道越长 + 对手越快（用户要求）。
-  //   aiK 全部 < 1，所以任何分级玩家都跑得过 AI —— 难的是"要跑更久、且容错更小"，
-  //   不是"必输"。真要必输就没���玩了。
-  { id: "easy", name: "易", icon: "🌑", kmh: 28440, segs: 12, slopeDeg: 26, lenK: 1.0, aiK: 0.70, gold: 4e10, themes: [3, 11, 24, 34] },
-  { id: "mid", name: "中", icon: "🪐", kmh: 40320, segs: 18, slopeDeg: 22, lenK: 1.6, aiK: 0.80, gold: 2.4e13, themes: [24, 34, 3, 11] },
-  { id: "hard", name: "难", icon: "🌌", kmh: 60120, segs: 24, slopeDeg: 18, lenK: 2.4, aiK: 0.87, gold: 1.08e17, themes: [34, 3, 24, 11] },
-  { id: "brutal", name: "极难", icon: "⚫", kmh: 3600000, segs: 30, slopeDeg: 14, lenK: 3.6, aiK: 0.93, gold: 5.184e21, themes: [3, 34, 11, 24] },
-  { id: "final", name: "终极", icon: "🌠", kmh: 6300000, segs: 36, slopeDeg: 10, lenK: 5.0, aiK: 0.97, gold: 1.5552e24, themes: [11, 24, 34, 3] },
+export const SPACE_LEAGUES = [
+  { id: "L1", name: "星环层", icon: "🛰️", refKmh: 1000,       segs: 10, slopeDeg: 24, gold: 2e10,    themes: [3, 11, 24, 34] },
+  { id: "L2", name: "疾驰层", icon: "⚡", refKmh: 20000,      segs: 12, slopeDeg: 22, gold: 9e11,    themes: [24, 34, 3, 11] },
+  { id: "L3", name: "越界层", icon: "🌑", refKmh: 45000,      segs: 14, slopeDeg: 20, gold: 4.05e13, themes: [34, 3, 24, 11] },
+  { id: "L4", name: "深空层", icon: "🌌", refKmh: 1500000,    segs: 18, slopeDeg: 17, gold: 1.8225e15, themes: [3, 34, 11, 24] },
+  { id: "L5", name: "星系层", icon: "🌠", refKmh: 3600000,    segs: 22, slopeDeg: 14, gold: 8.20125e16, themes: [11, 24, 34, 3] },
+  { id: "L6", name: "超域层", icon: "🕳️", refKmh: 5400000,    segs: 26, slopeDeg: 11, gold: 3.6905625e18, themes: [24, 3, 11, 34] },
+  { id: "L7", name: "全域层", icon: "💫", refKmh: 6300000,    segs: 30, slopeDeg: 10, gold: 1.66075e20, themes: [34, 11, 24, 3] },
+  { id: "L8", name: "光锥层", icon: "🔆", refKmh: 800000000,  segs: 32, slopeDeg: 8,  gold: 7.47337e21, themes: [3, 24, 34, 11] },
+  { id: "L9", name: "弦外层", icon: "🌀", refKmh: 9000000000, segs: 34, slopeDeg: 6,  gold: 3.36301e23, themes: [11, 3, 24, 34] },
 ];
 
-/** 宇宙场的目标时长（秒）：任何车、任何分级都跑满这么久 */
-export const SPACE_TARGET_SEC = 360;
+/**
+ * 3 个分区。`aiK` 全部 < 1 —— 这是"跑满参考配速就一定赢"的保证，
+ * 也是"任何一局都跑得完"的保证（对手先到终点也不判负）。
+ *
+ * rating 是**该分区所需的累计联赛段位分**，按联赛序号递增
+ * （见 spaceDivRatingNeed）：打进 L4 就意味着你已经在 L1~L3 攒够了分，
+ * 所以高联赛的分区不会因为"换了个联赛"就白送。
+ */
+export const SPACE_DIVS = [
+  { id: "A", name: "甲", dur: 40, aiK: 0.60, rating: 0,   goldK: 0.6 },
+  { id: "B", name: "乙", dur: 65, aiK: 0.74, rating: 90,  goldK: 1.0 },
+  { id: "C", name: "丙", dur: 90, aiK: 0.86, rating: 220, goldK: 1.6 },
+];
 
 /**
- * 该分级的赛道长度（px）= 玩家实际极速 × SPACE_TARGET_SEC。
- *
- * @param {object} tier SPACE_TIERS 的一项
- * @param {number} playerTop 玩家当前实际极速（px/s）
+ * 每个分区里的 3 场赛事。赛制复用 config/constants.js 的 RACE_FORMATS，
+ * 不新增任何玩法 —— 三种赛制（单挑 / 名次 / 团队）覆盖了三种完全不同的胜负判定。
+ * lenK 只改赛道长度，因此三场的胜负条件一致、难度只来自时长。
  */
-export const spaceLenOf = (tier, playerTop) =>
-  Math.round(Math.max(1, playerTop || 1) * SPACE_TARGET_SEC * (tier.lenK || 1));
+export const SPACE_RACES = [
+  { id: 0, name: "短距冲刺", icon: "⚡", fmt: "duel", lenK: 0.75, goldK: 0.8 },
+  { id: 1, name: "群雄竞速", icon: "🏁", fmt: "melee", lenK: 1.0, goldK: 1.0 },
+  { id: 2, name: "长程接力", icon: "🤝", fmt: "relay", lenK: 1.35, goldK: 1.3 },
+];
 
 /**
- * 宇宙场赛道（惰性构建 + 按长度缓存）。
+ * 每升一个联赛所需的**额外**联赛段位分。
  *
- * ★ 缓存键必须**含长度**：同一分级下不同车速得到不同长度的赛道，
- *   只按 tier.id 缓存会让第二台车拿到第一台车的赛道。
- *   键用"长度分桶"（按 4096px 向上取整）而不是精确长度 ——
- *   否则每帧极速的微小抖动都会生成一条新赛道。
+ * ★ 260 是按"在上一联赛的丙区连赢 2~3 场"标定的：丙区一胜给 62×(1+li×0.3)，
+ *   li=3 时约 118 分，260 分 ≈ 2~3 场。攒得动，但不是随手两把就过。
  */
-const spaceCache = new Map();
-export function spaceCourse(tierIdx, playerTop) {
-  const t = SPACE_TIERS[tierIdx];
-  if (!t) return null;
-  const len = spaceLenOf(t, playerTop);
-  const key = t.id + ":" + Math.ceil(len / 4096);
-  if (spaceCache.has(key)) return spaceCache.get(key);
-  const base = buildLongCourse({
-    name: `宇宙场 · ${t.name}`,
-    len,
-    segs: t.segs,
-    slopeDeg: t.slopeDeg,
-    seed: 0x5ace00 + tierIdx * 7919,
-    themes: t.themes,
-  });
-  const L = {
-    ...base,
-    // ★ 实体密度按"每秒几个"给，而不是按每 px 几个：
-    //   长度已经随车速缩放，用 px 密度会让无相的赛道（= 极速×360s）实体数暴涨。
-    coinN: 0,          // 由下面按 playerTop 算
-    ramp: 0.5,
-    den3: Math.max(1, playerTop || 1),   // AI 与三星节奏共用玩家极速基准
-    // ★ fuelK = 0：需求 need = len/range，而 range = vAvg/kAvg，kAvg ∝ fuelK →
-    //   fuelK = 0 时 kAvg = 0 → range = ∞ → need = 0，一箱都不用加。
-    //   这正是宇宙场该有的手感（omega 形态本来就 noFuel，其余车等效）。
-    fuelK: 0,
-    mech: 1.3,
-    hazardN: 0,        // 同上
-    gateN: 0,
-    variant: "normal",
-    theme: t.themes[0],
-    mood: "gauntlet",
-    spaceTier: t.id,
-    // 宇宙场专用：赛道极长，实体必须**流式生成**（见 world.js 的 CHUNK_*）
-    streaming: true,
-  };
-  // ★ 密度按"每几秒一个"给，与车速无关 —— 长度已经随车速缩放，
-  //   用 px 密度会让无相的赛道（= 极速×360s）实体数暴涨。
-  //   每 3 秒一枚金币：6 分钟共 120 枚，沿途始终有东西可捡，
-  //   但对 10 亿 px 的赛道也只占 120 个对象（可忽略）。
-  L.coinN = Math.max(8, Math.round(SPACE_TARGET_SEC / 3));
-  L.hazardN = Math.max(2, Math.round(SPACE_TARGET_SEC / 90));
-  L.coinVal = Math.max(1, Math.round(t.gold / (L.coinN * 20)));   // 赛道金币合计 ≈ 分级奖金的 5%
-  fitSlope(L, t.slopeDeg);
-  spaceCache.set(key, L);
-  // 缓存只留最近 6 条：玩家换车 / 换分级会不断产生新长度的赛道，
-  // 无上限地留着会让地形数组（每条几万个 steps/feats）持续堆积。
-  if (spaceCache.size > 6) spaceCache.delete(spaceCache.keys().next().value);
-  return L;
-}
+const LEAGUE_RATING_STEP = 260;
+
+/** 分区 A/B/C 的需求 = 联赛序号 × 260 + 该分区的基线 */
+export const spaceDivRatingNeed = (leagueIdx, divIdx) =>
+  Math.max(0, leagueIdx) * LEAGUE_RATING_STEP + (SPACE_DIVS[divIdx] || SPACE_DIVS[0]).rating;
+
+/** 某个分区是否已解锁（联赛段位分是**唯一**判据） */
+export const spaceDivOpen = (leagueIdx, divIdx, rating) =>
+  (Number(rating) || 0) >= spaceDivRatingNeed(leagueIdx, divIdx);
+
+/** 联赛的参考配速（px/s） */
+export const spaceRefPx = (leagueIdx) =>
+  ((SPACE_LEAGUES[leagueIdx] || SPACE_LEAGUES[0]).refKmh / 3.6) * 100;
+
+/** 单场目标时长（秒）：参考配速 × 分区时长 × 赛次倍率，换算出的墙钟时间 */
+export const spaceLenOf = (leagueIdx, divIdx, raceIdx) => {
+  const r = SPACE_RACES[raceIdx] || SPACE_RACES[0];
+  const d = SPACE_DIVS[divIdx] || SPACE_DIVS[0];
+  return Math.round(spaceRefPx(leagueIdx) * d.dur * r.lenK);
+};
+
+/** 该场的目标时长（秒） */
+export const spaceDurOf = (divIdx, raceIdx) =>
+  (SPACE_DIVS[divIdx] || SPACE_DIVS[0]).dur * (SPACE_RACES[raceIdx] || SPACE_RACES[0]).lenK;
 
 /**
- * 宇宙场的 AI 配速（R3.3 / R3.4）。
+ * 该场的对手基准配速（px/s）= 联赛参考配速 × 分区倍率。
  *
- * ★ 核心口径：AI 取玩家**当前车辆实际极速**的 0.9 倍，而不是全局固定值。
- *   Lv0 的入门宇宙车实车远低于标称 → AI 更慢，慢于玩家 → 玩家能赢；
- *   满级入门宇宙车（28,440 km/h）→ AI 25,596 km/h，明显更快；
- *   第七宇宙速度（6,300,000 km/h）→ 被 cap 钳到 50,000 → 玩家稳赢。
- *
- * ★ tier.kmh **完全不参与**配速：它只是面板上的"参考配速"文案。
- *   早先把它当"AI 该多快"的下限，结果 Lv0 玩家参赛时 AI 反而快 1.3~67 倍，
- *   "AI 不会因为玩家车弱而必胜"整条落空。
- *
- * @param {number} playerTop 玩家当前实际极速（px/s）
- * @param {object} tier      SPACE_TIERS 的一项（保留参数，签名与调用方一致）
- * @returns {number} AI 配速（px/s），已钳在 50000 km/h
+ * ★ 与玩家**完全无关**：这是修掉"加满速都追不上"的核心。
+ *   玩家能不能赢只取决于自己的形态极速够不够 AI 配速，而那是一个可以直接在面板上
+ *   比对的两个数 —— 不再是"AI 偷偷跟着你的表盘跑、于是永远差一点"。
  */
-export function spaceAIScale(playerTop, tier) {
-  const KM = (v) => (v / 3.6) * 100; // px/s → km/h
-  // ★ 数值护栏（不是难度旋钮）：真正的"AI 慢于玩家"由 aiK < 1 保证。
-  //   原先这里是 50,000 km/h，恰好卡在顶档车的 aiK 0.80~0.97 之前 ——
-  //   于是「中/难/极难/终极」四档算出来的 AI 速度**完全相同**（都被钳在 50,000），
-  //   "越难对手越快"这条直接失效（实测 4 档都是 50,000 km/h）。
-  //   现在抬到 10,000,000 km/h：只拦"配置写错导致 AI 飞得比玩家快"这种事故，
-  //   不再干涉正常分级。
-  const cap = KM(10000000);
-  const player = Math.max(1, playerTop || 0);
-  // ★ 恒为玩家的该分级 aiK 倍（0.70→0.97 逐级递增 = "越难对手越快"），
-  //   再钳在 50,000 km/h。全部 aiK < 1 → 任何分级玩家都跑得过 AI。
-  const aiK = (tier && tier.aiK) || 0.9;
-  return Math.min(player * aiK, cap);
-}
+export const spaceAIScale = (leagueIdx, divIdx) =>
+  spaceRefPx(leagueIdx) * (SPACE_DIVS[divIdx] || SPACE_DIVS[0]).aiK;
 
-/**
- * 单个对手在该分级基准配速上的**随机抖动**（用户要求"对手速度随机一点"）。
- *
- * ★ 为什么需要：5 个对手若配速完全相同，赛道上就是 5 条等距平行线，
- *   名次从开局就定死了，中途超车毫无悬念。±7% 让"谁能超谁"变成实时博弈。
- *
- * ★ 抖动量刻意**不随分级放大**（各分级都是 ±7%）：难度由 aiK 承担，
- *   抖动只负责"不呆板"。放大抖动会让终极级偶尔冒出快到离谱的对手，
- *   那是运气，不是难度。
- *
- * @param {number} base 该分级的基准配速（spaceAIScale 的返回值）
- * @param {number} i    对手序号（0~4）
- * @param {number} seed 本局随机种子（同一 seed 重放结果一致）
- */
+/** 单个对手在该场基准配速上的随机抖动（±7%），同一局内每个人的配速恒定 */
 export function spaceAIJitter(base, i, seed) {
-  // 单步 hash（mulberry32 同款混合）：同一个 (seed, i) 永远给同一个抖动，
-  // 同一局内多次调用结果一致，换 seed 就全变。
+  // 单步 hash：同一个 (seed, i) 永远给同一个抖动，换 seed 才全变
   let t = (seed ^ ((i + 1) * 0x9e3779b1)) >>> 0;
   t = Math.imul(t ^ (t >>> 16), 0x21f0aaad) >>> 0;
   t = Math.imul(t ^ (t >>> 15), 0x735a2d97) >>> 0;
   const r = ((t ^ (t >>> 15)) >>> 0) / 4294967296;   // [0,1)
-  return base * (0.93 + r * 0.14);                  // ±7%
+  return base * (0.93 + r * 0.14);
+}
+
+/** 该场的通关奖金（金币） */
+export const spaceGoldOf = (leagueIdx, divIdx, raceIdx) =>
+  Math.round(
+    (SPACE_LEAGUES[leagueIdx] || SPACE_LEAGUES[0]).gold *
+    (SPACE_DIVS[divIdx] || SPACE_DIVS[0]).goldK *
+    (SPACE_RACES[raceIdx] || SPACE_RACES[0]).goldK
+  );
+
+/**
+ * 胜一场的联赛段位分：分区越高给得越多，高联赛再乘一档。
+ * 负一场固定扣 12 分 —— 扣得比加得少，误操作不会把人锁死在分区门外。
+ */
+export function spaceRatingDelta(leagueIdx, divIdx, won) {
+  if (!won) return -12;
+  const base = [24, 40, 62][divIdx] || 24;
+  return Math.round(base * (1 + leagueIdx * 0.3));
+}
+
+/** 赛事键（成绩记录的索引）："L3-B-1" = 联赛 3 / 分区乙 / 第 2 场 */
+export const spaceRaceKey = (leagueIdx, divIdx, raceIdx) =>
+  `${(SPACE_LEAGUES[leagueIdx] || SPACE_LEAGUES[0]).id}-${(SPACE_DIVS[divIdx] || SPACE_DIVS[0]).id}-${(SPACE_RACES[raceIdx] || SPACE_RACES[0]).id}`;
+
+/** 场次描述对象（面板与开局共用一份，避免两处各算一遍） */
+export function spaceRaceDef(leagueIdx, divIdx, raceIdx) {
+  const L = SPACE_LEAGUES[leagueIdx] || SPACE_LEAGUES[0];
+  const d = SPACE_DIVS[divIdx] || SPACE_DIVS[0];
+  const r = SPACE_RACES[raceIdx] || SPACE_RACES[0];
+  return {
+    leagueIdx, divIdx, raceIdx,
+    key: spaceRaceKey(leagueIdx, divIdx, raceIdx),
+    name: `${L.name} · ${d.name} · ${r.name}`,
+    icon: r.icon,
+    fmt: r.fmt,
+    len: spaceLenOf(leagueIdx, divIdx, raceIdx),
+    dur: spaceDurOf(divIdx, raceIdx),
+    ai: spaceAIScale(leagueIdx, divIdx),
+    refPx: spaceRefPx(leagueIdx),
+    gold: spaceGoldOf(leagueIdx, divIdx, raceIdx),
+    need: spaceDivRatingNeed(leagueIdx, divIdx),
+  };
+}
+
+/**
+ * 宇宙联赛赛道（惰性构建 + 按场次缓存）。
+ *
+ * ★ 缓存键必须**含三级下标**：长度由联赛×分区×赛次共同决定，
+ *   只按联赛缓存会让第二场赛事拿到第一场的赛道。
+ *   键用"长度分桶"（按 4096px 向上取整）而不是精确长度 ——
+ *   否则每次改配置都会生成一条新赛道。
+ */
+const spaceCache = new Map();
+export function spaceCourse(leagueIdx, divIdx, raceIdx) {
+  const L = SPACE_LEAGUES[leagueIdx] || SPACE_LEAGUES[0];
+  const d = SPACE_DIVS[divIdx] || SPACE_DIVS[0];
+  const r = SPACE_RACES[raceIdx] || SPACE_RACES[0];
+  const len = spaceLenOf(leagueIdx, divIdx, raceIdx);
+  const key = spaceRaceKey(leagueIdx, divIdx, raceIdx) + ":" + Math.ceil(len / 4096);
+  if (spaceCache.has(key)) return spaceCache.get(key);
+  const base = buildLongCourse({
+    name: `宇宙联赛 · ${L.name} ${d.name}区`,
+    len,
+    segs: L.segs,
+    slopeDeg: L.slopeDeg,
+    seed: 0x5ace00 + leagueIdx * 7919 + divIdx * 131 + raceIdx * 17,
+    themes: L.themes,
+  });
+  const def = spaceRaceDef(leagueIdx, divIdx, raceIdx);
+  const course = {
+    ...base,
+    // 实体密度按"每几秒一个"给，与车速无关：长度已经由联赛配速 × 时长定死了
+    coinN: Math.max(8, Math.round(def.dur / 3)),
+    ramp: 0.5,
+    // den3 = 该场的对手基准：三星节奏 / 限时门都以此为准（gateN = 0，门不走）
+    den3: Math.max(1, def.ai),
+    fuelK: 0,      // 宇宙场不耗油：omega 形态本就 noFuel，其余车等效
+    mech: 1.3,
+    hazardN: Math.max(2, Math.round(def.dur / 90)),
+    gateN: 0,
+    variant: "normal",
+    theme: L.themes[0],
+    mood: "gauntlet",
+    spaceLeague: L.id,
+    spaceDiv: d.id,
+    spaceRace: r.name,
+    // 赛道极长，实体必须**流式生成**（见 world.js 的 CHUNK_*）
+    streaming: true,
+  };
+  // 单枚金币面值：整条赛道的金币合计 ≈ 场次奖金的 20%
+  course.coinVal = Math.max(1, Math.round(def.gold / (course.coinN * 5)));
+  fitSlope(course, L.slopeDeg);
+  spaceCache.set(key, course);
+  // 只留最近 6 条：换联赛 / 换分区会不断产生新赛道，无上限留着会持续堆积内存
+  if (spaceCache.size > 6) spaceCache.delete(spaceCache.keys().next().value);
+  return course;
 }
 
 // ---------------- 关卡访问（含最终任务） ----------------
@@ -1263,52 +1318,46 @@ export function levelAt(idx) {
 /**
  * 取"当前模式实际要跑的关卡"。
  *
- * ★ 为什么需要它：赛事不能复用玩家选中的那一关 ——
- *   R6.1 要求驮马（36 km/h）跑满 ≥360s，即赛道 ≥360,000px，
- *   而 432 关最长只有 78,000px。两者不可兼得（见 RACE_COURSE 注释），
- *   所以 race/ranked 一律走赛事专用赛道 RACE_COURSE。
- *   关卡模式（含终局关）仍走 levelAt，行为不变。
+ * ★ 物理层与渲染层都走这里，不能只让 world.js 换赛道：
+ *   physics/terrain.js 的 hillY 直接读它，若只改 world.js，
+ *   AI 会跑在 A 赛道上而地形仍是 B 的。
  *
- * 注意：**物理层与渲染层也必须走这里**，不能只让 world.js 换赛道 ——
- *   physics/terrain.js 的 hillY 直接读 levelAt(store.selLevel)，
- *   若只改 world.js，AI 会跑在 A 赛道上而地形仍是 B 的。
- *
- * ★ 宇宙场多一个参数：赛道长度 = 玩家极速 × 360s，所以必须传极速。
- *   缺省回落到 7900 px/s（= 28,440 km/h，第一宇宙速度标称），
- *   保证任何忘了传参的调用方都能拿到一条长度合理的赛道而不是长度 0。
+ * ★ 宇宙场走 startGame 钉好的那条赛道（见 spacePinned）：长度由联赛 × 分区 × 赛次
+ *   决定，与玩家极速无关，所以不需要再传极速进来。
  */
-export function courseAt(idx, mode, playerTop) {
-  // 宇宙场：优先用 startGame 钉好的那条赛道（见 spaceCourseOf）
-  if (mode === MODE_SPACE) return spacePinned || spaceCourse(spaceTier, playerTop || 27778) || RACE_COURSE;
+export function courseAt(idx, mode) {
+  if (mode === MODE_SPACE) return spacePinned || spaceCourse(0, 0, 0) || RACE_COURSE;
   return mode === "race" || mode === "ranked" ? RACE_COURSE : levelAt(idx);
 }
 
 /**
- * 宇宙场当前分级的下标。
- * ★ 放在 config 层而不是 store：courseAt 被 physics/terrain.js 的**热路径**
- *   （每帧每子步）调用，而 config ← core 是单向依赖的既定分层 ——
- *   若 levels.js 去 import store.js 就构成了反向依赖。
- *   用一个模块级变量 + setter 保持单向，写入方仍是 game 层。
+ * 宇宙场本局选中的三级下标。
+ *
+ * ★ 放 config 层而不是 store：courseAt 被 physics/terrain.js 的**热路径**
+ *   （每帧每子步）调用，而 config ← core 是单向依赖的既定分层。
+ *   用模块级变量 + setter 保持单向，写入方仍是 game 层。
  */
-let spaceTier = 0;
-export function setSpaceTier(i) {
-  spaceTier = Math.max(0, Math.min(SPACE_TIERS.length - 1, i | 0));
+let spaceLeague = 0;
+let spaceDiv = 0;
+let spaceRace = 0;
+export function setSpaceRace(l, d, r) {
+  spaceLeague = Math.max(0, Math.min(SPACE_LEAGUES.length - 1, l | 0));
+  spaceDiv = Math.max(0, Math.min(SPACE_DIVS.length - 1, d | 0));
+  spaceRace = Math.max(0, Math.min(SPACE_RACES.length - 1, r | 0));
 }
-/** 读当前分级下标（供 game/race.js 结算与 AI 配速取用） */
-export const spaceTierOf = () => spaceTier;
+/** 读当前选中的三级下标（game/race.js 与面板取用） */
+export const spaceLeagueOf = () => spaceLeague;
+export const spaceDivOf = () => spaceDiv;
+export const spaceRaceOf = () => spaceRace;
+/** 当前选中场次的完整描述（结算与配速取用） */
+export const spaceDefOf = () => spaceRaceDef(spaceLeague, spaceDiv, spaceRace);
 
 /**
- * 宇宙场本局钉住的赛道（startGame 时算一次，之后所有 courseAt 调用都返回它）。
+ * 宇宙场本局钉住的赛道（startGame 时算一次，之后所有 courseAt 都返回它）。
  *
- * ★ 为什么必须"钉住"而不是每次重算：courseAt 有 6 个调用点，
- *   其中 physics/terrain.js 那个在**每个物理子步**上。赛道长度依赖玩家极速，
- *   而极速在一局之内会变（升级、形态、上下坡）——
- *   若每次都重算，terrain 用的赛道和 world.js 建实体的赛道就会**不是同一条**，
- *   症状是"车飘在半空 / 掉出地图 / AI 跑在另一张图上"。
- *   这正是本函数注释里"AI 与地形必须取同一条，否则会出现车跑在 A 赛道上、
- *   地形却是 B 的"那条老 bug 的宇宙场版本。
- *
- *   钉住之后，一局之内长度恒定 —— 这也是"6 分钟"成立的前提。
+ * ★ 必须"钉住"而不是每次重算：courseAt 在 physics/terrain.js 里**每个物理子步**
+ *   都会被调用，而场次是玩家选的，一局之内不变。若每次重算，
+ *   terrain 与 world 就会拿到不同参数，症状是"车飘在半空 / 掉出地图 / AI 跑在另一张图上"。
  */
 let spacePinned = null;
 export function pinSpaceCourse(L) {
@@ -1323,8 +1372,7 @@ export function hasSegments(L) {
 
 /**
  * 按世界坐标 x 查询所属分段的场景下标。
- * 无分段定义的关卡恒返回 L.theme（支线关行为不变）；
- * 有分段时返回满足 segments[i].x <= x 的最后一段的 theme。
+ * 无分段定义的关卡恒返回 L.theme（支线关行为不变）。
  */
 export function segmentThemeAt(L, x) {
   if (!hasSegments(L)) return L ? L.theme : 0;
@@ -1343,22 +1391,18 @@ export function segmentThemeAt(L, x) {
 export function branchLevel(bi, k) {
   return LEVELS[bi * LEVELS_PER_BRANCH + k];
 }
-
 /** 支线 bi 第 k 关的全局索引 */
 export function globalIndexOf(bi, k) {
   return bi * LEVELS_PER_BRANCH + k;
 }
-
 /** 全局索引 → 支线下标 */
 export function branchOfGlobal(gi) {
   return Math.floor(gi / LEVELS_PER_BRANCH);
 }
-
 /** 全局索引 → { bi, k } */
 export function branchProgress(gi) {
   return { bi: Math.floor(gi / LEVELS_PER_BRANCH), k: gi % LEVELS_PER_BRANCH };
 }
-
 
 /** 三星时限（秒），任务书/测试可用 */
 export function starTime(L) {
@@ -1368,7 +1412,7 @@ export function starTime(L) {
 /**
  * 跳台变体（airtime / gauntlet）的滞空达标线（秒）= 跳台数 × 单台达标滞空。
  * 跳台是确定性的滞空源，因此"达标"只取决于玩家是否真的飞了跳台，
- * 不依赖随机地形是否恰好有坡顶——保证任何支线（含最平缓的翠野乡道）都可达成。
+ * 不依赖随机地形是否恰好有坡顶——保证任何支线都可达成。
  */
 export function airTargetOf(L) {
   const r = variantRule(L.variant);
@@ -1376,4 +1420,3 @@ export function airTargetOf(L) {
   // 只要求飞满绝大多数跳台（留出容错：漏掉最后一个跳台仍能通关）
   return Math.max(1, r.jumpN - 1) * KICK_TARGET;
 }
-
