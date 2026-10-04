@@ -33,6 +33,15 @@ const P = (mass, inertia, suspK, suspC, travel, torque, rpm, wheelieK, wheelieUp
  *   所以换车只换样子，轮胎既不会穿地也不会浮空，物理逐位不变。
  *
  * pose  骑手姿态偏移（px）：肩/头的位移决定"伏"还是"直"，车把位移决定手往哪儿够
+ *   ★ **有硬上限，别再往上加**。render/bike.js 的骑手几何是：
+ *       髋 x = −12.5 + shX·0.42   肩 x = 2.5 + shX   头 x = 5.6 + hdX
+ *       车把 x = 9.5 + barX（轴距只有 38，前轮中心在 x=19）
+ *     所以 shX 每加 1，躯干长 15 + 0.58·shX 就涨 0.58px，且头同步前移。
+ *     中立骑手 shX=0 时躯干 15px、头在车把**后** 3.9px。
+ *     ★ 判据：躯干 ≤ 25px、头−车把 ≤ +10px。越线的样子不是"更伏"，
+ *       是人被拉长 + 头拧到车把前面（无极曾经做到躯干 30 / 头超前轮 18px，
+ *       加上 9.6 的头盔，读起来像 rider 掉在车前面飘着）。
+ *     想要"更贴地"的观感请调 shY / hdY（压低身体），那才是伏得低而不是探得远。
  * bar   车把形态：flat 平把 / drop 弯把（公路车）/ wide 直把（越野车）
  * coil  悬挂弹簧幅度；0 = 刚性前叉（公路车本来就没有避震）
  */
@@ -699,7 +708,7 @@ export const VEHICLES = [
       tire: 0.6, rim: false, spokes: 32, spokeW: 0.22, tube: 1.1,
       topDrop: 25, coil: 0, bar: "drop", saddleW: 2,
       helmR: 6.8, peak: false, vents: 8,
-      pose: POSE(12, 10, 15, 9.5, 5, 8),
+      pose: POSE(11.5, 9, 14.5, 8.5, 4.5, 7),
     }),
     // ★ 拖尾：光矛（lance）—— 逃出一切之后只剩光。全场最长、最直、最亮：
     //   一枚纺锤形光幕 + 一条贯穿的芯线 + 稀疏的星屑，是七台里唯一的"直线"画法
@@ -755,8 +764,8 @@ export const VEHICLES = [
     art: ART({
       tire: 0.4, rim: false, spokes: 40, spokeW: 0.15, tube: 0.8,
       topDrop: 28, coil: 0, bar: "drop", saddleW: 1.5,
-      helmR: 7.2, peak: false, vents: 10,
-      pose: POSE(14, 12, 17, 11, 6, 10),
+      helmR: 7.0, peak: false, vents: 10,
+      pose: POSE(12.5, 9, 15.5, 8, 5, 7),
     }),
     // ★ 拖尾：光锥（cone）—— 九道**向后收束**的锥面，越远越窄越亮。
     //   这是九种画法里唯一的"会聚"：其余八种都从尾根向外散开，
@@ -791,8 +800,8 @@ export const VEHICLES = [
     art: ART({
       tire: 0.25, rim: false, spokes: 56, spokeW: 0.1, tube: 0.4,
       topDrop: 32, coil: 0, bar: "drop", saddleW: 1,
-      helmR: 7.8, peak: false, vents: 12,
-      pose: POSE(17, 15, 20, 14, 7, 13),
+      helmR: 7.2, peak: false, vents: 12,
+      pose: POSE(13.5, 9, 16.5, 8, 5.5, 7),
     }),
     // ★ 拖尾：弦裂（rift）—— 两道平行的断裂面，彼此**剪切错开**并缓慢换位，
     //   像空间本身被撕开一条缝。全场唯一的"成对"画法（其余都是单束或放射）。
@@ -831,8 +840,8 @@ export const VEHICLES = [
     art: ART({
       tire: 0.15, rim: false, spokes: 72, spokeW: 0.06, tube: 0.2,
       topDrop: 38, coil: 0, bar: "drop", saddleW: 0.6,
-      helmR: 8.4, peak: false, vents: 14,
-      pose: POSE(20, 18, 24, 17, 8, 16),
+      helmR: 7.4, peak: false, vents: 14,
+      pose: POSE(14.5, 8.5, 17.5, 7.5, 6, 6.5),
     }),
     // ★ 拖尾：光网（lattice）—— 一张向车尾**透视收缩并翻滚**的网格，
     //   横向的环与纵向的辐条交替亮灭，像身后拖着一条正在被拉直的空间坐标网。
@@ -872,8 +881,8 @@ export const VEHICLES = [
     art: ART({
       tire: 0.1, rim: false, spokes: 90, spokeW: 0.04, tube: 0.12,
       topDrop: 44, coil: 0, bar: "drop", saddleW: 0.4,
-      helmR: 9.0, peak: false, vents: 16,
-      pose: POSE(23, 21, 28, 20, 9, 19),
+      helmR: 7.6, peak: false, vents: 16,
+      pose: POSE(15.5, 8, 18.5, 7, 6.5, 6),
     }),
     // ★ 拖尾：编织（braid）—— 四股互相缠绕的束，两两交叉、一股压一股。
     //   光网是"一张面"，这是"几根实打实的绳子"；十二种画法里唯一的编结结构。
@@ -910,8 +919,8 @@ export const VEHICLES = [
     art: ART({
       tire: 0.06, rim: false, spokes: 112, spokeW: 0.025, tube: 0.08,
       topDrop: 50, coil: 0, bar: "drop", saddleW: 0.25,
-      helmR: 9.6, peak: false, vents: 18,
-      pose: POSE(26, 24, 32, 23, 10, 22),
+      helmR: 7.8, peak: false, vents: 18,
+      pose: POSE(16.5, 7.5, 19.5, 6.5, 7, 5.5),
     }),
     // ★ 拖尾：事件视界（event）—— 一圈圈**向内塌缩**的环，环内比环外更亮，
     //   最后收成一个吞掉一切的暗点。这是十二种画法里唯一的"减法"：
