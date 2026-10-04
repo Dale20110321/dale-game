@@ -22,7 +22,6 @@ import {
   save, downloadSave, parseSave, importSave, resetSave,
   isStorageAvailable, availableFreeThemes, isAdvancedUnlocked,
   listSlots, switchSlot, createSlot, deleteSlot, currentSlot, MAX_SLOTS,
-  noteVehiclePurchase, noteVehicleForm,
 } from "../core/storage.js";
 import { showToast } from "../core/toast.js";
 import { initAudio, playCoinSound } from "../core/audio.js";
@@ -97,7 +96,7 @@ export function initPanels(a) {
 
 /** 玩法 tab 切换：闯关/比赛渲染关卡地图；排位/无限走全屏面板 */
 export function selectMode(mode) {
-  const m = mode === "race" || mode === "ranked" || mode === "free" || mode === "space" ? mode : "level";
+  const m = mode === "race" || mode === "free" || mode === "space" ? mode : "level";
   for (const b of document.querySelectorAll("#modeTabs .mtab")) {
     const on = b.dataset.mode === m;
     b.classList.toggle("is-on", on);
@@ -120,8 +119,7 @@ export function selectMode(mode) {
     renderHomeView("level");
   } else {
     if (homeView) homeView.style.display = "none";
-    if (m === "ranked") renderRankedPanel();
-    else if (m === "space") renderSpacePanel();
+    if (m === "space") renderSpacePanel();
     else renderFreePanel();
   }
 }
@@ -269,7 +267,8 @@ function onPanelClick(e) {
       api.startGame("level", FINALE_INDEX);
       return;
     case "ranked":
-      api.startGame("ranked", store.selLevel || 0, { advanced: el.dataset.adv === "1" });
+      store.raceRanked = el.dataset.adv === "1";
+      renderRacePanel(openBranch);
       return;
     case "raceFmt": {
       // 切赛制只改选择，不开局 —— 面板重绘即可，赛制在 store 里留存
@@ -495,6 +494,7 @@ function levelCell(bi, k) {
     <div class="thm">坡度 ${Math.round(L.maxSlope)}° · ${Math.round(toM(L.len))}m</div>
     <div class="thm">三星 ≤ ${fmtClock(starTime(L))}</div>
     <div class="stars">${stars}</div>
+    ${levelRecHtml(gi, L)}
   </div>`;
 }
 
@@ -504,6 +504,22 @@ function levelCell(bi, k) {
  *   renderRacePanel）需要它切回卡片墙；主页面（renderHomeView）下方本就紧跟 12 支线
  *   总览，再放一个"收起"只会挤占首屏。
  */
+/**
+ * 逐关记录行：最佳用时 / 最佳金币 / 尝试次数 / 上次通过。
+ *
+ * ★ 星级只答"有没有通关、几星"，答不出"打了多久才三星、试了几次"。
+ *   有了这三行，同一个三星关卡反复重打的收益才看得见，玩家才知道该刷哪一关。
+ */
+function levelRecHtml(gi, L) {
+  const r = (store.levelRecords || {})[gi];
+  if (!r || !r.tries) return "";
+  const bits = ["试过 " + r.tries + " 次"];
+  if (r.bestMs > 0) bits.push("最佳 " + (r.bestMs / 1000).toFixed(1) + "s");
+  if (r.bestCoins > 0) bits.push("金币 " + r.bestCoins + "/" + L.coinN);
+  if (r.lastAt) bits.push("上次 " + fmtDate(r.lastAt).slice(5, 16));
+  return '<div class="lvRec">📋 ' + bits.join(" · ") + "</div>";
+}
+
 function levelBlock(withClose) {
   const b = BRANCHES[openBranch];
   const th = THEMES[b.theme] || THEMES[0];
@@ -531,13 +547,50 @@ export function renderLevelsPanel(openBi) {
   <button class="btn backBtn" data-act="back">返回</button>`);
 }
 
-/** 比赛模式：赛制选择 + 同一套支线卡片墙（点某关与 AI 竞速） */
+/**
+ * 比赛面板：**3 种赛制 × 2 个档位（普通 / 排位）**。
+ *
+ * ★ 排位赛不再是独立 tab（用户要求合并）：它和比赛玩的是同一件事 —— 跟 AI 竞速 ——
+ *   差别只在"结果算不算段位分"。而赛制选择（1V1 / 多人 / 团赛）本来就与段位无关，
+ *   分成两个入口只会让玩家为了刷段位先想"我该点哪个 tab"。
+ *   现在 6 个入口在同一屏选完：先选赛制，再选档位，最后点关卡开跑。
+ *
+ * 档位行同时兼作**段位面板**：当前段位分 / 星数 / 距离下一段还差多少 / 升段奖励，
+ * 全部就地显示，不必再切到别处查。
+ */
+function rankTierCard(advanced, label, desc, note, ok) {
+  return card({
+    cls: "vehCard",
+    icon: store.raceRanked === advanced ? "◉" : "○",
+    title: label + (store.raceRanked === advanced ? " · 已选" : ""),
+    sub: desc,
+    meta: note,
+    interactive: ok,
+    locked: !ok,
+    selected: store.raceRanked === advanced,
+    attrs: ok ? `data-act="ranked" data-adv="${advanced ? 1 : 0}"` : "",
+  });
+}
+
 export function renderRacePanel(openBi) {
   panelKind = "race";
   inHomeView = false;
   openBranch = Number.isInteger(openBi) && branchOpen(openBi) ? openBi : -1;
   const cur = raceFormatPick();
-  showPanel(`<div class="modeTitle">🏆 比赛模式 · 与 AI 竞速</div>
+  const P = store.progress;
+  const rating = P.rating || 0;
+  const invited = P.invited === true;
+  const adv = isAdvancedUnlocked(rating);
+  const curR = RANKS[rankIndexOf(rating)] || RANKS[0];
+  const next = rankNextOf(rating);
+  const curIdx = rankIndexOf(rating);
+  const pct = next
+    ? Math.max(0, Math.min(100, ((rating - curR.min) / Math.max(1, next.min - curR.min)) * 100))
+    : 100;
+  const starOf = (r, i) => (rating < r.min ? 0 : i < curIdx ? 3 : rankStars(rating));
+  const hi = pct.toFixed(1);
+  showPanel(`<div class="modeTitle">🏆 比赛 · 3 种赛制 × 2 个档位</div>
+  <div class="brHead">① 选赛制</div>
   <div class="fmtRow">${RACE_FORMAT_IDS.map((id) => {
     const f = RACE_FORMATS[id];
     const on = id === cur;
@@ -548,6 +601,44 @@ export function renderRacePanel(openBi) {
       <span class="fmtGold">名次奖金 ${RACE_PLACE_GOLD[0]} / ${RACE_PLACE_GOLD[1]} / …</span>
     </button>`;
   }).join("")}</div>
+
+  <div class="brHead">② 选档位 · 排位档会结算段位分，普通档只发名次奖金</div>
+  <div class="rankBox">
+    <div class="rankScore">${rating}</div>
+    <div class="rankSub">${rankName(rating)}
+      <span class="rankStars" aria-label="本段星数 ${rankStars(rating)} / 3">${"★".repeat(rankStars(rating))}<span class="dim">${"☆".repeat(3 - rankStars(rating))}</span></span>
+      · 战绩 ${P.wins} 胜 ${P.losses} 负</div>
+    <div class="rankBar" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"
+         aria-label="${rankName(rating)} 段内进度"><i style="width:${hi}%"></i></div>
+    <div class="rankSub">${next
+      ? `下一段「${next.name}」还差 <b>${next.min - rating}</b> 分 · 升段奖励 🪙 ${goldNum(next.reward)}`
+      : `段位表已刷满 · 累计升段奖励 🪙 ${goldNum(RANKS.reduce((a, r) => a + r.reward, 0))}`}</div>
+  </div>
+  ${rankTierCard(false, "普通比赛",
+    "AI 配速固定在三��节奏的 0.68 倍，带追赶修正 —— 输赢不影响段位分",
+    `名次奖金 ${RACE_PLACE_GOLD[0]} → ${RACE_PLACE_GOLD[RACE_PLACE_GOLD.length - 1]} 🪙 · 段位分不变`,
+    true)}
+  ${rankTierCard(true, "排位比赛",
+    `AI 配速随段位分提升（三星节奏的 ${paceRange(false)}）${adv ? ` · 高级排位可到 ${paceRange(true)}` : ""}`,
+    !invited ? "🔒 通关「最终任务」后解锁"
+      : `胜 +${rankDelta(rating, false, true)} / 负 -${RATING_LOSS} 段位分`
+        + (adv ? " · 已解锁高级排位" : ` · 段位分 ≥ ${RATING_ADVANCED} 开高级排位`),
+    invited)}
+  <details class="rankLadder"><summary>段位阶梯（${RANKS.length} 段 × 3 星）</summary>
+    <ol class="rankList">${RANKS.map((r, i) => {
+      const got = starOf(r, i);
+      return `<li class="${rating >= r.min ? "on" : ""}${i === curIdx ? " cur" : ""}">
+        <span class="rkMin">${r.min}</span>
+        <span class="rkName">${r.name}</span>
+        <span class="rkStar" aria-label="${got} 星">${i === 0 ? "" : "★".repeat(got) + "☆".repeat(3 - got)}</span>
+        <span class="rkRew">${r.reward ? "🪙 " + goldNum(r.reward) : "—"}</span>
+      </li>`;
+    }).join("")}</ol>
+    <div class="panelNote">升段奖励只在首次跨过该段门槛时发一次（掉段再升回来不补发）；
+      ★ 进段 · ★★ 段内过半 · ★★★ 段内 85%</div>
+  </details>
+
+  <div class="brHead">③ 选赛道</div>
   <div class="branchWall">${BRANCHES.map((_, i) => branchCard(i)).join("")}</div>
   ${openBranch >= 0 ? levelBlock(true) : ""}
   <div class="panelNote">按名次发奖（第 1 名 ${RACE_PLACE_GOLD[0]} 🪙，完赛即有）· 赛道需已解锁</div>
@@ -566,25 +657,13 @@ function playCell(gi) {
     }
     return;
   }
-  if (panelKind === "race") api.startGame("race", gi, { format: raceFormatPick() });
+  if (panelKind === "race") api.startGame("race", gi, { format: raceFormatPick(), ranked: store.raceRanked });
   else api.startGame("level", gi);
 }
 
 // ---------------- 13.2 最终任务 / 排位赛 ----------------
 
 
-function rankedTier(advanced, label, desc, ok, note) {
-  return card({
-    cls: "vehCard",
-    icon: ok ? (advanced ? "🔥" : "🏆") : "🔒",
-    title: label,
-    sub: desc,
-    meta: note,
-    interactive: ok,
-    locked: !ok,
-    attrs: ok ? `data-act="ranked" data-adv="${advanced ? 1 : 0}"` : "",
-  });
-}
 
 /**
  * 排位赛 AI 配速区间文案：直接由 rankedAIScale() 算两端，不再手写数字。
@@ -596,82 +675,6 @@ function paceRange(advanced) {
   const lo = rankedAIScale(0, advanced).toFixed(2);
   const hi = rankedAIScale(RATING_TOP, advanced).toFixed(2);
   return `${lo}× → ${hi}×`;
-}
-
-/**
- * 排位赛：段位阶梯（14 段 × 3 星）+ 普通/高级两档 + 升段奖励一览。
- *
- * ★ 面板要做的事是"让玩家看得见阶梯"：段位星数、距离下一段还差多少分、
- *   下一段的升段奖励是多少，全部摆在明面上。比赛阶段扩到 14 段之后，
- *   如果只显示一个孤零零的段位分，玩家会以为还是原来那 8 段。
- */
-export function renderRankedPanel() {
-  panelKind = "ranked";
-  inHomeView = false;
-  const P = store.progress;
-  const rating = P.rating || 0;
-  const invited = P.invited === true;
-  const adv = isAdvancedUnlocked(rating);
-  const segIdx = Number.isInteger(store.selLevel) ? store.selLevel : 0;
-  const seg = LEVELS[segIdx] || LEVELS[0];
-  const stars = rankStars(rating);
-  const next = rankNextOf(rating);
-  // 本段内的进度（1★ 门槛 → 下一段门槛，用来画条）
-  const cur = rankIndexOf(rating);
-  const curR = RANKS[cur] || RANKS[0];
-  // 阶梯表里每一段的显示星数：未达成不亮星、已离开的段满星、当前段按实际星数。
-  // ★ 当前段直接调 rankStars(rating) —— 这就是发星的那份口径，
-  //   所以阶梯上当前段那几颗星与上方标题里的星数必然一致。
-  //   旧实现在这里另写了一份"倍数口径"（门槛 ×1.5 / ×2），而 constants 早已改成
-  //   "段内跨度口径"（1★ 进段 / 2★ 段内过半 / 3★ 段内 85%）。两份口径算出的星数
-  //   在多处对不上（白银 620 分、钻石 1500 分、虚空 9500 分都分叉），
-  //   面板显示的星数与实际到手的不是一回事。现已只留一个事实来源。
-  const starOf = (r, i) => {
-    if (rating < r.min) return 0;
-    if (i < cur) return 3;
-    return rankStars(rating);
-  };
-  const lo = curR.min;
-  const hi = next ? next.min : curR.min * 2;
-  const pct = next ? Math.max(0, Math.min(100, ((rating - lo) / Math.max(1, hi - lo)) * 100)) : 100;
-  const gainN = rankDelta(rating, false, true);
-  const gainA = rankDelta(rating, true, true);
-  showPanel(`<div class="modeTitle">🏆 排位赛${P.peak ? " · 已登顶" : ""}</div>
-  <div class="rankBox">
-    <div class="rankScore">${rating}</div>
-    <div class="rankSub">${rankName(rating)}
-      <span class="rankStars" aria-label="本段星数 ${stars} / 3">${"★".repeat(stars)}<span class="dim">${"☆".repeat(3 - stars)}</span></span>
-      · 战绩 ${P.wins} 胜 ${P.losses} 负</div>
-    <div class="rankBar" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"
-         aria-label="${rankName(rating)} 段内进度"><i style="width:${pct.toFixed(1)}%"></i></div>
-    ${next
-      ? `<div class="rankSub">下一段「${next.name}」还差 <b>${next.min - rating}</b> 分 · 升段奖励 🪙 ${goldNum(next.reward)}</div>`
-      : `<div class="rankSub">段位表已刷满 · 累计升段奖励 🪙 ${goldNum(RANKS.reduce((a, r) => a + r.reward, 0))}</div>`}
-  </div>
-  ${invited ? "" : `<div class="panelNote">🔒 尚未收到排位赛邀请：通关「最终任务」后解锁</div>`}
-  ${rankedTier(false, "普通排位赛", `AI 配速随段位分提升（三星节奏的 ${paceRange(false)}）`,
-    invited, invited ? `胜 +${gainN} / 负 -${RATING_LOSS}` : "未解锁")}
-  ${rankedTier(true, "高级排位赛", `AI 配速显著更高，可超过三星节奏（${paceRange(true)}）`,
-    invited && adv,
-    !invited ? "未解锁"
-      : adv ? `胜 +${gainA} / 负 -${RATING_LOSS_ADVANCED}`
-        : `段位分 ≥ ${RATING_ADVANCED}（${RANKS.find((r) => r.min === RATING_ADVANCED).name}）解锁（当前 ${rating}）`)}
-  <details class="rankLadder"><summary>段位阶梯（${RANKS.length} 段 × 3 星）</summary>
-    <ol class="rankList">${RANKS.map((r, i) => {
-      const got = starOf(r, i);
-      return `<li class="${rating >= r.min ? "on" : ""}${i === cur ? " cur" : ""}">
-        <span class="rkMin">${r.min}</span>
-        <span class="rkName">${r.name}</span>
-        <span class="rkStar" aria-label="${got} 星">${i === 0 ? "" : "★".repeat(got) + "☆".repeat(3 - got)}</span>
-        <span class="rkRew">${r.reward ? "🪙 " + goldNum(r.reward) : "—"}</span>
-      </li>`;
-    }).join("")}</ol>
-    <div class="panelNote">升段奖励只在首次跨过该段门槛时发一次（掉段再升回来不补发）；
-      ★ 进段 · ★★ 段内过半 · ★★★ 段内 85%</div>
-  </details>
-  <div class="panelNote">赛道：第 ${segIdx + 1} 关 · ${seg.name}（随你最近选择的关卡）</div>
-  <div class="panelNote">登顶「${RANKS.find((r) => r.min === RATING_PEAK).name}」（段位分 ≥ ${RATING_PEAK}）解锁无限模式自由选图${P.peak ? " · 已达成" : ""}</div>
-  <button class="btn backBtn" data-act="back">返回</button>`);
 }
 
 // ---------------- 13.3 无限模式 ----------------
@@ -1017,11 +1020,8 @@ function ownDetail(id) {
   const m = store.garageMeta[id];
   if (!m) return "";
   const parts = [];
-  if (m.boughtAt) parts.push("购入 " + fmtDate(m.boughtAt).slice(0, 10));
-  if (m.runs) parts.push(m.runs + " 局 · " + fmtKm(m.odometerM));
-  if (m.formAt) parts.push("形态 " + fmtDate(m.formAt).slice(0, 10));
-  if (!parts.length) return "";
-  return `<div class="ultraRow">📋 ${parts.join(" · ")}</div>`;
+  if (!m.runs) return "";
+  return `<div class="ultraRow">📋 骑过 ${m.runs} 局 · 累计 ${fmtKm(m.odometerM)}</div>`;
 }
 
 function buyBlock(v, i) {
@@ -1062,7 +1062,6 @@ function buyVehicleNow(i) {
   store.gold -= v.price;
   store.ownedVehicles.push(i);
   store.currentVehicle = i;
-  noteVehiclePurchase(v.id);
   save();
   renderGaragePanel();
   const n = note();
@@ -1122,7 +1121,6 @@ function buyUltra(i) {
   }
   store.gold -= v.ultra.cost;
   store.ultra[v.id] = true;
-  noteVehicleForm(v.id);
   save();
   // 若买的就是当前使用的车，立即应用效果
   if (store.currentVehicle === i && api.applyVehicle) api.applyVehicle();
@@ -1146,7 +1144,6 @@ export function buyOrSelectVeh(i) {
       store.gold -= v.price;
       store.ownedVehicles.push(i);
       store.currentVehicle = i;
-      noteVehiclePurchase(v.id);
       save();
       renderGaragePanel();
       const n = note();

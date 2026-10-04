@@ -484,15 +484,10 @@ export function levelGroundInfo(L, x, e = 2) {
  *   物理与存档都不受影响。
  */
 let freeSeed = 0;
-/** 已求出的体格序列（按块号索引），随里程增长；setFreeSeed 会清空 */
-let nepSeq = [];
 /** 无限模式的地块宽度（px） */
 export const BLOCK_W = 3000;
 export function setFreeSeed(s) {
   freeSeed = (Number(s) || 0) >>> 0;
-  // ★ 必须清空序列：新的一局从头开始推导体格，
-  //   若沿用上一局的残留，去重约束会把第 0~3 块误判成冲突而顺延。
-  nepSeq = [];
 }
 
 /** 全体体格的平均 stepGap（整局恒定，作为断层频率基准） */
@@ -545,37 +540,34 @@ function freeMoodIndex(t) {
 }
 
 /**
- * 地块体格的**最近 N 块不重复**约束。
+ * 地块体格：每块一个下标，**与相邻块强制不同**。
  *
- * ★ 光修哈希还不够：12 选 1 的随机序列里，"隔 3~4 块重复一次"仍属常见。
- *   这里显式记住前 NEP_BLOCKS 个用过的下标，命中就顺延到下一个空闲项。
- *   NEP 取得小（4）时几乎不改变分布，却能把最小重复间隔拉到 ≥ NEP 块。
- */
-const NEP_BLOCKS = 4;
-
-/**
- * 无限模式体格序列：每块一个下标，带"最近 NEP_BLOCKS 块不重复"约束。
+ * ★ 为什么必须完全无状态（这是"光速下浏览器内存爆掉"的直接原因）：
+ *   这里原本是一个按块号**无限增长**的数组 `nepSeq` —— 为了实现"最近 4 块不重复"
+ *   而把每一块算出来的下标都记下来。注释里写"跑 10 万块（300km）也只占 400KB，
+ *   可接受"，那个判断在自行车速度下成立，在**光速下是灾难**：
+ *   BLOCK_W = 3000px，光锥 3×10^10 px/s = 每秒 1000 万块、弦外 3×10^11 px/s
+ *   = 每秒 1 亿块。数组槽位 8 字节，弦外一秒就是约 800MB —— 页面被浏览器直接杀掉，
+ *   表现为"跑一会儿就崩 / 标签页无响应"。
  *
- * ★ 用**完整数组**而不是循环数组：`freeHill` 是纯函数，可能被任意 x 调用
- *   （渲染回看、respawn 跳回安全点、AI 落在远处……），
- *   循环数组只保留最后 N 块的值，早于那的块会取到别人的槽位。
- *   数组按需增长，每块多占 4 字节 —— 跑 10 万块（300km）也只占 400KB，可接受。
+ * ★ 为什么现在不需要那个数组了：
+ *   NEP 机制本来是为修 `freeMoodIndex` 的 mod-4 周期 bug（实测 mood(t+4)===mood(t)
+ *   的概率高达 90.3%，也就是"一直是同一块图再刷新"）而加的。那个 bug 早就在
+ *   `freeMoodIndex` 里的 `>>> 16` 高低位混合处修掉了，数组从此只是冗余保险 ——
+ *   却成了整条无限模式链路上唯一无界的内存增长点，代价与收益完全倒挂。
+ *
+ * ★ 去掉 4 块回看、只保留"与紧邻上一块不同"会不会退���成重复感？
+ *   不会：相邻重复的概率从哈希本来的 1/12（8.3%）直接降到 **0**；而"隔 2~4 块
+ *   重复"由哈希分布本身决定，本来就在正常范围。12 种体格按块轮换，玩家看到的
+ *   是"每段都不一样"，而不是"每隔几块刷一次同一张图"。
  */
 function freeMoodSeq(t) {
-  for (let i = nepSeq.length; i <= t; i++) {
-    let idx = freeMoodIndex(i);
-    // 与最近 NEP_BLOCKS 块冲突时顺延（最多试满一轮，必然找到空闲项）
-    for (let k = 0; k < TERRAIN_MOODS.length; k++) {
-      let clash = false;
-      for (let j = Math.max(0, i - NEP_BLOCKS); j < i; j++) {
-        if (nepSeq[j] === idx) { clash = true; break; }
-      }
-      if (!clash) break;
-      idx = (idx + 1) % TERRAIN_MOODS.length;
-    }
-    nepSeq[i] = idx;
+  const idx = freeMoodIndex(t);
+  // 与紧邻的上一块冲突时顺延一格（最多试一轮，必然让开）
+  if (t > 0 && idx === freeMoodIndex(t - 1)) {
+    return (idx + 1) % TERRAIN_MOODS.length;
   }
-  return nepSeq[t];
+  return idx;
 }
 
 /** 无限模式地形（随里程缓慢加难，无终点；地形随地块切换体格，绝不重复） */

@@ -385,6 +385,8 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 }
 .lvCell .stars { color: var(--gold); font-size: var(--font-micro-size); letter-spacing: 1px; }
 .lvCell .thm { font-size: var(--font-micro-size); color: var(--text-lo); }
+/* 逐关记录行：比正文更小更淡，让"通关了没有"仍然压过"打了多久" */
+.lvCell .lvRec { font-size: var(--font-micro-size); color: var(--text-lo); opacity: .75; }
 
 .vehCard {
   display: flex; align-items: center; gap: var(--space-3);

@@ -141,7 +141,7 @@ export function raceUpdate(dt) {
     if (groundInfo(ai.x).y === Infinity) continue;
 
     let mult;
-    if (store.mode === "ranked") {
+    if (store.raceRanked) {
       // 排位赛：纯配速，无追赶；多人局里每位对手再乘自己的个体系数
       mult = rankedAIScale(store.progress.rating, store.rankedAdvanced) * ai.bias;
     } else {

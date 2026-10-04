@@ -189,7 +189,7 @@ export function drawHud() {
 
   drawInfoCard(L.info);
   drawFuelGauge(L.fuel);
-  if (store.mode === "race" || store.mode === "ranked" || store.mode === "space") drawRaceBar(L.race);
+  if (store.mode === "race" || store.mode === "space") drawRaceBar(L.race);
   drawSpeedGauge(L.speed);
   if (L.drive) drawDriveIndicator(L.drive);
   if (L.quit) drawQuitButton(L.quit);
@@ -246,8 +246,8 @@ function drawInfoCard(r) {
       ? "🎯 " + L.name
       : store.mode === "space"
         ? "🌌 " + L.name
-        : store.mode === "race" || store.mode === "ranked"
-          ? "🏆 " + (store.mode === "ranked" ? "排位赛" : "比赛") + " 第" + (store.selLevel + 1) + "关"
+        : store.mode === "race"
+          ? "🏆 " + (store.raceRanked ? "排位" : "比赛") + " 第" + (store.selLevel + 1) + "关"
           : "关卡 " + (store.selLevel + 1) + (compact ? "" : " · " + L.name);
 
   // 无底板：文字靠投影保证在任意天空/地表上可读。
@@ -264,7 +264,7 @@ function drawInfoCard(r) {
     const vi = VARIANT_INFO[L.variant];
     if (vi) bx += badgeText(vi.icon + vi.name, bx, r.y + 1, token("glass-fill-strong"), token("info")) + 4;
   }
-  if ((store.mode === "race" || store.mode === "ranked" || store.mode === "space") && store.raceAI) {
+  if ((store.mode === "race" || store.mode === "space") && store.raceAI) {
     const lead = (bike.rear.x + bike.front.x) / 2 - store.raceAI.x;
     // ★ 宇宙联赛的领先量动辄上亿米，toM 直读会渲染成 12 位数字把整条信息栏撑爆，
     //   所以一律走 abbrevNum（与车库/商店同一条紧凑口径）。

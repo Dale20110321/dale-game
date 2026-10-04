@@ -492,7 +492,7 @@ export const VEHICLES = [
     trail: TRAIL("arc", "#EAF9FF", "#5EC8F5",
       { len: 190, width: 8, count: 3, spread: 9, seed: 0.13 }),
     // ★ inertia = 1 / airRot = 1.63（|airRot×inertia−1| = 0）
-    phys: P(3.10, 1.63, 1.7, 1.5, 12, 26.4, 6.6, /* wheelieK */ 4.6, /* wheelieUp */ 20.2),
+    phys: P(68.6, 1.63, 2.4, 1.5, 12, 26.4, 0.75, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
     ultra: { fx: {}, name: "环绕形态", icon: "🛰️", mode: "omega", cost: 10000000000,
       desc: "28440 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
@@ -526,7 +526,7 @@ export const VEHICLES = [
     trail: TRAIL("helix", "#E6FFF6", "#3FE0A5",
       { len: 235, width: 10, count: 2, seed: 0.41 }),
     // ★ inertia = 1 / airRot = 1.34
-    phys: P(2.45, 1.34, 1.8, 1.5, 11, 39.2, 8.1, /* wheelieK */ 7.4, /* wheelieUp */ 41.5),
+    phys: P(101.9, 1.34, 3.5, 1.5, 11, 39.2, 0.82, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
     ultra: { fx: {}, name: "逃逸形态", icon: "🚀", mode: "omega", cost: 300000000000,
       desc: "40320 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
@@ -562,7 +562,7 @@ export const VEHICLES = [
     trail: TRAIL("corona", "#FFF8D6", "#FFE14D",
       { len: 215, width: 11, count: 9, seed: 0.68 }),
     // ★ inertia = 1 / airRot = 1.15
-    phys: P(1.90, 1.15, 1.9, 1.5, 10, 52.6, 9.6, /* wheelieK */ 11.6, /* wheelieUp */ 86.4),
+    phys: P(136.8, 1.15, 5.0, 1.5, 11, 52.6, 0.9, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
     ultra: { fx: {}, name: "星际形态", icon: "🌌", mode: "omega", cost: 9000000000000,
       desc: "60120 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
@@ -598,7 +598,7 @@ export const VEHICLES = [
     trail: TRAIL("ember", "#FFD98A", "#FF6B3D",
       { len: 245, width: 10, count: 15, seed: 0.29 }),
     // ★ inertia = 1 / airRot = 1.06
-    phys: P(1.42, 1.06, 2.0, 1.5, 9, 92.4, 13.5, /* wheelieK */ 9.7, /* wheelieUp */ 104.2),
+    phys: P(240.2, 1.06, 8.0, 1.5, 12, 92.4, 1.0, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
     ultra: { fx: {}, name: "银河形态", icon: "🌠", mode: "omega", cost: 270000000000000,
       desc: "1890000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
@@ -633,7 +633,7 @@ export const VEHICLES = [
     trail: TRAIL("ripple", "#FFD6EC", "#FF4D9E",
       { len: 250, width: 12, count: 6, seed: 0.87 }),
     // ★ inertia = 1 / airRot = 0.97
-    phys: P(1.02, 0.97, 2.1, 1.5, 8, 168.5, 19.5, /* wheelieK */ 22.4, /* wheelieUp */ 192.7),
+    phys: P(435.7, 0.97, 12.0, 1.5, 14, 168.5, 1.08, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
     ultra: { fx: {}, name: "星系群形态", icon: "🕸️", mode: "omega", cost: 8100000000000000,
       desc: "3600000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
@@ -669,7 +669,7 @@ export const VEHICLES = [
     trail: TRAIL("vortex", "#F0E4FF", "#B07CFF",
       { len: 262, width: 13, count: 5, seed: 0.55 }),
     // ★ inertia = 1 / airRot = 1.99
-    phys: P(0.72, 1.99, 2.2, 1.5, 7, 305.8, 27.5, /* wheelieK */ 8.4, /* wheelieUp */ 92.6),
+    phys: P(790.8, 1.99, 18.0, 1.5, 16, 305.8, 1.15, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
     ultra: { fx: {}, name: "超星系团形态", icon: "🕳️", mode: "omega", cost: 243000000000000000,
       desc: "5400000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
@@ -706,7 +706,7 @@ export const VEHICLES = [
     trail: TRAIL("lance", "#FFFFFF", "#F0F4FF",
       { len: 420, width: 9, count: 7, seed: 0.02 }),
     // ★ inertia = 1 / airRot = 0.78
-    phys: P(0.42, 0.78, 2.3, 1.5, 6, 420.6, 36, /* wheelieK */ 31.2, /* wheelieUp */ 398.4),
+    phys: P(1087.6, 0.78, 26.0, 1.5, 20, 420.6, 1.22, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
     ultra: { fx: {}, name: "全域形态", icon: "💫", mode: "omega", cost: 7290000000000000000,
       desc: "6300000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
@@ -763,7 +763,7 @@ export const VEHICLES = [
     trail: TRAIL("cone", "#FFFFFF", "#C9F7FF",
       { len: 460, width: 12, count: 9, seed: 0.31 }),
     // ★ inertia = 1 / airRot = 0.708
-    phys: P(0.30, 0.708, 2.4, 1.5, 5, 520.8, 41, /* wheelieK */ 36.0, /* wheelieUp */ 480.0),
+    phys: P(1346.8, 0.708, 40.0, 1.5, 24, 520.8, 1.3, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
     ultra: { fx: {}, name: "光锥", icon: "⚡", mode: "omega", cost: 6561000000000000000000,
       desc: "1079252849 km/h（= 光速）· 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
@@ -798,7 +798,7 @@ export const VEHICLES = [
     trail: TRAIL("rift", "#FFFFFF", "#FF4DE8",
       { len: 520, width: 14, count: 6, seed: 0.77 }),
     // ★ inertia = 1 / airRot = 0.642
-    phys: P(0.22, 0.642, 2.5, 1.5, 4, 640.2, 47, /* wheelieK */ 41.5, /* wheelieUp */ 580.0),
+    phys: P(1655.6, 0.642, 60.0, 1.5, 30, 640.2, 1.38, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
     ultra: { fx: {}, name: "弦外", icon: "🌀", mode: "omega", cost: 5904900000000000000000000,
       desc: "10792528488 km/h（= 10 倍光速）· 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },

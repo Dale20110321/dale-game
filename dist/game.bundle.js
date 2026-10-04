@@ -906,7 +906,7 @@ var VEHICLES = [
       pose: POSE(1.5, 0.5, 2, 0.5, 0.5, -0.5)
     }),
     trail: TRAIL("arc", "#EAF9FF", "#5EC8F5", { len: 190, width: 8, count: 3, spread: 9, seed: 0.13 }),
-    phys: P(3.1, 1.63, 1.7, 1.5, 12, 26.4, 6.6, 4.6, 20.2),
+    phys: P(68.6, 1.63, 2.4, 1.5, 12, 26.4, 0.75, 1.2, 1.4),
     ultra: {
       fx: {},
       name: "环绕形态",
@@ -948,7 +948,7 @@ var VEHICLES = [
       pose: POSE(4.5, 2.5, 5.5, 2, 1.5, 1.5)
     }),
     trail: TRAIL("helix", "#E6FFF6", "#3FE0A5", { len: 235, width: 10, count: 2, seed: 0.41 }),
-    phys: P(2.45, 1.34, 1.8, 1.5, 11, 39.2, 8.1, 7.4, 41.5),
+    phys: P(101.9, 1.34, 3.5, 1.5, 11, 39.2, 0.82, 1.2, 1.4),
     ultra: {
       fx: {},
       name: "逃逸形态",
@@ -990,7 +990,7 @@ var VEHICLES = [
       pose: POSE(-1, -2, -1.5, -2, -2, -3)
     }),
     trail: TRAIL("corona", "#FFF8D6", "#FFE14D", { len: 215, width: 11, count: 9, seed: 0.68 }),
-    phys: P(1.9, 1.15, 1.9, 1.5, 10, 52.6, 9.6, 11.6, 86.4),
+    phys: P(136.8, 1.15, 5, 1.5, 11, 52.6, 0.9, 1.2, 1.4),
     ultra: {
       fx: {},
       name: "星际形态",
@@ -1032,7 +1032,7 @@ var VEHICLES = [
       pose: POSE(-0.5, -2.5, -1, -2, 0, -3)
     }),
     trail: TRAIL("ember", "#FFD98A", "#FF6B3D", { len: 245, width: 10, count: 15, seed: 0.29 }),
-    phys: P(1.42, 1.06, 2, 1.5, 9, 92.4, 13.5, 9.7, 104.2),
+    phys: P(240.2, 1.06, 8, 1.5, 12, 92.4, 1, 1.2, 1.4),
     ultra: {
       fx: {},
       name: "银河形态",
@@ -1074,7 +1074,7 @@ var VEHICLES = [
       pose: POSE(7.5, 6, 9.5, 5, 3, 4.5)
     }),
     trail: TRAIL("ripple", "#FFD6EC", "#FF4D9E", { len: 250, width: 12, count: 6, seed: 0.87 }),
-    phys: P(1.02, 0.97, 2.1, 1.5, 8, 168.5, 19.5, 22.4, 192.7),
+    phys: P(435.7, 0.97, 12, 1.5, 14, 168.5, 1.08, 1.2, 1.4),
     ultra: {
       fx: {},
       name: "星系群形态",
@@ -1116,7 +1116,7 @@ var VEHICLES = [
       pose: POSE(1, -5, -0.5, -4, 1, -5.5)
     }),
     trail: TRAIL("vortex", "#F0E4FF", "#B07CFF", { len: 262, width: 13, count: 5, seed: 0.55 }),
-    phys: P(0.72, 1.99, 2.2, 1.5, 7, 305.8, 27.5, 8.4, 92.6),
+    phys: P(790.8, 1.99, 18, 1.5, 16, 305.8, 1.15, 1.2, 1.4),
     ultra: {
       fx: {},
       name: "超星系团形态",
@@ -1158,7 +1158,7 @@ var VEHICLES = [
       pose: POSE(12, 10, 15, 9.5, 5, 8)
     }),
     trail: TRAIL("lance", "#FFFFFF", "#F0F4FF", { len: 420, width: 9, count: 7, seed: 0.02 }),
-    phys: P(0.42, 0.78, 2.3, 1.5, 6, 420.6, 36, 31.2, 398.4),
+    phys: P(1087.6, 0.78, 26, 1.5, 20, 420.6, 1.22, 1.2, 1.4),
     ultra: {
       fx: {},
       name: "全域形态",
@@ -1200,7 +1200,7 @@ var VEHICLES = [
       pose: POSE(14, 12, 17, 11, 6, 10)
     }),
     trail: TRAIL("cone", "#FFFFFF", "#C9F7FF", { len: 460, width: 12, count: 9, seed: 0.31 }),
-    phys: P(0.3, 0.708, 2.4, 1.5, 5, 520.8, 41, 36, 480),
+    phys: P(1346.8, 0.708, 40, 1.5, 24, 520.8, 1.3, 1.2, 1.4),
     ultra: {
       fx: {},
       name: "光锥",
@@ -1242,7 +1242,7 @@ var VEHICLES = [
       pose: POSE(17, 15, 20, 14, 7, 13)
     }),
     trail: TRAIL("rift", "#FFFFFF", "#FF4DE8", { len: 520, width: 14, count: 6, seed: 0.77 }),
-    phys: P(0.22, 0.642, 2.5, 1.5, 4, 640.2, 47, 41.5, 580),
+    phys: P(1655.6, 0.642, 60, 1.5, 30, 640.2, 1.38, 1.2, 1.4),
     ultra: {
       fx: {},
       name: "弦外",
@@ -1516,6 +1516,7 @@ var store = {
   lastMode: "level",
   pendingSpace: false,
   rankedAdvanced: false,
+  raceRanked: false,
   slot: 0,
   selLevel: 0,
   unlocked: 0,
@@ -1530,6 +1531,8 @@ var store = {
   upgrades: {},
   ultra: {},
   garageMeta: {},
+  levelRecords: {},
+  raceRecords: {},
   createdAt: "",
   progress: {
     branchCleared: [],
@@ -3071,11 +3074,9 @@ function hillRaw(L, x) {
   return 300 + relief * ss((x - LAUNCH_PAD) / RUN_IN);
 }
 var freeSeed = 0;
-var nepSeq = [];
 var BLOCK_W = 3000;
 function setFreeSeed(s) {
   freeSeed = (Number(s) || 0) >>> 0;
-  nepSeq = [];
 }
 var FREE_GAP_AVG = 1800;
 var FREE_K_WAVE = (() => {
@@ -3095,25 +3096,12 @@ function freeMoodIndex(t) {
   h = (h ^ h >>> 15) >>> 0;
   return h % TERRAIN_MOODS.length;
 }
-var NEP_BLOCKS = 4;
 function freeMoodSeq(t) {
-  for (let i = nepSeq.length;i <= t; i++) {
-    let idx = freeMoodIndex(i);
-    for (let k = 0;k < TERRAIN_MOODS.length; k++) {
-      let clash = false;
-      for (let j = Math.max(0, i - NEP_BLOCKS);j < i; j++) {
-        if (nepSeq[j] === idx) {
-          clash = true;
-          break;
-        }
-      }
-      if (!clash)
-        break;
-      idx = (idx + 1) % TERRAIN_MOODS.length;
-    }
-    nepSeq[i] = idx;
+  const idx = freeMoodIndex(t);
+  if (t > 0 && idx === freeMoodIndex(t - 1)) {
+    return (idx + 1) % TERRAIN_MOODS.length;
   }
-  return nepSeq[t];
+  return idx;
 }
 function freeHill(x) {
   const d = Math.max(0, x - 400);
@@ -3631,17 +3619,7 @@ function indexOfVeh(id) {
   return VEHICLES.findIndex((v) => v.id === id);
 }
 function blankVehMeta(id) {
-  return {
-    id,
-    engine: 0,
-    tire: 0,
-    frame: 0,
-    susp: 0,
-    boughtAt: "",
-    formAt: "",
-    odometerM: 0,
-    runs: 0
-  };
+  return { id, engine: 0, tire: 0, frame: 0, susp: 0, odometerM: 0, runs: 0 };
 }
 var LEGACY_VEHICLE_IDS = [
   "trail",
@@ -3708,6 +3686,8 @@ function blankStoreState() {
     freeThemes: []
   };
   store.space = { rating: 0, records: {} };
+  store.levelRecords = {};
+  store.raceRecords = {};
   store.stat = {
     totalRuns: 0,
     totalMeters: 0,
@@ -3733,8 +3713,6 @@ function sanitizeVehicles(raw) {
       tire: clampLv(rec.tire, ml),
       frame: clampLv(rec.frame, ml),
       susp: clampLv(rec.susp, ml),
-      boughtAt: strOr(rec.boughtAt, ""),
-      formAt: strOr(rec.formAt, ""),
       odometerM: Math.max(0, intOr(rec.odometerM)),
       runs: Math.max(0, intOr(rec.runs))
     };
@@ -3787,8 +3765,6 @@ function buildDoc() {
       tire: clampLv(up.tire, maxLvOf(veh)),
       frame: clampLv(up.frame, maxLvOf(veh)),
       susp: clampLv(up.susp, maxLvOf(veh)),
-      boughtAt: strOr(meta.boughtAt, ""),
-      formAt: strOr(meta.formAt, ""),
       odometerM: Math.max(0, intOr(meta.odometerM)),
       runs: Math.max(0, intOr(meta.runs))
     };
@@ -3841,6 +3817,10 @@ function buildDoc() {
       rating: Math.max(0, intOr((store.space || {}).rating)),
       records: { ...(store.space || {}).records || {} }
     },
+    records: {
+      levels: { ...store.levelRecords || {} },
+      races: { ...store.raceRecords || {} }
+    },
     lifetime: {
       runs: Math.max(0, intOr(s.totalRuns)),
       meters: Math.max(0, intOr(s.totalMeters)),
@@ -3868,7 +3848,7 @@ function applyDoc(doc) {
   store.garageMeta = {};
   for (const id in store.upgrades) {
     const v = store.upgrades[id];
-    store.garageMeta[id] = { boughtAt: v.boughtAt, formAt: v.formAt, odometerM: v.odometerM, runs: v.runs };
+    store.garageMeta[id] = { odometerM: v.odometerM, runs: v.runs };
   }
   store.ownedVehicles = [];
   for (const id of Array.isArray(g.owned) ? g.owned : []) {
@@ -3898,6 +3878,9 @@ function applyDoc(doc) {
   store.progress.promoClaimed = Math.max(0, intOr(r.promoClaimed));
   store.rankedAdvanced = r.advanced === true;
   store.space = { rating: Math.max(0, intOr(sp.rating)), records: sanitizeRecords(sp.records) };
+  const rec = objOr(doc.records) || {};
+  store.levelRecords = sanitizeLevelRecords(rec.levels);
+  store.raceRecords = sanitizeRaceRecords(rec.races);
   store.stat.totalRuns = Math.max(0, intOr(l.runs));
   store.stat.totalMeters = Math.max(0, intOr(l.meters));
   store.stat.totalSeconds = Math.max(0, intOr(l.seconds));
@@ -4013,6 +3996,38 @@ function clearLegacyKeys() {
       continue;
     lsRemove(k);
   }
+}
+function sanitizeLevelRecords(raw) {
+  const out = {};
+  const src = objOr(raw);
+  if (!src)
+    return out;
+  for (const k in src) {
+    const gi = intOr(k);
+    const o = objOr(src[k]);
+    if (!o || gi < 0 || gi >= LEVELS.length)
+      continue;
+    out[gi] = {
+      tries: Math.max(0, intOr(o.tries)),
+      bestMs: Math.max(0, intOr(o.bestMs)),
+      bestCoins: Math.max(0, intOr(o.bestCoins)),
+      lastAt: strOr(o.lastAt, "")
+    };
+  }
+  return out;
+}
+function sanitizeRaceRecords(raw) {
+  const out = {};
+  const src = objOr(raw);
+  if (!src)
+    return out;
+  for (const k in src) {
+    const o = objOr(src[k]);
+    if (!o || !/^\d+-\d+$/.test(k))
+      continue;
+    out[k] = { runs: Math.max(0, intOr(o.runs)), wins: Math.max(0, intOr(o.wins)), best: Math.max(0, intOr(o.best)) };
+  }
+  return out;
 }
 function readDoc() {
   const d = objOr(jsonOr(lsGet(SAVE_KEYS.doc), null));
@@ -4160,16 +4175,7 @@ function addStat({ runs = 0, meters = 0, seconds = 0, mode = "" } = {}) {
   return st;
 }
 function metaOf(id) {
-  return store.garageMeta[id] || (store.garageMeta[id] = { boughtAt: "", formAt: "", odometerM: 0, runs: 0 });
-}
-function noteVehiclePurchase(id) {
-  const m = metaOf(id);
-  if (!m.boughtAt)
-    m.boughtAt = nowIso();
-  return m;
-}
-function noteVehicleForm(id) {
-  metaOf(id).formAt = nowIso();
+  return store.garageMeta[id] || (store.garageMeta[id] = { odometerM: 0, runs: 0 });
 }
 function noteVehicleRun(id, meters) {
   const m = metaOf(id);
@@ -4179,6 +4185,31 @@ function noteVehicleRun(id, meters) {
 }
 function noteSpaceResult(key, place, won) {
   const rec = store.space.records[key] || (store.space.records[key] = { runs: 0, wins: 0, best: 0 });
+  rec.runs += 1;
+  if (won)
+    rec.wins += 1;
+  if (place > 0 && (rec.best === 0 || place < rec.best))
+    rec.best = place;
+  return rec;
+}
+function noteLevelRun(gi, o) {
+  const k = intOr(gi);
+  if (k < 0 || k >= LEVELS.length)
+    return null;
+  const rec = store.levelRecords[k] || (store.levelRecords[k] = { tries: 0, bestMs: 0, bestCoins: 0, lastAt: "" });
+  rec.tries += 1;
+  rec.lastAt = nowIso();
+  if (o && o.done) {
+    const ms = Math.max(0, Math.round(Number(o.ms) || 0));
+    if (ms > 0 && (rec.bestMs === 0 || ms < rec.bestMs))
+      rec.bestMs = ms;
+    rec.bestCoins = Math.max(rec.bestCoins, Math.max(0, intOr(o.coins)));
+  }
+  return rec;
+}
+function noteRaceRun(fmtIdx, ranked, place, won) {
+  const k = intOr(fmtIdx) + "-" + (ranked ? 1 : 0);
+  const rec = store.raceRecords[k] || (store.raceRecords[k] = { runs: 0, wins: 0, best: 0 });
   rec.runs += 1;
   if (won)
     rec.wins += 1;
@@ -4925,6 +4956,53 @@ function pinToGround() {
   b.head.py = midY - SEAT_H;
   b.head._vy = 0;
 }
+function wheelieExcessOf(P) {
+  const flip = P.rb.mTot * P.gravity * WHEELBASE * 0.5;
+  if (!(flip > 0))
+    return 0;
+  return wheelieTauOf(P.rb.mTot, P.gravity, P.wheelieMul) / flip;
+}
+var WHEELIE_SAFE_DEG = 8;
+var WHEELIE_CUT_DEG = 30;
+function wheelieGovernor(b, throttle, P) {
+  if (!throttle)
+    return 1;
+  if (P && wheelieExcessOf(P) > ANTI_ENGAGE)
+    return 1;
+  if (Math.abs(systemVel(b).vx) < 200)
+    return 1;
+  const pitch = Math.atan2(b.rear.y - b.front.y, b.front.x - b.rear.x);
+  if (pitch <= 0)
+    return 1;
+  const deg = pitch * 180 / Math.PI;
+  if (deg <= WHEELIE_SAFE_DEG)
+    return 1;
+  if (deg >= WHEELIE_CUT_DEG)
+    return 0;
+  const t = (deg - WHEELIE_SAFE_DEG) / (WHEELIE_CUT_DEG - WHEELIE_SAFE_DEG);
+  return 1 - t * t * (3 - 2 * t);
+}
+var ANTI_ENGAGE = 4;
+var ANTI_SAFE_DEG = 10;
+function antiWheelie(b, P, sub) {
+  if (b.grounded <= 0)
+    return;
+  const excess = wheelieExcessOf(P);
+  if (excess <= ANTI_ENGAGE)
+    return;
+  const pitch = Math.atan2(b.rear.y - b.front.y, b.front.x - b.rear.x);
+  const safe = ANTI_SAFE_DEG * Math.max(0, 1 - (excess - ANTI_ENGAGE) / 6) * Math.PI / 180;
+  if (pitch <= safe)
+    return;
+  const gain = Math.min(80, excess * 1.5);
+  const maxRate = Math.min(5, 0.9 + Math.log10(excess) * 1.6);
+  const rate = (b.rear._vy - b.front._vy) / WHEELBASE;
+  const target = clamp(-(pitch - safe) * gain, -maxRate, maxRate);
+  const dv = (target - rate) * WHEELBASE * 0.5;
+  b.front._vy += dv;
+  b.rear._vy -= dv;
+  b.head._vy -= dv * 0.5;
+}
 function flightStep(P, dt, throttle, brk, rev) {
   const b = bike;
   const sv = systemVel(b);
@@ -5251,11 +5329,12 @@ function applyDrive(b, P, sub, throttle, brk, rev) {
   const veh = VEHICLES[store.currentVehicle];
   const IW = P.wheelI || wheelInertia(P.rb.mW);
   const wheelieTau = wheelieTauOf(P.rb.mTot, P.gravity, P.wheelieMul);
+  const driveK = wheelieGovernor(b, throttle, P);
   for (const wk of WHEELS) {
     let w = b.wheelRot[wk];
     let tau = 0;
     if (wk === "rear" && throttle)
-      tau += clamp(torqueAt(veh, w, throttle, P.torquePeak, P.rpmK || 1), -wheelieTau, wheelieTau);
+      tau += clamp(torqueAt(veh, w, throttle, P.torquePeak, P.rpmK || 1) * driveK, -wheelieTau, wheelieTau);
     if (wk === "rear" && rev && !brk) {
       const base = P.baseTopSpeed || P.topSpeed;
       const wantW = -base * REV_SPEED / WHEEL_R;
@@ -5652,6 +5731,7 @@ function stepPhysics() {
     airControl(b, sub);
     applySuspension(b, SUS, sub);
     applyDrive(b, P, sub, drvK, brkK, rev);
+    antiWheelie(b, P, sub);
     applyDrag(b, P, sub);
     if ((warp || absolut) && drvK && !run.crashed) {
       const svw = systemVel(b);
@@ -6568,7 +6648,7 @@ function raceUpdate(dt) {
     if (groundInfo(ai.x).y === Infinity)
       continue;
     let mult;
-    if (store.mode === "ranked") {
+    if (store.raceRanked) {
       mult = rankedAIScale(store.progress.rating, store.rankedAdvanced) * ai.bias;
     } else {
       mult = RACE_PACE * catchupFactor(ai.x - playerX) * ai.bias;
@@ -6725,14 +6805,16 @@ function beginRun() {
   resetRunState();
   store.cam.x = 0;
   fillTank();
-  if (store.mode === "ranked")
-    raceInit("duel");
-  else if (store.mode === "race")
+  if (store.mode === "race")
     raceInit(store.raceFormat);
   else if (store.mode === MODE_SPACE)
     raceInit(spaceDefOf().fmt, true);
   resumeFinaleCheckpoint();
   store.state = "play";
+  if (store.mode === "level" && store.selLevel < LEVELS.length) {
+    noteLevelRun(store.selLevel, null);
+    save();
+  }
   presenter.hideOverlay();
 }
 function resumeFinaleCheckpoint() {
@@ -6796,10 +6878,13 @@ function settleRanked(won) {
 }
 function startGame(m, lv, opt) {
   try {
-    const mode = m || store.lastMode;
-    if (mode === "ranked" && !store.progress.invited) {
-      showToast("\uD83D\uDD12 尚未收到排位赛邀请（通关最终任务后解锁）", 1500);
-      return;
+    const mode = m === "ranked" ? "race" : m || store.lastMode;
+    const wantRanked = opt && opt.ranked !== undefined ? !!opt.ranked : store.raceRanked;
+    if (wantRanked && mode === "race" && !store.progress.invited) {
+      store.raceRanked = false;
+      showToast("\uD83D\uDD12 排位档未解锁（通关最终任务后开放）· 本局按普通比赛进行", 1600);
+    } else {
+      store.raceRanked = wantRanked;
     }
     if (mode === MODE_SPACE) {
       if (!rankedCleared()) {
@@ -6815,10 +6900,10 @@ function startGame(m, lv, opt) {
     }
     store.mode = mode;
     const wantAdv = opt && opt.advanced !== undefined ? !!opt.advanced : store.rankedAdvanced === true;
-    store.rankedAdvanced = mode === "ranked" && wantAdv && isAdvancedUnlocked(store.progress.rating);
+    store.rankedAdvanced = store.raceRanked && wantAdv && isAdvancedUnlocked(store.progress.rating);
     store.selLevel = lv !== undefined ? lv : store.selLevel || 0;
     if (mode === "race" && opt && opt.format && RACE_FORMATS[opt.format]) {
-      store.raceFormat = opt.format;
+      store.raceFormatPick = opt.format;
     }
     if (store.mode === "free")
       freeInit(opt && opt.theme);
@@ -6943,13 +7028,14 @@ function finishLevel() {
     time: undefined,
     nextLabel: "下一关 →"
   };
-  if (store.mode === "race") {
+  if (store.mode === "race" && !store.raceRanked) {
     const f = raceFormat();
     const won = !(store.raceAI && store.raceAI.finish);
     const place = racePlace(store.racers, bike.rear.x);
     const p = f.team ? place[0] : place;
     const total = f.team ? 2 : f.riders + 1;
     const gold = RACE_PLACE_GOLD[Math.min(p - 1, RACE_PLACE_GOLD.length - 1)];
+    noteRaceRun(RACE_FORMAT_IDS.indexOf(store.raceFormatPick), store.raceRanked, p, won);
     addGold(gold);
     result.nextLabel = "继续 →";
     result.goldGain = gold;
@@ -6958,7 +7044,7 @@ function finishLevel() {
     const tag = f.team ? "团队接力 · 我方" + (p === 1 ? "获胜" : "惜败") : f.riders > 1 ? "多人竞技 · 第 " + p + " / " + total + " 名" : "比赛" + (won ? "获胜" : "失利");
     showToast((won ? "\uD83C\uDFC6 抵达终点 · " : "\uD83C\uDFC1 抵达终点 · ") + tag + " · 名次奖金 \uD83E\uDE99+" + gold, 1100, won ? "success" : "warn");
     result.title = (won ? "\uD83C\uDFC6 " : "\uD83C\uDFC1 ") + tag;
-  } else if (store.mode === "ranked") {
+  } else if (store.mode === "race" && store.raceRanked) {
     const won = !(store.raceAI && store.raceAI.finish);
     const before = store.progress.rating;
     const after = settleRanked(won);
@@ -6989,6 +7075,7 @@ function finishLevel() {
     result.nextLabel = "继续 →";
     showToast(`\uD83C\uDF0C ${def.name} 完成 · 第 ${p}/${total} 名 · \uD83E\uDE99+${goldNum(def.gold)} · 联赛分 ${delta >= 0 ? "+" : ""}${delta} → ${store.space.rating}`, 1800, won ? "success" : "warn");
   } else if (store.mode === "level") {
+    noteLevelRun(store.selLevel, { done: true, ms: elapsed * 1000, coins: run.coinGot });
     const elapsed = store.time - run.levelStartTime + run.penaltyTime;
     const ratio = run.totalCoins > 0 ? run.coinGot / run.totalCoins : 1;
     let s = 1;
@@ -7081,7 +7168,7 @@ function update(dt) {
   }
   store.time += dt;
   stepPhysics();
-  if (store.mode === "level" || store.mode === "race" || store.mode === "ranked" || store.mode === MODE_SPACE) {
+  if (store.mode === "level" || store.mode === "race" || store.mode === MODE_SPACE) {
     syncSegmentTheme(courseAt(store.selLevel, store.mode), (b.rear.x + b.front.x) / 2);
   }
   streamChunks();
@@ -7141,11 +7228,11 @@ function update(dt) {
   }
   if (store.mode === MODE_SPACE) {
     spaceUpdate(dt);
-  } else if (store.mode === "race" || store.mode === "ranked") {
+  } else if (store.mode === "race") {
     raceUpdate(dt);
     if (store.raceAI && store.raceAI.finish && !run.settling) {
       run.settling = true;
-      if (store.mode === "ranked") {
+      if (store.raceRanked) {
         settleRanked(false);
       } else {
         showToast("\uD83D\uDE35 对手先到终点！");
@@ -9623,7 +9710,7 @@ function drawHud() {
   const L = hudLayout(!!w, touchActive);
   drawInfoCard(L.info);
   drawFuelGauge(L.fuel);
-  if (store.mode === "race" || store.mode === "ranked" || store.mode === "space")
+  if (store.mode === "race" || store.mode === "space")
     drawRaceBar(L.race);
   drawSpeedGauge(L.speed);
   if (L.drive)
@@ -9666,7 +9753,7 @@ function drawInfoCard(r) {
   const L = courseAt(store.selLevel, store.mode) || LEVELS[0];
   const compact = view.W < 520 || view.H < 480;
   const isFinale = store.mode === "level" && store.selLevel === FINALE_INDEX;
-  const title = store.mode === "free" ? "♾ 自由模式" : isFinale ? "\uD83C\uDFAF " + L.name : store.mode === "space" ? "\uD83C\uDF0C " + L.name : store.mode === "race" || store.mode === "ranked" ? "\uD83C\uDFC6 " + (store.mode === "ranked" ? "排位赛" : "比赛") + " 第" + (store.selLevel + 1) + "关" : "关卡 " + (store.selLevel + 1) + (compact ? "" : " · " + L.name);
+  const title = store.mode === "free" ? "♾ 自由模式" : isFinale ? "\uD83C\uDFAF " + L.name : store.mode === "space" ? "\uD83C\uDF0C " + L.name : store.mode === "race" ? "\uD83C\uDFC6 " + (store.raceRanked ? "排位" : "比赛") + " 第" + (store.selLevel + 1) + "关" : "关卡 " + (store.selLevel + 1) + (compact ? "" : " · " + L.name);
   ctx.save();
   ctx.shadowColor = token("shadow-text-strong");
   ctx.shadowBlur = 6;
@@ -9677,7 +9764,7 @@ function drawInfoCard(r) {
     if (vi)
       bx += badgeText(vi.icon + vi.name, bx, r.y + 1, token("glass-fill-strong"), token("info")) + 4;
   }
-  if ((store.mode === "race" || store.mode === "ranked" || store.mode === "space") && store.raceAI) {
+  if ((store.mode === "race" || store.mode === "space") && store.raceAI) {
     const lead = (bike.rear.x + bike.front.x) / 2 - store.raceAI.x;
     const txt = (lead >= 0 ? "领先 " : "落后 ") + abbrevNum(Math.round(toM(Math.abs(lead)))) + "m";
     bx += badgeText(txt, bx, r.y + 1, token("glass-fill-strong"), lead >= 0 ? token("success") : token("danger")) + 4;
@@ -10347,7 +10434,7 @@ function initPanels(a) {
   refreshMenuButtons();
 }
 function selectMode(mode) {
-  const m = mode === "race" || mode === "ranked" || mode === "free" || mode === "space" ? mode : "level";
+  const m = mode === "race" || mode === "free" || mode === "space" ? mode : "level";
   for (const b of document.querySelectorAll("#modeTabs .mtab")) {
     const on = b.dataset.mode === m;
     b.classList.toggle("is-on", on);
@@ -10366,9 +10453,7 @@ function selectMode(mode) {
   } else {
     if (homeView2)
       homeView2.style.display = "none";
-    if (m === "ranked")
-      renderRankedPanel();
-    else if (m === "space")
+    if (m === "space")
       renderSpacePanel();
     else
       renderFreePanel();
@@ -10481,7 +10566,8 @@ function onPanelClick(e) {
       api.startGame("level", FINALE_INDEX);
       return;
     case "ranked":
-      api.startGame("ranked", store.selLevel || 0, { advanced: el.dataset.adv === "1" });
+      store.raceRanked = el.dataset.adv === "1";
+      renderRacePanel(openBranch);
       return;
     case "raceFmt": {
       const id = el.dataset.fmt;
@@ -10673,7 +10759,21 @@ function levelCell(bi, k) {
     <div class="thm">坡度 ${Math.round(L.maxSlope)}° · ${Math.round(toM(L.len))}m</div>
     <div class="thm">三星 ≤ ${fmtClock(starTime(L))}</div>
     <div class="stars">${stars}</div>
+    ${levelRecHtml(gi, L)}
   </div>`;
+}
+function levelRecHtml(gi, L) {
+  const r = (store.levelRecords || {})[gi];
+  if (!r || !r.tries)
+    return "";
+  const bits = ["试过 " + r.tries + " 次"];
+  if (r.bestMs > 0)
+    bits.push("最佳 " + (r.bestMs / 1000).toFixed(1) + "s");
+  if (r.bestCoins > 0)
+    bits.push("金币 " + r.bestCoins + "/" + L.coinN);
+  if (r.lastAt)
+    bits.push("上次 " + fmtDate(r.lastAt).slice(5, 16));
+  return '<div class="lvRec">\uD83D\uDCCB ' + bits.join(" · ") + "</div>";
 }
 function levelBlock(withClose) {
   const b = BRANCHES[openBranch];
@@ -10697,12 +10797,36 @@ function renderLevelsPanel(openBi) {
   <div class="panelNote">星级：通关 1★ · 金币 70% 以上 2★ · 快速通关 3★ ｜ 支线内链式解锁，支线之间可并行推进</div>
   <button class="btn backBtn" data-act="back">返回</button>`);
 }
+function rankTierCard(advanced, label, desc, note, ok) {
+  return card({
+    cls: "vehCard",
+    icon: store.raceRanked === advanced ? "◉" : "○",
+    title: label + (store.raceRanked === advanced ? " · 已选" : ""),
+    sub: desc,
+    meta: note,
+    interactive: ok,
+    locked: !ok,
+    selected: store.raceRanked === advanced,
+    attrs: ok ? `data-act="ranked" data-adv="${advanced ? 1 : 0}"` : ""
+  });
+}
 function renderRacePanel(openBi) {
   panelKind = "race";
   inHomeView = false;
   openBranch = Number.isInteger(openBi) && branchOpen(openBi) ? openBi : -1;
   const cur = raceFormatPick();
-  showPanel(`<div class="modeTitle">\uD83C\uDFC6 比赛模式 · 与 AI 竞速</div>
+  const P = store.progress;
+  const rating = P.rating || 0;
+  const invited = P.invited === true;
+  const adv = isAdvancedUnlocked(rating);
+  const curR = RANKS[rankIndexOf(rating)] || RANKS[0];
+  const next = rankNextOf(rating);
+  const curIdx = rankIndexOf(rating);
+  const pct = next ? Math.max(0, Math.min(100, (rating - curR.min) / Math.max(1, next.min - curR.min) * 100)) : 100;
+  const starOf = (r, i) => rating < r.min ? 0 : i < curIdx ? 3 : rankStars(rating);
+  const hi = pct.toFixed(1);
+  showPanel(`<div class="modeTitle">\uD83C\uDFC6 比赛 · 3 种赛制 × 2 个档位</div>
+  <div class="brHead">① 选赛制</div>
   <div class="fmtRow">${RACE_FORMAT_IDS.map((id) => {
     const f = RACE_FORMATS[id];
     const on = id === cur;
@@ -10713,6 +10837,34 @@ function renderRacePanel(openBi) {
       <span class="fmtGold">名次奖金 ${RACE_PLACE_GOLD[0]} / ${RACE_PLACE_GOLD[1]} / …</span>
     </button>`;
   }).join("")}</div>
+
+  <div class="brHead">② 选档位 · 排位档会结算段位分，普通档只发名次奖金</div>
+  <div class="rankBox">
+    <div class="rankScore">${rating}</div>
+    <div class="rankSub">${rankName(rating)}
+      <span class="rankStars" aria-label="本段星数 ${rankStars(rating)} / 3">${"★".repeat(rankStars(rating))}<span class="dim">${"☆".repeat(3 - rankStars(rating))}</span></span>
+      · 战绩 ${P.wins} 胜 ${P.losses} 负</div>
+    <div class="rankBar" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"
+         aria-label="${rankName(rating)} 段内进度"><i style="width:${hi}%"></i></div>
+    <div class="rankSub">${next ? `下一段「${next.name}」还差 <b>${next.min - rating}</b> 分 · 升段奖励 \uD83E\uDE99 ${goldNum(next.reward)}` : `段位表已刷满 · 累计升段奖励 \uD83E\uDE99 ${goldNum(RANKS.reduce((a, r) => a + r.reward, 0))}`}</div>
+  </div>
+  ${rankTierCard(false, "普通比赛", "AI 配速固定在三��节奏的 0.68 倍，带追赶修正 —— 输赢不影响段位分", `名次奖金 ${RACE_PLACE_GOLD[0]} → ${RACE_PLACE_GOLD[RACE_PLACE_GOLD.length - 1]} \uD83E\uDE99 · 段位分不变`, true)}
+  ${rankTierCard(true, "排位比赛", `AI 配速随段位分提升（三星节奏的 ${paceRange(false)}）${adv ? ` · 高级排位可到 ${paceRange(true)}` : ""}`, !invited ? "\uD83D\uDD12 通关「最终任务」后解锁" : `胜 +${rankDelta(rating, false, true)} / 负 -${RATING_LOSS} 段位分` + (adv ? " · 已解锁高级排位" : ` · 段位分 ≥ ${RATING_ADVANCED} 开高级排位`), invited)}
+  <details class="rankLadder"><summary>段位阶梯（${RANKS.length} 段 × 3 星）</summary>
+    <ol class="rankList">${RANKS.map((r, i) => {
+    const got = starOf(r, i);
+    return `<li class="${rating >= r.min ? "on" : ""}${i === curIdx ? " cur" : ""}">
+        <span class="rkMin">${r.min}</span>
+        <span class="rkName">${r.name}</span>
+        <span class="rkStar" aria-label="${got} 星">${i === 0 ? "" : "★".repeat(got) + "☆".repeat(3 - got)}</span>
+        <span class="rkRew">${r.reward ? "\uD83E\uDE99 " + goldNum(r.reward) : "—"}</span>
+      </li>`;
+  }).join("")}</ol>
+    <div class="panelNote">升段奖励只在首次跨过该段门槛时发一次（掉段再升回来不补发）；
+      ★ 进段 · ★★ 段内过半 · ★★★ 段内 85%</div>
+  </details>
+
+  <div class="brHead">③ 选赛道</div>
   <div class="branchWall">${BRANCHES.map((_, i) => branchCard(i)).join("")}</div>
   ${openBranch >= 0 ? levelBlock(true) : ""}
   <div class="panelNote">按名次发奖（第 1 名 ${RACE_PLACE_GOLD[0]} \uD83E\uDE99，完赛即有）· 赛道需已解锁</div>
@@ -10730,81 +10882,14 @@ function playCell(gi) {
     return;
   }
   if (panelKind === "race")
-    api.startGame("race", gi, { format: raceFormatPick() });
+    api.startGame("race", gi, { format: raceFormatPick(), ranked: store.raceRanked });
   else
     api.startGame("level", gi);
-}
-function rankedTier(advanced, label, desc, ok, note) {
-  return card({
-    cls: "vehCard",
-    icon: ok ? advanced ? "\uD83D\uDD25" : "\uD83C\uDFC6" : "\uD83D\uDD12",
-    title: label,
-    sub: desc,
-    meta: note,
-    interactive: ok,
-    locked: !ok,
-    attrs: ok ? `data-act="ranked" data-adv="${advanced ? 1 : 0}"` : ""
-  });
 }
 function paceRange(advanced) {
   const lo = rankedAIScale(0, advanced).toFixed(2);
   const hi = rankedAIScale(RATING_TOP, advanced).toFixed(2);
   return `${lo}× → ${hi}×`;
-}
-function renderRankedPanel() {
-  panelKind = "ranked";
-  inHomeView = false;
-  const P = store.progress;
-  const rating = P.rating || 0;
-  const invited = P.invited === true;
-  const adv = isAdvancedUnlocked(rating);
-  const segIdx = Number.isInteger(store.selLevel) ? store.selLevel : 0;
-  const seg = LEVELS[segIdx] || LEVELS[0];
-  const stars = rankStars(rating);
-  const next = rankNextOf(rating);
-  const cur = rankIndexOf(rating);
-  const curR = RANKS[cur] || RANKS[0];
-  const starOf = (r, i) => {
-    if (rating < r.min)
-      return 0;
-    if (i < cur)
-      return 3;
-    return rankStars(rating);
-  };
-  const lo = curR.min;
-  const hi = next ? next.min : curR.min * 2;
-  const pct = next ? Math.max(0, Math.min(100, (rating - lo) / Math.max(1, hi - lo) * 100)) : 100;
-  const gainN = rankDelta(rating, false, true);
-  const gainA = rankDelta(rating, true, true);
-  showPanel(`<div class="modeTitle">\uD83C\uDFC6 排位赛${P.peak ? " · 已登顶" : ""}</div>
-  <div class="rankBox">
-    <div class="rankScore">${rating}</div>
-    <div class="rankSub">${rankName(rating)}
-      <span class="rankStars" aria-label="本段星数 ${stars} / 3">${"★".repeat(stars)}<span class="dim">${"☆".repeat(3 - stars)}</span></span>
-      · 战绩 ${P.wins} 胜 ${P.losses} 负</div>
-    <div class="rankBar" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"
-         aria-label="${rankName(rating)} 段内进度"><i style="width:${pct.toFixed(1)}%"></i></div>
-    ${next ? `<div class="rankSub">下一段「${next.name}」还差 <b>${next.min - rating}</b> 分 · 升段奖励 \uD83E\uDE99 ${goldNum(next.reward)}</div>` : `<div class="rankSub">段位表已刷满 · 累计升段奖励 \uD83E\uDE99 ${goldNum(RANKS.reduce((a, r) => a + r.reward, 0))}</div>`}
-  </div>
-  ${invited ? "" : `<div class="panelNote">\uD83D\uDD12 尚未收到排位赛邀请：通关「最终任务」后解锁</div>`}
-  ${rankedTier(false, "普通排位赛", `AI 配速随段位分提升（三星节奏的 ${paceRange(false)}）`, invited, invited ? `胜 +${gainN} / 负 -${RATING_LOSS}` : "未解锁")}
-  ${rankedTier(true, "高级排位赛", `AI 配速显著更高，可超过三星节奏（${paceRange(true)}）`, invited && adv, !invited ? "未解锁" : adv ? `胜 +${gainA} / 负 -${RATING_LOSS_ADVANCED}` : `段位分 ≥ ${RATING_ADVANCED}（${RANKS.find((r) => r.min === RATING_ADVANCED).name}）解锁（当前 ${rating}）`)}
-  <details class="rankLadder"><summary>段位阶梯（${RANKS.length} 段 × 3 星）</summary>
-    <ol class="rankList">${RANKS.map((r, i) => {
-    const got = starOf(r, i);
-    return `<li class="${rating >= r.min ? "on" : ""}${i === cur ? " cur" : ""}">
-        <span class="rkMin">${r.min}</span>
-        <span class="rkName">${r.name}</span>
-        <span class="rkStar" aria-label="${got} 星">${i === 0 ? "" : "★".repeat(got) + "☆".repeat(3 - got)}</span>
-        <span class="rkRew">${r.reward ? "\uD83E\uDE99 " + goldNum(r.reward) : "—"}</span>
-      </li>`;
-  }).join("")}</ol>
-    <div class="panelNote">升段奖励只在首次跨过该段门槛时发一次（掉段再升回来不补发）；
-      ★ 进段 · ★★ 段内过半 · ★★★ 段内 85%</div>
-  </details>
-  <div class="panelNote">赛道：第 ${segIdx + 1} 关 · ${seg.name}（随你最近选择的关卡）</div>
-  <div class="panelNote">登顶「${RANKS.find((r) => r.min === RATING_PEAK).name}」（段位分 ≥ ${RATING_PEAK}）解锁无限模式自由选图${P.peak ? " · 已达成" : ""}</div>
-  <button class="btn backBtn" data-act="back">返回</button>`);
 }
 function renderFreePanel() {
   panelKind = "free";
@@ -11044,15 +11129,9 @@ function ownDetail(id) {
   if (!m)
     return "";
   const parts = [];
-  if (m.boughtAt)
-    parts.push("购入 " + fmtDate(m.boughtAt).slice(0, 10));
-  if (m.runs)
-    parts.push(m.runs + " 局 · " + fmtKm(m.odometerM));
-  if (m.formAt)
-    parts.push("形态 " + fmtDate(m.formAt).slice(0, 10));
-  if (!parts.length)
+  if (!m.runs)
     return "";
-  return `<div class="ultraRow">\uD83D\uDCCB ${parts.join(" · ")}</div>`;
+  return `<div class="ultraRow">\uD83D\uDCCB 骑过 ${m.runs} 局 · 累计 ${fmtKm(m.odometerM)}</div>`;
 }
 function buyBlock(v, i) {
   const lack = Math.max(0, v.price - store.gold);
@@ -11089,7 +11168,6 @@ function buyVehicleNow(i) {
   store.gold -= v.price;
   store.ownedVehicles.push(i);
   store.currentVehicle = i;
-  noteVehiclePurchase(v.id);
   save();
   renderGaragePanel();
   const n = note();
@@ -11137,7 +11215,6 @@ function buyUltra(i) {
   }
   store.gold -= v.ultra.cost;
   store.ultra[v.id] = true;
-  noteVehicleForm(v.id);
   save();
   if (store.currentVehicle === i && api.applyVehicle)
     api.applyVehicle();
@@ -11160,7 +11237,6 @@ function buyOrSelectVeh(i) {
       store.gold -= v.price;
       store.ownedVehicles.push(i);
       store.currentVehicle = i;
-      noteVehiclePurchase(v.id);
       save();
       renderGaragePanel();
       const n = note();

@@ -152,15 +152,14 @@ function indexOfVeh(id) {
 /**
  * 逐车记录的**空模板**。
  *
- * boughtAt / formAt / odometerM / runs 是 v5 新增的明细字段：升级等级答不了
- * "这台车我什么时候买的、骑了多少公里"，而这些问题只有逐车留痕才答得上来。
+ * odometerM / runs 是 v5 新增的明细字段：升级等级答不了
+ * "这台车我总共骑了多少公里"，而这个问题只有逐车留痕才答得上来。
  */
 function blankVehMeta(id) {
-  return {
-    id,
-    engine: 0, tire: 0, frame: 0, susp: 0,
-    boughtAt: "", formAt: "", odometerM: 0, runs: 0,
-  };
+  // ★ 只有里程与场次，没有"购车时间 / 形态解锁时间" ——
+  //   时间戳在这款游戏里没有可读性（玩家不会回头查"我几号买的这台车"），
+  //   却让每条记录多一个要维护、要在迁移里兼容的字段。
+  return { id, engine: 0, tire: 0, frame: 0, susp: 0, odometerM: 0, runs: 0 };
 }
 
 // ============================================================
@@ -206,6 +205,8 @@ function blankStoreState() {
     rating: 0, wins: 0, losses: 0, peak: false, promoClaimed: 0, freeThemes: [],
   };
   store.space = { rating: 0, records: {} };
+  store.levelRecords = {};
+  store.raceRecords = {};
   store.stat = {
     totalRuns: 0, totalMeters: 0, totalSeconds: 0, lastPlayed: "",
     earnedGold: 0, byMode: {},
@@ -225,7 +226,6 @@ function sanitizeVehicles(raw) {
       ...blankVehMeta(veh.id),
       engine: clampLv(rec.engine, ml), tire: clampLv(rec.tire, ml),
       frame: clampLv(rec.frame, ml), susp: clampLv(rec.susp, ml),
-      boughtAt: strOr(rec.boughtAt, ""), formAt: strOr(rec.formAt, ""),
       odometerM: Math.max(0, intOr(rec.odometerM)), runs: Math.max(0, intOr(rec.runs)),
     };
   }
@@ -273,7 +273,6 @@ export function buildDoc() {
       ...blankVehMeta(veh.id),
       engine: clampLv(up.engine, maxLvOf(veh)), tire: clampLv(up.tire, maxLvOf(veh)),
       frame: clampLv(up.frame, maxLvOf(veh)), susp: clampLv(up.susp, maxLvOf(veh)),
-      boughtAt: strOr(meta.boughtAt, ""), formAt: strOr(meta.formAt, ""),
       odometerM: Math.max(0, intOr(meta.odometerM)), runs: Math.max(0, intOr(meta.runs)),
     };
   }
@@ -326,6 +325,10 @@ export function buildDoc() {
       rating: Math.max(0, intOr((store.space || {}).rating)),
       records: { ...((store.space || {}).records || {}) },
     },
+    records: {
+      levels: { ...(store.levelRecords || {}) },
+      races: { ...(store.raceRecords || {}) },
+    },
     lifetime: {
       runs: Math.max(0, intOr(s.totalRuns)),
       meters: Math.max(0, intOr(s.totalMeters)),
@@ -358,7 +361,7 @@ export function applyDoc(doc) {
   store.garageMeta = {};
   for (const id in store.upgrades) {
     const v = store.upgrades[id];
-    store.garageMeta[id] = { boughtAt: v.boughtAt, formAt: v.formAt, odometerM: v.odometerM, runs: v.runs };
+    store.garageMeta[id] = { odometerM: v.odometerM, runs: v.runs };
   }
 
   // 拥有列表：id → 下标。已经被精简掉的车自然消失，不需要任何额外处理
@@ -392,6 +395,9 @@ export function applyDoc(doc) {
   store.rankedAdvanced = r.advanced === true;
 
   store.space = { rating: Math.max(0, intOr(sp.rating)), records: sanitizeRecords(sp.records) };
+  const rec = objOr(doc.records) || {};
+  store.levelRecords = sanitizeLevelRecords(rec.levels);
+  store.raceRecords = sanitizeRaceRecords(rec.races);
 
   store.stat.totalRuns = Math.max(0, intOr(l.runs));
   store.stat.totalMeters = Math.max(0, intOr(l.meters));
@@ -531,6 +537,38 @@ function clearLegacyKeys() {
 // ============================================================
 
 /** 读当前槽的文档（校验 app 与形状；不合格视为"没有存档"） */
+/** 逐关记录校验：只保留下标合法、字段形状正确的条目 */
+function sanitizeLevelRecords(raw) {
+  const out = {};
+  const src = objOr(raw);
+  if (!src) return out;
+  for (const k in src) {
+    const gi = intOr(k);
+    const o = objOr(src[k]);
+    // 下标越界（关卡总数被改过）直接丢弃，不重排 —— 星级数组才是通关的事实来源
+    if (!o || gi < 0 || gi >= LEVELS.length) continue;
+    out[gi] = {
+      tries: Math.max(0, intOr(o.tries)),
+      bestMs: Math.max(0, intOr(o.bestMs)),
+      bestCoins: Math.max(0, intOr(o.bestCoins)),
+      lastAt: strOr(o.lastAt, ""),
+    };
+  }
+  return out;
+}
+/** 逐场记录校验：键形如 "1-0"（赛制下标 - 档位） */
+function sanitizeRaceRecords(raw) {
+  const out = {};
+  const src = objOr(raw);
+  if (!src) return out;
+  for (const k in src) {
+    const o = objOr(src[k]);
+    if (!o || !/^\d+-\d+$/.test(k)) continue;
+    out[k] = { runs: Math.max(0, intOr(o.runs)), wins: Math.max(0, intOr(o.wins)), best: Math.max(0, intOr(o.best)) };
+  }
+  return out;
+}
+
 export function readDoc() {
   const d = objOr(jsonOr(lsGet(SAVE_KEYS.doc), null));
   return d && d.app === SAVE_APP ? d : null;
@@ -725,17 +763,7 @@ export function addStat({ runs = 0, meters = 0, seconds = 0, mode = "" } = {}) {
 
 /** 取（并惰性建立）某辆车的明细 */
 function metaOf(id) {
-  return store.garageMeta[id] || (store.garageMeta[id] = { boughtAt: "", formAt: "", odometerM: 0, runs: 0 });
-}
-/** 购车时打点：只记第一次（重复调用不会覆盖已记录的购入时间） */
-export function noteVehiclePurchase(id) {
-  const m = metaOf(id);
-  if (!m.boughtAt) m.boughtAt = nowIso();
-  return m;
-}
-/** 解锁形态时打点 */
-export function noteVehicleForm(id) {
-  metaOf(id).formAt = nowIso();
+  return store.garageMeta[id] || (store.garageMeta[id] = { odometerM: 0, runs: 0 });
 }
 /** 每局结算时累加这台车的里程与场次 */
 export function noteVehicleRun(id, meters) {
@@ -760,6 +788,38 @@ export function noteSpaceResult(key, place, won) {
 // ---------------- 升级数据访问 ----------------
 
 /** 读取当前车辆的升级等级（没有则惰性初始化） */
+/**
+ * 记一次逐关成绩：每次开始都记一次尝试，通关时刷新最佳用时与最佳金币。
+ * @param {number} gi 关卡全局下标
+ * @param {{done?:boolean, ms?:number, coins?:number}} o
+ */
+export function noteLevelRun(gi, o) {
+  const k = intOr(gi);
+  if (k < 0 || k >= LEVELS.length) return null;
+  const rec = store.levelRecords[k] || (store.levelRecords[k] = { tries: 0, bestMs: 0, bestCoins: 0, lastAt: "" });
+  rec.tries += 1;
+  rec.lastAt = nowIso();
+  if (o && o.done) {
+    const ms = Math.max(0, Math.round(Number(o.ms) || 0));
+    if (ms > 0 && (rec.bestMs === 0 || ms < rec.bestMs)) rec.bestMs = ms;
+    rec.bestCoins = Math.max(rec.bestCoins, Math.max(0, intOr(o.coins)));
+  }
+  return rec;
+}
+/**
+ * 记一场比赛的最终名次。
+ * @param {number} fmtIdx RACE_FORMAT_IDS 里的下标
+ * @param {boolean} ranked 是否排位档
+ */
+export function noteRaceRun(fmtIdx, ranked, place, won) {
+  const k = intOr(fmtIdx) + "-" + (ranked ? 1 : 0);
+  const rec = store.raceRecords[k] || (store.raceRecords[k] = { runs: 0, wins: 0, best: 0 });
+  rec.runs += 1;
+  if (won) rec.wins += 1;
+  if (place > 0 && (rec.best === 0 || place < rec.best)) rec.best = place;
+  return rec;
+}
+
 export function getUp() {
   const veh = VEHICLES[store.currentVehicle];
   const id = veh ? veh.id : VEHICLES[0].id;

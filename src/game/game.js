@@ -4,7 +4,7 @@ import {
   START_X, WHEELBASE, toM, toKmh, LAND_REF,
   RATING_MIN, RANK_GAIN_BASE, RANK_GAIN_BASE_ADV, RATING_LOSS, RATING_LOSS_ADVANCED,
   rankName, rankStars, rankPromoReward, rankDelta, rankGold,
-  RACE_FORMATS, RACE_PLACE_GOLD } from "../config/constants.js";
+  RACE_FORMATS, RACE_FORMAT_IDS, RACE_PLACE_GOLD } from "../config/constants.js";
 import {
   LEVELS, levelAt, courseAt, segmentThemeAt, variantRule, FINALE_INDEX, FINALE, FINALE_SEGS,
   MODE_SPACE, SPACE_LEAGUES, SPACE_DIVS, SPACE_RACES, setSpaceRace, spaceDivOf, spaceRaceOf,
@@ -21,7 +21,7 @@ import { playCrashSound } from "../core/audio.js";
 import { token } from "../config/ui-tokens.js";
 import {
   save, addStat, settleProgress, isAdvancedUnlocked,
-  noteVehiclePurchase, noteVehicleRun, noteSpaceResult,
+  noteVehicleRun, noteSpaceResult, noteLevelRun, noteRaceRun,
 } from "../core/storage.js";
 import { groundInfo, groundY, safeSpot } from "../physics/terrain.js";
 import { applyUpgrades, bikeVx, crash, resetBike, stepPhysics, ignoresHazardLimit } from "../physics/bike.js";
@@ -215,14 +215,18 @@ function beginRun() {
   resetRunState();
   store.cam.x = 0;
   fillTank();
-  // 排位赛永远是单挑；普通比赛按玩家在面板上选的赛制（1V1 / 多人 / 团赛）
-  if (store.mode === "ranked") raceInit("duel");
-  else if (store.mode === "race") raceInit(store.raceFormat);
+  // 比赛：赛制与档位都由面板选好（3 赛制 × 普通/排位 两档 = 6 个入口）
+  if (store.mode === "race") raceInit(store.raceFormat);
   // 宇宙联赛：阵容取**该场赛事自己的赛制**（短距=1V1 / 群雄=6人 / 长程=3v3）。
   // 第二个参数 true = 借阵容但不改玩家在比赛面板选的赛制。
   else if (store.mode === MODE_SPACE) raceInit(spaceDefOf().fmt, true);
   resumeFinaleCheckpoint();
   store.state = "play";
+  // 逐关记录：开局先记一次尝试，通关时 finishLevel 再刷新最佳用时与金币
+  if (store.mode === "level" && store.selLevel < LEVELS.length) {
+    noteLevelRun(store.selLevel, null);
+    save();
+  }
   presenter.hideOverlay();
 }
 
@@ -320,11 +324,15 @@ export function settleRanked(won) {
  */
 export function startGame(m, lv, opt) {
   try {
-    const mode = m || store.lastMode;
-    // 排位赛准入：未收到邀请（通关最终任务）时拒绝开局，且不改动任何状态
-    if (mode === "ranked" && !store.progress.invited) {
-      showToast("🔒 尚未收到排位赛邀请（通关最终任务后解锁）", 1500);
-      return;
+    const mode = m === "ranked" ? "race" : (m || store.lastMode);
+    // 排位**档位**的准入：未收到邀请（通关最终任务）时，退回普通比赛而不是拒绝开局 ——
+    //   排位档现在是比赛里的一个选项，直接拒绝会让玩家以为整个比赛坏了。
+    const wantRanked = opt && opt.ranked !== undefined ? !!opt.ranked : store.raceRanked;
+    if (wantRanked && mode === "race" && !store.progress.invited) {
+      store.raceRanked = false;
+      showToast("🔒 排位档未解锁（通关最终任务后开放）· 本局按普通比赛进行", 1600);
+    } else {
+      store.raceRanked = wantRanked;
     }
     // 宇宙场准入（两道门，用户要求"跑完排位赛才有"）：
     //  1) 排位赛赢过至少一场 —— 否则宇宙场只是竞速模式换个皮，
@@ -346,11 +354,11 @@ export function startGame(m, lv, opt) {
     // 高级赛请求：显式传入 opt.advanced 时以它为准（rating 未达标则降级为普通）；
     // 未传入时保留上一局的档位（重开 startGame() 不丢档）。
     const wantAdv = opt && opt.advanced !== undefined ? !!opt.advanced : store.rankedAdvanced === true;
-    store.rankedAdvanced = mode === "ranked" && wantAdv && isAdvancedUnlocked(store.progress.rating);
+    store.rankedAdvanced = store.raceRanked && wantAdv && isAdvancedUnlocked(store.progress.rating);
     store.selLevel = lv !== undefined ? lv : store.selLevel || 0;
     // 赛制：显式传入优先，否则沿用上一次选择（重开一局不丢赛制）
     if (mode === "race" && opt && opt.format && RACE_FORMATS[opt.format]) {
-      store.raceFormat = opt.format;
+      store.raceFormatPick = opt.format;
     }
     if (store.mode === "free") freeInit(opt && opt.theme);
     else {
@@ -520,7 +528,7 @@ function finishLevel() {
     time: undefined,
     nextLabel: "下一关 →",
   };
-  if (store.mode === "race") {
+  if (store.mode === "race" && !store.raceRanked) {
     const f = raceFormat();
     const won = !(store.raceAI && store.raceAI.finish);
     // 名次：多人竞技按名次发奖，团赛按队伍名次发奖（1V1 就是 1 或 2）
@@ -530,6 +538,7 @@ function finishLevel() {
     // 名次奖金：第 1 名拿满，越靠后拿得越少，但**只要完赛就有**——
     // 6 人场跑第 5 也比 1V1 输一把的 0 块强，"多跑一场多赚一点"才有正反馈。
     const gold = RACE_PLACE_GOLD[Math.min(p - 1, RACE_PLACE_GOLD.length - 1)];
+    noteRaceRun(RACE_FORMAT_IDS.indexOf(store.raceFormatPick), store.raceRanked, p, won);
     addGold(gold);
     result.nextLabel = "继续 →";
     result.goldGain = gold;
@@ -541,8 +550,10 @@ function finishLevel() {
     showToast((won ? "🏆 抵达终点 · " : "🏁 抵达终点 · ") + tag + " · 名次奖金 🪙+" + gold,
       1100, won ? "success" : "warn");
     result.title = (won ? "🏆 " : "🏁 ") + tag;
-  } else if (store.mode === "ranked") {
-    // 排位赛：胜负直接决定段位分变化（结算提示由 settleRanked 内部输出）
+  } else if (store.mode === "race" && store.raceRanked) {
+    // 排位档：胜负决定段位分变化（结算提示由 settleRanked 内部输出）。
+    // ★ 与普通比赛共用同一个 mode —— 差别只在"结果算不算段位分"，
+    //   所以名次奖金照发，段位分也照算，两者不冲突。
     const won = !(store.raceAI && store.raceAI.finish);
     const before = store.progress.rating;
     const after = settleRanked(won);
@@ -579,6 +590,8 @@ function finishLevel() {
       1800, won ? "success" : "warn"
     );
   } else if (store.mode === "level") {
+    // 逐关记录：最佳用时 / 最佳金币在这里一次性写回
+    noteLevelRun(store.selLevel, { done: true, ms: elapsed * 1000, coins: run.coinGot });
     // 计时惩罚（摔车）计入本关用时，直接影响三星时限
     const elapsed = store.time - run.levelStartTime + run.penaltyTime;
     const ratio = run.totalCoins > 0 ? run.coinGot / run.totalCoins : 1;
@@ -706,7 +719,7 @@ export function update(dt) {
   //   绝不触碰 bike.rear / bike.front / bike.head 的 x / y / px / py；重力与抓地是按分段
   //   取值的常量，切换只改变"后续子步的加速度"，已经积分的当前帧状态不受影响。
   //   因此跨越分界点绝不会出现位置瞬移、速度突变或 NaN。
-  if (store.mode === "level" || store.mode === "race" || store.mode === "ranked" || store.mode === MODE_SPACE) {
+  if (store.mode === "level" || store.mode === "race" || store.mode === MODE_SPACE) {
     syncSegmentTheme(courseAt(store.selLevel, store.mode), (b.rear.x + b.front.x) / 2);
   }
   // 流式实体（宇宙场）：按相机位置铺/丢 chunk。放在物理之后，
@@ -781,11 +794,11 @@ export function update(dt) {
   if (store.mode === MODE_SPACE) {
     // 宇宙场：AI 先到终点不判负（本地模拟，奖励只看是否完赛，见 finishLevel）
     spaceUpdate(dt);
-  } else if (store.mode === "race" || store.mode === "ranked") {
+  } else if (store.mode === "race") {
     raceUpdate(dt);
     if (store.raceAI && store.raceAI.finish && !run.settling) {
       run.settling = true;
-      if (store.mode === "ranked") {
+      if (store.raceRanked) {
         settleRanked(false); // 对手先到终点 → 排位判负，立即结算段位分
       } else {
         showToast("😵 对手先到终点！");
