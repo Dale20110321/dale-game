@@ -260,7 +260,7 @@ export function showResultCard(res = {}) {
         .join("")}</div>`;
 
   const items = [{ label: "金币", value: `<b class="roll" data-roll="${res.goldTotal === undefined ? store.gold || 0 : res.goldTotal}">0</b>` },
-    { label: "本局获得", value: "🪙 +" + (res.goldGain || 0) },
+    { label: "本局获得", value: "🪙 +" + goldNum(res.goldGain || 0, { yuan: false }) },
     { label: "本局用时", value: res.time ? res.time.toFixed(1) + "s" : "—" }];
   if (res.ratingDelta) {
     items.push({ label: "段位分", value: (res.ratingDelta > 0 ? "+" : "") + res.ratingDelta + " → " + res.rating });
@@ -280,23 +280,27 @@ export function showResultCard(res = {}) {
   startGoldRoll();
 }
 
-/** 金币滚动计数（≤0.6s；减少动效环境直接显示终值） */
+/**
+ * 金币滚动计数（≤0.6s；减少动效环境直接显示终值）。
+ *
+ * ★ 中间帧也走 goldNum：余额一旦上 1e4，裸 `String(cur)` 会在滚动过程中
+ *   先铺成五位数、最后突然跳成 "1.41×10^9"，看起来像卡了一下。
+ *   而 1e21 以上裸 String 会直接输出 "1e+21"，与菜单余额完全不是一个写法。
+ */
 function startGoldRoll() {
   const el = modePanel ? modePanel.querySelector(".roll") : null;
   if (!el) return;
   const target = Number(el.dataset.roll) || 0;
   if (reducedMotion() || typeof setInterval !== "function") {
-    el.textContent = String(target);
+    el.textContent = goldNum(target);
     return;
   }
-  let cur = 0;
   let steps = 0;
   const timer = setInterval(() => {
     steps++;
-    cur = Math.round(target * Math.min(1, steps / 18));
-    el.textContent = String(cur);
+    el.textContent = goldNum(Math.round(target * Math.min(1, steps / 18)));
     if (steps >= 18) {
-      el.textContent = String(target);
+      el.textContent = goldNum(target);
       clearInterval(timer);
     }
   }, 33);

@@ -20,7 +20,7 @@ import { store, uiHooks } from "../core/store.js";
 import { abbrevNum, goldNum } from "../core/utils.js";
 import {
   save, downloadSave, parseSave, importSave, resetSave,
-  isStorageAvailable, availableFreeThemes, isAdvancedUnlocked,
+  isStorageAvailable, availableFreeThemes, isAdvancedUnlocked, takeLoadError,
   listSlots, switchSlot, createSlot, deleteSlot, currentSlot, MAX_SLOTS,
 } from "../core/storage.js";
 import { showToast } from "../core/toast.js";
@@ -812,8 +812,9 @@ export function renderSpacePanel() {
         icon: L.icon,
         title: `联赛 ${li + 1} · ${L.name}`,
         sub: `参考配速 ${abbrevNum(Math.round(toKmh(ref)))} km/h · ${L.segs} 段地形 · 坡度 ${L.slopeDeg}°` +
-          (best ? ` · 已打过 ${best} 场` : ""),
-        meta: best ? `最高分区 ${best}` : `起步分区 甲（段位分 ${spaceDivRatingNeed(li, 0)}）`,
+          (rec.runs ? ` · 已打过 ${rec.runs} 场` : ""),
+        meta: rec.runs ? `最高分区 ${rec.top} · 最好第 ${rec.best || "—"} 名 · ${rec.wins} 胜`
+          : `起步分区 甲（段位分 ${spaceDivRatingNeed(li, 0)}）`,
         right: openLeague === li ? "▾" : "▸",
         interactive: true,
         selected: openLeague === li,
@@ -835,22 +836,27 @@ function spaceThemeVars(L) {
 }
 
 /** 展开中的联赛下标（-1 = 全收起）；面板每次重绘都会读它 */
-/** 展开中的联赛下标（-1 = 全收起）；面板每次重绘都会读它 */
-/** 某个分区已打过多少场 / 最好名次（由成绩记录反推） */
+/**
+ * 某个联赛打过多少场 / 赢几场 / 最好第几（由成绩记录反推）。
+ * `top` 是打进过的**最高分区名**（甲/乙/丙），没有记录时为空串。
+ */
 function leagueRecord(li) {
   const recs = store.space.records || {};
   const tag = SPACE_LEAGUES[li].id + "-";
   let runs = 0;
   let wins = 0;
   let top = "";
+  let best = 0;
   for (const k in recs) {
     if (k.indexOf(tag) !== 0) continue;
     runs += recs[k].runs;
     wins += recs[k].wins;
+    // 名次越小越好，取全联赛的最好成绩（0 = 没进过前三，记 0 表示"无纪录"）
+    if (recs[k].best && (!best || recs[k].best < best)) best = recs[k].best;
     if (!top || SPACE_DIVS.findIndex((d) => d.id === k.split("-")[1]) >
       SPACE_DIVS.findIndex((d) => d.id === top)) top = k.split("-")[1];
   }
-  return { runs, wins, top };
+  return { runs, wins, top, best };
 }
 
 /** 单场赛事的格子（每个分区 3 个） */
@@ -1151,7 +1157,7 @@ export function buyOrSelectVeh(i) {
       api.applyVehicle();
     } else {
       const n = note();
-      if (n) n.textContent = "金币不足，需要 " + v.price + " 🪙";
+      if (n) n.textContent = "金币不足，需要 " + goldNum(v.price) + " 🪙";
     }
   }
 }
@@ -1307,6 +1313,13 @@ export function renderSavePanel() {
   const cur = currentSummary();
   const rating = store.progress.rating || 0;
   const stor = isStorageAvailable();
+  // ★ 读档失败过一次（存档原文已保留，但这次进度读不出来）——必须显式告诉玩家，
+  //   否则症状就是"金币和星级凭空归零"，看着像被清了档。
+  const loadErr = takeLoadError();
+  const loadErrBox = loadErr
+    ? `<div class="panelNote" style="color:var(--danger)">⚠️ <b>上次读档失败</b>：${loadErr}<br>
+       你的存档原文<strong>没有被删除</strong>，刷新页面会重新尝试读取；导出存档可先留一份备份。</div>`
+    : "";
   const cmp = saveView.pending && saveView.summary
     ? `${compareBox(cur, saveView.summary)}
        <div class="panelNote">这份存档含 ${saveView.summary.vehicles} 辆车 · 宇宙联赛分 ${saveView.summary.spaceRating} · 建于 ${fmtDate(saveView.summary.createdAt)}</div>
@@ -1338,6 +1351,7 @@ export function renderSavePanel() {
     { label: "存档建立", value: fmtDate(store.createdAt) },
   ])}
   ${dossierHtml()}${modeStatHtml(st)}
+  ${loadErrBox}
   ${stor ? "" : `<div class="panelNote">⚠️ 浏览器存储不可用（隐私模式 / 空间已满 / 被禁用）：本次无法保存进度，导出 / 导入 / 重置均不可用</div>`}
   <div class="brHead">🎚 画面设置 · 画质</div>
   <div class="tabs" role="tablist">${QUALITY.map((q) =>

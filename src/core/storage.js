@@ -41,6 +41,14 @@ const META_KEYS = { slot: "dale_slot", slots: "dale_slots" };
 
 /** localStorage 是否可用（隐私模式 / 配额满 / 被禁用时返回 false，供 UI 查询） */
 let available = true;
+/**
+ * 上一次 loadSave 的错误信息（读档失败时非空，取走即清）。
+ *
+ * ★ 为什么要有它：loadSave 的 catch 过去只 blankStoreState()，玩家看到的是
+ *   "金币和进度全没了"，却没有任何提示他究竟是读档失败还是自己真的清过档。
+ *   读档失败与真的空档必须能被区分 —— 前者是 bug，后者是正常起点。
+ */
+let loadError = "";
 export function isStorageAvailable() {
   return available;
 }
@@ -142,6 +150,23 @@ function clampLv(v, maxLv) {
 function clampStar(v) {
   const n = Math.round(Number(v));
   return Number.isFinite(n) && n > 0 ? Math.min(3, n) : 0;
+}
+
+/**
+ * 逐关星级字段 → 0~3 的整数数组。
+ *
+ * ★ 同时收两种形态，这是**向后兼容的关键**：
+ *   · 字符串 "321300…"，一位一关（现行格式，好读、体积小一半）
+ *   · 数组 [3,2,1,0,…]，一关一项（v5 之前的格式，玩家手里的老导出文件）
+ * 玩家把新存档导入老版本、或反过来，都不该丢进度，所以两边都认。
+ * 认不出来时返回空数组 → 进度从头再来（与"存档里没有这个键"同一条路径）。
+ */
+function parseStarStr(v) {
+  if (typeof v === "string") {
+    return v.split("").map((c) => clampStar(c.charCodeAt(0) - 48));
+  }
+  if (Array.isArray(v)) return v.map(clampStar);
+  return [];
 }
 
 /** 车辆 id → VEHICLES 下标；-1 = 该车已从游戏里删掉 */
@@ -342,10 +367,16 @@ export function buildDoc() {
         finaleDone: p.finaleDone === true,
         invited: p.invited === true,
       },
-      // ★ 逐关星级数组：**通关进度的事实来源**，432 项 0~3。
+      // ★ 逐关星级：**通关进度的事实来源**，每关一位、432 位、值 0~3。
       //   它必须存在 —— 丢掉它等于让玩家从零开始；上面 progress 里的
       //   cleared / stars 只是它的汇总读数。
-      stars: (store.stars || []).map(clampStar),
+      //
+      //   ★ 为什么存成**字符串**而不是数组：432 个数字铺开是 432 行 JSON，
+      //     全是裸数字、看不出哪段是什么（"这里怎么全是 3"这种问题就是这么来的）。
+      //     一关一位连成一条后，进度长什么样一眼可见：开头 "321321" 是已通关区段，
+      //     后面一大串 0 是还没打的。体积还小一半（432 B vs 865 B）。
+      //   读回（applyDoc）同时接受字符串与数组，老存档不必迁移。
+      stars: (store.stars || []).map(clampStar).join(""),
       // 逐关成绩：records 是"通了多少次、最好多快、拿了多少金币"，
       // 与 stars（通没通、几星）是两回事，更新时机也不同，所以分开放。
       records: { ...(store.levelRecords || {}) },
@@ -453,8 +484,10 @@ export function applyDoc(doc) {
   // ---- 主线 ----
   store.unlocked = Math.max(0, Math.min(LEVELS.length - 1, intOr(c.unlocked)));
   store.selLevel = Math.max(0, Math.min(LEVELS.length - 1, intOr(c.sel)));
-  // 逐关星级数组是通关进度的事实来源，缺了要从头再来 —— 单独校验并补齐到关卡总数
-  store.stars = (Array.isArray(cp.stars) ? cp.stars.map(clampStar) : [])
+  // 逐关星级是通关进度的事实来源，缺了要从头再来 —— 单独校验并补齐到关卡总数。
+  // ★ 两种形态都要收：新版存的是"一位一关"的字符串（见 buildDoc），
+  //   老存档存的是 432 项数组（v5 之前）。字符串按字符拆，数字超出 0~3 直接归 0。
+  store.stars = parseStarStr(cp.stars)
     .concat(new Array(LEVELS.length).fill(0)).slice(0, LEVELS.length);
   store.levelRecords = sanitizeLevelRecords(cp.records);
   store.progress.finaleSeg = Math.max(0, Math.min(FINALE_SEGS, intOr(c.finaleSeg)));
@@ -552,8 +585,7 @@ function legacyDocFrom(map) {
     if (ultraRaw[id] === true && indexOfVeh(id) >= 0) forms[id] = true;
   }
 
-  const starsRaw = jsonOr(src[SAVE_KEYS.stars] || "[]", []);
-  const stars = (Array.isArray(starsRaw) ? starsRaw : []).map(clampStar)
+  const stars = parseStarStr(jsonOr(src[SAVE_KEYS.stars], ""))
     .concat(new Array(LEVELS.length).fill(0)).slice(0, LEVELS.length);
 
   const prog = objOr(jsonOr(src[SAVE_KEYS.prog] || "{}", {})) || {};
@@ -666,6 +698,18 @@ function sanitizeRaceRecords(raw) {
   return out;
 }
 
+/**
+ * 存档键是否**存在但内容读不出**。
+ *
+ * ★ 与"压根没有存档键"必须分开：前者是存档损坏，后者是新玩家。
+ *   两者混为一谈时，损坏的存档会被当成"没有存档"而被重置覆盖 —— 不可逆。
+ *   判据就是键在不在，不去 parse（parse 失败本身就是"损坏"的证据）。
+ */
+function corruptDocPresent() {
+  const raw = lsGet(SAVE_KEYS.doc);
+  return raw !== null && raw !== undefined && raw !== "";
+}
+
 export function readDoc() {
   const d = objOr(jsonOr(lsGet(SAVE_KEYS.doc), null));
   if (!d) return null;
@@ -695,6 +739,14 @@ export function loadSave() {
     const doc = readDoc();
     if (doc) {
       applyDoc(doc);
+    } else if (corruptDocPresent()) {
+      // ★ 存档键在，但内容不是合法文档（JSON 坏了 / schema 对不上）。
+      //   过去这里直接落到 resetSave()，而它**会 writeDoc** —— 于是玩家那份
+      //   读不出但可能还能救的原文被一份空档当场覆盖，不可逆。
+      //   现在只清内存态、不碰 localStorage，并把原因报给面板。
+      //   下次玩家若导出备份、或用工具修好 JSON，重新加载就能读回来。
+      loadError = "存档内容损坏（不是合法 JSON 或版本不符）";
+      blankStoreState();
     } else if (hasLegacyData()) {
       // bike_ach 一并读进来：成就已经并入文档，迁移时要从它取值
       const legacy = {};
@@ -718,8 +770,26 @@ export function loadSave() {
     refreshProgress();
     touchSlotMeta(slotIndex(), clearedCountOfCurrent());
   } catch (e) {
+    // ★ 这里曾经只是 blankStoreState()，**把整份存档清空却一声不吭**。
+    //   于是任何一处读档抛错（曾经真的发生过：summarizeSave 里引用了不存在的
+    //   `stars` 变量，ReferenceError）都会表现为"金币清零、进度全没"，
+    //   而玩家无从知道发生了什么 —— 症状（丢档）与病因（某个字段读错）
+    //   隔了一整个 catch，看板上什么线索都没有。
+    //
+    //   现在的做法：保住原始文档不覆盖（**不调 writeDoc**），只把内存态复位，
+    //   并把错误记下来供面板显示。宁可这一次读不出进度，也不要把玩家的存档
+    //   从 localStorage 里抹掉 —— 后者是不可逆的，前者刷新一下就好。
+    loadError = (e && e.message) ? String(e.message) : "未知错误";
+    try { console.error("[storage] 读档失败，已保留原始存档：", e); } catch (x) { /* noop */ }
     blankStoreState();
   }
+}
+
+/** 上一次 loadSave 是否失败（面板据此提示玩家，存档原文已被保留） */
+export function takeLoadError() {
+  const e = loadError;
+  loadError = "";
+  return e;
 }
 
 /**
@@ -801,7 +871,9 @@ export function isAdvancedUnlocked(rating) {
  */
 export function deriveUnlocks(progress, stars) {
   const p = objOr(progress) || {};
-  const arr = Array.isArray(stars) ? stars : [];
+  // 内部调用一律传数组，但导出文件里是字符串 —— 用 parseStarStr 收两种，
+  // 省得哪天有人直接把文档里的字段喂进来时静默当成"全没通关"
+  const arr = parseStarStr(stars);
   const allCleared = LEVELS.length > 0 && arr.length >= LEVELS.length &&
     arr.slice(0, LEVELS.length).every((s) => s >= 1);
   const rating = Math.max(0, intOr(p.rating));
@@ -1063,21 +1135,40 @@ export function resetSave() {
 // ============================================================
 
 /** 从导入数据里解析进度概览（容错不抛异常），供确认前的对比展示 */
+/**
+ * 导出文件的摘要（给"这份存档里有什么"那一屏用）。
+ *
+ * ★ stars 必须从 **doc 里**取，不能引用任何模块级变量：这个函数只拿到一份
+ *   别人传进来的文档（导入别人的存档时，那份文档与本进程内存毫无关系）。
+ *   之前这里直接写 `stars` 而函数体里根本没声明，一调就抛
+ *   ReferenceError —— 于是**导入功能整个不可用**：parseSave 的最后一步
+ *   就是 summarizeSave。
+ *
+ * 口径与 buildDoc 对齐：cleared = ≥1 的关数，stars = 星级总和。
+ * 优先读 campaign.stars（逐关字段，事实来源），退化时读 progress.stars（汇总读数）。
+ * 两种形态（字符串 / 数组）都收 —— 玩家导入的可能是老版本导出的文件。
+ */
 export function summarizeSave(doc) {
   const d = objOr(doc) || {};
-
+  const cp = objOr(objOr(d.campaign) || {}).progress;
+  const raw = parseStarStr(objOr(d.campaign).stars);
+  let cleared = 0;
   let total = 0;
-  for (const s of stars) {
-    const n = Number(s) || 0;
-    if (n > 0) total += n;
+  for (const n of raw) {
+    if (n > 0) { cleared++; total += n; }
+  }
+  // 老档没有逐关字段时，退回汇总读数（progress.stars 是总数，不是数组）
+  if (!raw.length && cp && Number.isFinite(Number(cp.stars))) {
+    total = Math.max(0, intOr(cp.stars));
+    cleared = Math.max(0, intOr(cp.cleared));
   }
   const g = objOr(d.garage) || {};
   const league = objOr(objOr(d.space) || {}).league;
   return {
-    cleared: stars.filter((s) => Number(s) > 0).length,
+    cleared,
     stars: total,
     rating: Math.max(0, intOr((objOr(d.ranked) || {}).rating)),
-    spaceRating: Math.max(0, intOr(objOr(league) || {}).rating),
+    spaceRating: Math.max(0, intOr((objOr(league) || {}).rating)),
     gold: safeGold(fromPlainDecimal((objOr(d.money) || {}).gold)),
     vehicles: Array.isArray(g.owned) ? g.owned.length : 0,
   };
