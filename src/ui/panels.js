@@ -43,6 +43,8 @@ const homeView = document.getElementById("homeView");
 let inHomeView = true;
 /** 上次选中的玩法 tab：返回主页时回到它，而不是永远弹回「闯关」 */
 let lastTab = "level";
+/** 上一场比赛抽到的赛道（下次抽签要避开它）。-1 = 还没跑过 */
+let lastRaceLevel = -1;
 /** 宇宙联赛面板当前展开的联赛下标（-1 = 全收起） */
 let openSpaceLeague = 0;
 /** 存档面板的临时视图状态（导入待确认数据 / 对比摘要 / 提示 / 二次确认） */
@@ -269,6 +271,7 @@ function onPanelClick(e) {
     case "ranked":
       store.raceRanked = el.dataset.adv === "1";
       renderRacePanel(openBranch);
+      scrollStepIntoView("raceGoHead");   // 档位选完 → 直接把「开跑」滚进视野
       return;
     case "raceFmt": {
       // 切赛制只改选择，不开局 —— 面板重绘即可，赛制在 store 里留存
@@ -276,7 +279,20 @@ function onPanelClick(e) {
       if (RACE_FORMATS[id]) {
         store.raceFormatPick = id;
         renderRacePanel(openBranch);
+        scrollStepIntoView("raceTierHead"); // 赛制选完 → 滚到档位
       }
+      return;
+    }
+    case "raceGo": {
+      // 随机抽一条已解锁赛道直接开跑。上一场用过的会被排除，
+      // 免得"随机"连着两次给你同一张图。
+      const gi = randomRaceLevel(lastRaceLevel);
+      if (gi < 0) {
+        showToast("🔒 还没有已解锁的赛道，先去闯关开一局", 1400, "warn");
+        return;
+      }
+      lastRaceLevel = gi;
+      api.startGame("race", gi, { format: raceFormatPick(), ranked: store.raceRanked });
       return;
     }
     case "freeRandom":
@@ -602,7 +618,7 @@ export function renderRacePanel(openBi) {
     </button>`;
   }).join("")}</div>
 
-  <div class="brHead">② 选档位 · 排位档会结算段位分，普通档只发名次奖金</div>
+  <div class="brHead" id="raceTierHead">② 选档位 · 排位档会结算段位分，普通档只发名次奖金</div>
   <div class="rankBox">
     <div class="rankScore">${rating}</div>
     <div class="rankSub">${rankName(rating)}
@@ -638,11 +654,15 @@ export function renderRacePanel(openBi) {
       ★ 进段 · ★★ 段内过半 · ★★★ 段内 85%</div>
   </details>
 
-  <div class="brHead">③ 选赛道</div>
-  <div class="branchWall">${BRANCHES.map((_, i) => branchCard(i)).join("")}</div>
-  ${openBranch >= 0 ? levelBlock(true) : ""}
-  <div class="panelNote">按名次发奖（第 1 名 ${RACE_PLACE_GOLD[0]} 🪙，完赛即有）· 赛道需已解锁</div>
-  <button class="btn backBtn" data-act="back">返回</button>`);
+  <div class="brHead" id="raceGoHead">③ 开跑</div>
+  <div class="panelNote">赛道<b>随机抽取</b> —— 在已解锁且还没通关的关卡里等概率摇一条，
+    所以每场比赛都是新地图，不必在一屏 12 支线 × 6 关里翻找。
+    连着两场不会抽到同一条。</div>
+  <div class="row2">
+    <button class="btn" data-act="raceGo" style="flex:1">🏁 随机赛道开跑</button>
+    <button class="btn backBtn" data-act="back">返回</button>
+  </div>
+  <div class="panelNote">按名次发奖（第 1 名 ${RACE_PLACE_GOLD[0]} 🪙，完赛即有）</div>`);
 }
 
 /** 点关卡格：按当前面板种类开局；锁定则给出明确的解锁提示 */
@@ -659,6 +679,58 @@ function playCell(gi) {
   }
   if (panelKind === "race") api.startGame("race", gi, { format: raceFormatPick(), ranked: store.raceRanked });
   else api.startGame("level", gi);
+}
+
+/**
+ * 比赛随机抽一条已解锁赛道。
+ *
+ * ★ 为什么不再让玩家选：面板里"选赛制 → 选档位 → 选赛道分支 → 选关卡"
+ *   四层摞在一起，赛道那一层是 12 张分支卡 × 6 个关卡格，玩家得一路往下滚
+ *   才能找到自己在打的那条 —— 而比赛本来就该是"换个地方再跑一遍"，
+ *   选地图不是它的决策内容。抽签把这一层整个去掉，也顺手解决了滚动问题。
+ *
+ * ★ 抽签规则：优先在**已解锁且没通关**的关卡里等概率抽，抽到全通关的支线
+ *   说明玩家已经打穿了，那就在全部已解锁关卡里抽。全程一条没解锁就返回 -1，
+ *   由调用方提示（而不是静默开局到一条锁着的关）。
+ *
+ * @param {number} avoid 上一场的关卡下标；抽中它就再抽一次，避免连着两场同图
+ * @returns {number} 关卡全局下标；无可用赛道时 -1
+ */
+function randomRaceLevel(avoid) {
+  const pool = [];
+  const all = [];
+  for (let bi = 0; bi < BRANCHES.length; bi++) {
+    for (let k = 0; k < LEVELS_PER_BRANCH; k++) {
+      if (!levelUnlocked(bi, k)) continue;
+      const gi = globalIndexOf(bi, k);
+      all.push(gi);
+      if (!((store.stars[gi] || 0) >= 1) && gi !== avoid) pool.push(gi);
+    }
+  }
+  const from = pool.length ? pool : all.filter((gi) => gi !== avoid);
+  const src = from.length ? from : all;
+  if (!src.length) return -1;
+  return src[(Math.random() * src.length) | 0];
+}
+
+/**
+ * 分步引导：点完一步就把下一步滚进视野。
+ *
+ * ★ 为什么需要：面板三段加起来超过两屏，不滚就看不到自己刚点的选择生效了，
+ *   也不知道下一步在哪。滚过去之后"选赛制 → 选档位 → 开跑"读起来才是一条流程。
+ *   已经在视野内就不动（避免每次点击都把页面顶到最上）。
+ */
+function scrollStepIntoView(id) {
+  const host = document.getElementById("modePanel");
+  if (!host || typeof host.querySelector !== "function") return;
+  const el = host.querySelector("#" + id);
+  if (!el || typeof el.scrollIntoView !== "function") return;
+  const box = el.getBoundingClientRect();
+  const hostBox = host.getBoundingClientRect ? host.getBoundingClientRect() : null;
+  const top = hostBox ? box.top - hostBox.top : box.top;
+  // 已经在上半屏就当可见，不打扰玩家
+  if (top >= 0 && top < (hostBox ? hostBox.height : window.innerHeight || 600) * 0.6) return;
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // ---------------- 13.2 最终任务 / 排位赛 ----------------

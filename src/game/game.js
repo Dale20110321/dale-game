@@ -607,10 +607,13 @@ function finishLevel() {
       1800, won ? "success" : "warn"
     );
   } else if (store.mode === "level") {
+    // 计时惩罚（摔车）计入本关用时，直接影响三星时限。
+    // ★ 必须**先声明再用**：下面 noteLevelRun 那一行原本写在 const 之前，
+    //   于是每次普通关卡通关都抛 ReferenceError（TDZ），finishLevel 整个中断 ——
+    //   表现就是"骑过终点却不算过关"，星级、金币、解锁全都没写。
+    const elapsed = store.time - run.levelStartTime + run.penaltyTime;
     // 逐关记录：最佳用时 / 最佳金币在这里一次性写回
     noteLevelRun(store.selLevel, { done: true, ms: elapsed * 1000, coins: run.coinGot });
-    // 计时惩罚（摔车）计入本关用时，直接影响三星时限
-    const elapsed = store.time - run.levelStartTime + run.penaltyTime;
     const ratio = run.totalCoins > 0 ? run.coinGot / run.totalCoins : 1;
     let s = 1;
     if (ratio >= 0.7) s = 2;
