@@ -33,6 +33,15 @@ const P = (mass, inertia, suspK, suspC, travel, torque, rpm, wheelieK, wheelieUp
  *   所以换车只换样子，轮胎既不会穿地也不会浮空，物理逐位不变。
  *
  * pose  骑手姿态偏移（px）：肩/头的位移决定"伏"还是"直"，车把位移决定手往哪儿够
+ *   ★ **有硬上限，别再往上加**。render/bike.js 的骑手几何是：
+ *       髋 x = −12.5 + shX·0.42   肩 x = 2.5 + shX   头 x = 5.6 + hdX
+ *       车把 x = 9.5 + barX（轴距只有 38，前轮中心在 x=19）
+ *     所以 shX 每加 1，躯干长 15 + 0.58·shX 就涨 0.58px，且头同步前移。
+ *     中立骑手 shX=0 时躯干 15px、头在车把**后** 3.9px。
+ *     ★ 判据：躯干 ≤ 25px、头−车把 ≤ +10px。越线的样子不是"更伏"，
+ *       是人被拉长 + 头拧到车把前面（无极曾经做到躯干 30 / 头超前轮 18px，
+ *       加上 9.6 的头盔，读起来像 rider 掉在车前面飘着）。
+ *     想要"更贴地"的观感请调 shY / hdY（压低身体），那才是伏得低而不是探得远。
  * bar   车把形态：flat 平把 / drop 弯把（公路车）/ wide 直把（越野车）
  * coil  悬挂弹簧幅度；0 = 刚性前叉（公路车本来就没有避震）
  */
@@ -45,14 +54,16 @@ const POSE = (shX, shY, hdX, hdY, barX, barY) => ({ shX, shY, hdX, hdY, barX, ba
  *   两者分开，是因为拖尾不参与任何物理，且要按**该车此刻的极速**归一化，
  *   塞进 art 会让人以为改 art 会影响物理。
  *
- * ★ 七台宇宙车必须**每台一种颜色 + 一种形态**（用户明确要求）。形态不是换色，
- *   是换画法：电弧 / 螺旋 / 日冕 / 余烬 / 涟漪 / 涡旋 / 光矛，七种画法
- *   连抖动相位（seed）都错开，避免七台车同屏时拖尾同频闪烁。
+ * ★ 十二台宇宙级车必须**每台一种颜色 + 一种形态**（用户明确要求）。形态不是换色，
+ *   是换画法：电弧 / 螺旋 / 日冕 / 余烬 / 涟漪 / 涡旋 / 光矛 / 光锥 / 弦裂 /
+ *   光网 / 编织 / 事件视界，十二种连抖动相位（seed）都错开，避免同屏时拖尾同频闪烁。
  *
  * core  拖尾**芯**：接近白的高温色（能量最密处）
  * glow  拖尾**外焰**：车辆主色系（余晖、边缘）
  * style 签名形态，决定 render/trail.js 走哪条绘制分支：
- *       arc 电弧 / helix 螺旋 / corona 日冕 / ember 余烬 / ripple 涟漪 / vortex 涡旋 / lance 光矛
+ *       arc 电弧 / helix 螺旋 / corona 日冕 / ember 余烬 / ripple 涟漪 /
+ *       vortex 涡旋 / lance 光矛 / cone 光锥 / rift 弦裂 / lattice 光网 /
+ *       braid 编织 / event 事件视界
  * len   **满档尾长（屏幕 px，不是世界 px）** —— 见 render/trail.js 的"零逐帧分配"纪律 3
  * width 满档半宽（屏幕 px）
  * count 元素数（闪电条数 / 火舌数 / 光环数 / 碎块数），随画质档缩放
@@ -460,9 +471,9 @@ export const VEHICLES = [
   // ================================================================
   {
     id: "cv1",
-    name: "第一宇宙速度",
+    name: "星环",
     icon: "🛰️",
-    desc: "7.9 km/s · 环绕速度 · 近地轨道",
+    desc: "第一宇宙速度 · 7.9 km/s 环绕速度 · 近地轨道",
     tier: "宇宙",
     maxLv: 500,
     // ★ 该车「形态」的标称极速（km/h）。omega 形态据此 + 升级等级解算出实际极速，
@@ -491,15 +502,15 @@ export const VEHICLES = [
     trail: TRAIL("arc", "#EAF9FF", "#5EC8F5",
       { len: 190, width: 8, count: 3, spread: 9, seed: 0.13 }),
     // ★ inertia = 1 / airRot = 1.63（|airRot×inertia−1| = 0）
-    phys: P(3.10, 1.63, 1.7, 1.5, 12, 26.4, 6.6, /* wheelieK */ 4.6, /* wheelieUp */ 20.2),
+    phys: P(68.6, 1.63, 2.4, 1.5, 12, 26.4, 0.75, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
     ultra: { fx: {}, name: "环绕形态", icon: "🛰️", mode: "omega", cost: 10000000000,
       desc: "28440 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
   {
     id: "cv2",
-    name: "第二宇宙速度",
+    name: "离尘",
     icon: "🚀",
-    desc: "11.2 km/s · 地球逃逸速度",
+    desc: "第二宇宙速度 · 11.2 km/s 地球逃逸速度",
     tier: "宇宙",
     maxLv: 500,
     // ★ 11.2 km/s = 40,320 km/h —— 摆脱地球引力束缚的最小速度。
@@ -525,15 +536,15 @@ export const VEHICLES = [
     trail: TRAIL("helix", "#E6FFF6", "#3FE0A5",
       { len: 235, width: 10, count: 2, seed: 0.41 }),
     // ★ inertia = 1 / airRot = 1.34
-    phys: P(2.45, 1.34, 1.8, 1.5, 11, 39.2, 8.1, /* wheelieK */ 7.4, /* wheelieUp */ 41.5),
+    phys: P(101.9, 1.34, 3.5, 1.5, 11, 39.2, 0.82, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
     ultra: { fx: {}, name: "逃逸形态", icon: "🚀", mode: "omega", cost: 300000000000,
       desc: "40320 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
   {
     id: "cv3",
-    name: "第三宇宙速度",
+    name: "越日",
     icon: "🌌",
-    desc: "16.7 km/s · 太阳系逃逸速度",
+    desc: "第三宇宙速度 · 16.7 km/s 太阳系逃逸速度",
     tier: "宇宙",
     maxLv: 500,
     // ★ 16.7 km/s = 60,120 km/h —— 摆脱太阳引力、飞出太阳系所需的最小速度。
@@ -561,15 +572,15 @@ export const VEHICLES = [
     trail: TRAIL("corona", "#FFF8D6", "#FFE14D",
       { len: 215, width: 11, count: 9, seed: 0.68 }),
     // ★ inertia = 1 / airRot = 1.15
-    phys: P(1.90, 1.15, 1.9, 1.5, 10, 52.6, 9.6, /* wheelieK */ 11.6, /* wheelieUp */ 86.4),
+    phys: P(136.8, 1.15, 5.0, 1.5, 11, 52.6, 0.9, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
     ultra: { fx: {}, name: "星际形态", icon: "🌌", mode: "omega", cost: 9000000000000,
       desc: "60120 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
   {
     id: "cv4",
-    name: "第四宇宙速度",
+    name: "出银",
     icon: "🌠",
-    desc: "525 km/s · 银河系逃逸速度",
+    desc: "第四宇宙速度 · 525 km/s 银河系逃逸速度",
     tier: "宇宙",
     maxLv: 500,
     // ★ 525 km/s = 1,890,000 km/h —— 摆脱**银河系**引力束缚的最小速度。
@@ -597,15 +608,15 @@ export const VEHICLES = [
     trail: TRAIL("ember", "#FFD98A", "#FF6B3D",
       { len: 245, width: 10, count: 15, seed: 0.29 }),
     // ★ inertia = 1 / airRot = 1.06
-    phys: P(1.42, 1.06, 2.0, 1.5, 9, 92.4, 13.5, /* wheelieK */ 9.7, /* wheelieUp */ 104.2),
+    phys: P(240.2, 1.06, 8.0, 1.5, 12, 92.4, 1.0, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
     ultra: { fx: {}, name: "银河形态", icon: "🌠", mode: "omega", cost: 270000000000000,
       desc: "1890000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
   {
     id: "cv5",
-    name: "第五宇宙速度",
+    name: "破群",
     icon: "🕸️",
-    desc: "1000 km/s · 本星系群逃逸速度",
+    desc: "第五宇宙速度 · 1000 km/s 本星系群逃逸速度",
     tier: "宇宙",
     maxLv: 500,
     // ★ 约 1000 km/s = 3,600,000 km/h —— 脱离**本星系群**（银河系 + 仙女座等
@@ -632,15 +643,15 @@ export const VEHICLES = [
     trail: TRAIL("ripple", "#FFD6EC", "#FF4D9E",
       { len: 250, width: 12, count: 6, seed: 0.87 }),
     // ★ inertia = 1 / airRot = 0.97
-    phys: P(1.02, 0.97, 2.1, 1.5, 8, 168.5, 19.5, /* wheelieK */ 22.4, /* wheelieUp */ 192.7),
+    phys: P(435.7, 0.97, 12.0, 1.5, 14, 168.5, 1.08, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
     ultra: { fx: {}, name: "星系群形态", icon: "🕸️", mode: "omega", cost: 8100000000000000,
       desc: "3600000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
   {
     id: "cv6",
-    name: "第六宇宙速度",
+    name: "超脱",
     icon: "🕳️",
-    desc: "1500 km/s · 超星系团逃逸速度",
+    desc: "第六宇宙速度 · 1500 km/s 超星系团逃逸速度",
     tier: "宇宙",
     maxLv: 500,
     // ★ 约 1500 km/s = 5,400,000 km/h —— 脱离**本超星系团**所需的逃逸速度。
@@ -668,15 +679,15 @@ export const VEHICLES = [
     trail: TRAIL("vortex", "#F0E4FF", "#B07CFF",
       { len: 262, width: 13, count: 5, seed: 0.55 }),
     // ★ inertia = 1 / airRot = 1.99
-    phys: P(0.72, 1.99, 2.2, 1.5, 7, 305.8, 27.5, /* wheelieK */ 8.4, /* wheelieUp */ 92.6),
+    phys: P(790.8, 1.99, 18.0, 1.5, 16, 305.8, 1.15, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
     ultra: { fx: {}, name: "超星系团形态", icon: "🕳️", mode: "omega", cost: 243000000000000000,
       desc: "5400000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
   {
     id: "cv7",
-    name: "第七宇宙速度",
+    name: "无界",
     icon: "💫",
-    desc: "1750 km/s · 整个宇宙的逃逸速度",
+    desc: "第七宇宙速度 · 1750 km/s 全域逃逸速度",
     tier: "宇宙",
     maxLv: 500,
     // ★ 1750 km/s = 6,300,000 km/h —— 取用户给的 1500~2000 km/s 区间中值。
@@ -697,7 +708,7 @@ export const VEHICLES = [
       tire: 0.6, rim: false, spokes: 32, spokeW: 0.22, tube: 1.1,
       topDrop: 25, coil: 0, bar: "drop", saddleW: 2,
       helmR: 6.8, peak: false, vents: 8,
-      pose: POSE(12, 10, 15, 9.5, 5, 8),
+      pose: POSE(11.5, 9, 14.5, 8.5, 4.5, 7),
     }),
     // ★ 拖尾：光矛（lance）—— 逃出一切之后只剩光。全场最长、最直、最亮：
     //   一枚纺锤形光幕 + 一条贯穿的芯线 + 稀疏的星屑，是七台里唯一的"直线"画法
@@ -705,20 +716,241 @@ export const VEHICLES = [
     trail: TRAIL("lance", "#FFFFFF", "#F0F4FF",
       { len: 420, width: 9, count: 7, seed: 0.02 }),
     // ★ inertia = 1 / airRot = 0.78
-    phys: P(0.42, 0.78, 2.3, 1.5, 6, 420.6, 36, /* wheelieK */ 31.2, /* wheelieUp */ 398.4),
+    phys: P(1087.6, 0.78, 26.0, 1.5, 20, 420.6, 1.22, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
     ultra: { fx: {}, name: "全域形态", icon: "💫", mode: "omega", cost: 7290000000000000000,
       desc: "6300000 km/h · 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
   },
 
+  // ================================================================
+  //  光速级（3 台）—— 用户点名追加的终点
+  //
+  //  ★ 极速取**真光速**而不是"更快一点的数"：
+  //    c = 299,792.458 km/s（SI 定义的精确值）= 1,079,252,849 km/h。
+  //    弦外取 10c、裂界取 100c —— 大统一理论里超光速并不被禁止（不是"更快的光"，
+  //    而是载 info 时的群速度），所以世界观上成立。
+  //
+  //  ★ 价格每一档跳 **×900**（不是宇宙序列的 ×30）：
+  //    第七宇宙速度 5.832e17 → 光锥 5.2488e20 → 弦外 4.72392e23 → 裂界 4.25153e26。
+  //    ×30 是同一"宇宙速度阶梯"内部的等比；×900 是**跨出那个阶梯** ——
+  //    光速车与前十台宇宙车之间应当是一道天堑，而不是同一条曲线上的下一格。
+  //    代价是总资产量级冲到 ~2.3e28，故 GOLD_MAX 必须跟着抬到 1e30。
+  //
+  //  ★ 这三台把速度推到 2.998e12 px/s，牵出四处硬上限的连锁抬升
+  //    （改之前必须一起改，否则会静默截断）：
+  //    constants.TOP_SPEED_CAP / NUM_CAP_V → 1e14
+  //    camera.CAM_ZOOM_ABS_MIN → 1e-10（否则一帧横移 5e10px 直接闪出画面）
+  //  ================================================================
+  {
+    id: "cv8",
+    name: "光锥",
+    icon: "⚡",
+    desc: "光速 · 299,792 km/s · 形态极速即光速本身",
+    tier: "宇宙",
+    maxLv: 500,
+    // ★ 1,079,252,849 km/h = c（299,792.458 km/s × 3600）。形态满级恰好跑到光速。
+    nominalKmh: 1079252849,
+    // costK = 车价 × 40 ÷ 四项升满单价合计(621,200) = 车价 ÷ 15,530
+    costK: 33797810688989053,
+    price: 524880000000000000000,
+
+    speed: 2.6,
+    grip: 620.0,
+    weight: 0.30,
+    airRot: 1.412,
+    fuel: 18,
+    color: "#C9F7FF",   // 纯白光 —— 越过彩色光谱之后只剩白
+    // ★ 光锥：外胎与车架都细到接近消失（轮胎 0.4px、管径 0.8px），
+    //   辐条 40 根密到读成一片连续环，骑手压到极限前趴。
+    art: ART({
+      tire: 0.4, rim: false, spokes: 40, spokeW: 0.15, tube: 0.8,
+      topDrop: 28, coil: 0, bar: "drop", saddleW: 1.5,
+      helmR: 7.0, peak: false, vents: 10,
+      pose: POSE(12.5, 9, 15.5, 8, 5, 7),
+    }),
+    // ★ 拖尾：光锥（cone）—— 九道**向后收束**的锥面，越远越窄越亮。
+    //   这是九种画法里唯一的"会聚"：其余八种都从尾根向外散开，
+    //   而光速不该看起来像一团炸开的火 —— 它该看起来像一个正在合拢的锥。
+    trail: TRAIL("cone", "#FFFFFF", "#C9F7FF",
+      { len: 460, width: 12, count: 9, seed: 0.31 }),
+    // ★ inertia = 1 / airRot = 0.708
+    phys: P(1346.8, 0.708, 40.0, 1.5, 24, 520.8, 1.3, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
+    ultra: { fx: {}, name: "光锥", icon: "⚡", mode: "omega", cost: 6561000000000000000000,
+      desc: "1079252849 km/h（= 光速）· 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
+  },
+  {
+    id: "cv9",
+    name: "弦外",
+    icon: "🌀",
+    desc: "十倍光速 · 2,997,925 km/s · 超出因果律的那一格",
+    tier: "宇宙",
+    maxLv: 500,
+    // ★ 10c = 2,997,924.58 km/s = 1.079252849e10 km/h
+    nominalKmh: 10792528488,
+    costK: 30418029620090148100,
+    price: 472392000000000000000000,
+
+    speed: 2.6,
+    grip: 1180.0,
+    weight: 0.22,
+    airRot: 1.557,
+    fuel: 20,
+    color: "#FF4DE8",   // 品红 —— 光谱之外第一次出现的颜色
+    // ★ 弦外：车架已经薄到没有厚度可言（管径 0.4px），辐条 56 根，
+    //   头盔开到极限 —— 这一台的整个卖点就是"你画不出它，因为它没有宽度了"。
+    art: ART({
+      tire: 0.25, rim: false, spokes: 56, spokeW: 0.1, tube: 0.4,
+      topDrop: 32, coil: 0, bar: "drop", saddleW: 1,
+      helmR: 7.2, peak: false, vents: 12,
+      pose: POSE(13.5, 9, 16.5, 8, 5.5, 7),
+    }),
+    // ★ 拖尾：弦裂（rift）—— 两道平行的断裂面，彼此**剪切错开**并缓慢换位，
+    //   像空间本身被撕开一条缝。全场唯一的"成对"画法（其余都是单束或放射）。
+    trail: TRAIL("rift", "#FFFFFF", "#FF4DE8",
+      { len: 520, width: 14, count: 6, seed: 0.77 }),
+    // ★ inertia = 1 / airRot = 0.642
+    phys: P(1655.6, 0.642, 60.0, 1.5, 30, 640.2, 1.38, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
+    ultra: { fx: {}, name: "弦外", icon: "🌀", mode: "omega", cost: 5904900000000000000000000,
+      desc: "10792528488 km/h（= 10 倍光速）· 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
+  },
+  {
+    id: "cv10",
+    name: "裂界",
+    icon: "♾️",
+    desc: "百倍光速 · 29,979,245 km/s · 光网之外的最后一格",
+    tier: "宇宙",
+    maxLv: 500,
+    // ★ 100c = 1.079252849e11 km/h（c = 1,079,252,849 km/h，SI 定义的精确值 ×100）。
+    //   px/s = 2.998e12 —— **比原上界 NUM_CAP_V = 1e12 还大**，
+    //   所以 constants 的 NUM_CAP_V / TOP_SPEED_CAP 一并抬到 1e14，
+    //   camera.CAM_ZOOM_ABS_MIN 抬到 1e-10（否则一帧横移 5e10 px 直接闪出画面）。
+    nominalKmh: 107925284880,
+    // costK = 车价 × 40 ÷ 四项升满单价合计(621,200) = 车价 ÷ 15,530
+    // 价格 = 弦外 × 900（与"第七宇宙速度 → 光锥"同档跨阶，×30 是宇宙阶梯内部的等比）
+    costK: 27379400000000000000000,
+    price: 425152800000000000000000000,
+
+    speed: 2.6,
+    grip: 2242.0,
+    weight: 0.16,
+    airRot: 1.713,
+    fuel: 22,
+    color: "#E0FF00",   // 酸绿 —— 可见光谱长波端，也是"网格"最该有的颜色
+    // ★ 裂界：车架已经薄到连"细"都谈不上（管径 0.2px、胎 0.15px），
+    //   辐条 72 根密成一片连续环 —— 它的卖点就是"你画不出它，因为它没有厚度了"。
+    art: ART({
+      tire: 0.15, rim: false, spokes: 72, spokeW: 0.06, tube: 0.2,
+      topDrop: 38, coil: 0, bar: "drop", saddleW: 0.6,
+      helmR: 7.4, peak: false, vents: 14,
+      pose: POSE(14.5, 8.5, 17.5, 7.5, 6, 6.5),
+    }),
+    // ★ 拖尾：光网（lattice）—— 一张向车尾**透视收缩并翻滚**的网格，
+    //   横向的环与纵向的辐条交替亮灭，像身后拖着一条正在被拉直的空间坐标网。
+    //   这是十种画法里唯一的"二维面"：其余九种都是单束 / 放射 / 环 / 成对，
+    //   只有它读起来是一张有面积的网 —— 百倍光速不该还有"一条线"的形状。
+    trail: TRAIL("lattice", "#FFFFFF", "#E0FF00",
+      { len: 600, width: 16, count: 7, seed: 0.64 }),
+    // ★ inertia = 1 / airRot = 0.584（|airRot×inertia−1| = 0）
+    phys: P(2034.7, 0.584, 90.0, 1.5, 38, 786.8, 1.463, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
+    ultra: { fx: {}, name: "裂界", icon: "♾️", mode: "omega", cost: 5314410000000000000000000000,
+      desc: "107925284880 km/h（= 100 倍光速）· 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
+  },
+  {
+    id: "cv11",
+    name: "千界",
+    icon: "🌠",
+    desc: "千倍光速 · 299,792,458 km/s · 连因果都开始追不上你",
+    tier: "宇宙",
+    maxLv: 500,
+    // ★ 1000c = 1.079252849e12 km/h = 2.998e13 px/s。
+    //   价格 ×900 接在裂界后面 —— 与「第七宇宙速度 → 光锥 → 弦外 → 裂界」
+    //   用的是同一个跨阶倍率（宇宙阶梯内部是 ×30，跨出那个阶梯才是 ×900）。
+    //   尊贵感靠**价格跨越的量级**：裂界的形态解锁是 5.3×10^27，这一台是
+    //   4.78×10^30 —— 中间隔了三个数量级，"贵"这件事不需要文案解释。
+    nominalKmh: 1079252848800,
+    costK: 24636700000000000000000000,
+    price: 382637520000000000000000000000,
+
+    speed: 2.6,
+    grip: 4260.0,
+    weight: 0.12,
+    airRot: 1.884,
+    fuel: 24,
+    color: "#FF2D95",   // 霓粉 —— 光谱之外第二次出现的颜色（比弦外的品红更刺眼）
+    // ★ 千界：管径 0.12px、胎 0.1px，辐条 90 根。裂界是"没有厚度"，
+    //   这一台是"厚度成了负数"——它比上一台薄了一个数量级。
+    art: ART({
+      tire: 0.1, rim: false, spokes: 90, spokeW: 0.04, tube: 0.12,
+      topDrop: 44, coil: 0, bar: "drop", saddleW: 0.4,
+      helmR: 7.6, peak: false, vents: 16,
+      pose: POSE(15.5, 8, 18.5, 7, 6.5, 6),
+    }),
+    // ★ 拖尾：编织（braid）—— 四股互相缠绕的束，两两交叉、一股压一股。
+    //   光网是"一张面"，这是"几根实打实的绳子"；十二种画法里唯一的编结结构。
+    trail: TRAIL("braid", "#FFFFFF", "#FF2D95",
+      { len: 680, width: 15, count: 4, seed: 0.28 }),
+    // ★ inertia = 1 / airRot = 0.531
+    phys: P(2502.7, 0.531, 135.0, 1.5, 48, 967.8, 1.551, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
+    ultra: { fx: {}, name: "千界", icon: "🌠", mode: "omega", cost: 4782969000000000000000000000000,
+      desc: "1079252848800 km/h（= 1000 倍光速）· 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
+  },
+  {
+    id: "cv12",
+    name: "无极",
+    icon: "💠",
+    desc: "万倍光速 · 2,997,924,580 km/s · 整个游戏的终点",
+    tier: "宇宙",
+    maxLv: 500,
+    // ★ 10000c = 1.079252849e13 km/h = **2.998e14 px/s**。
+    //   这比旧的 NUM_CAP_V = 1e14 还大，所以上限抬到 1e16，
+    //   camera.CAM_ZOOM_ABS_MIN 抬到 1e-12（否则一帧横移 5e12 px 直接闪出画面）。
+    nominalKmh: 10792528488000,
+    costK: 22173400000000000000000000000,
+    price: 344373768000000000000000000000000,
+
+    speed: 2.6,
+    grip: 8094.0,
+    weight: 0.09,
+    airRot: 2.072,
+    fuel: 26,
+    color: "#7B00FF",   // 极深紫 —— 可见光谱的最后一段，后面什么都没有了
+    // ★ 无极：管径 0.08px、胎 0.06px，辐条 112 根、头盔开 18 道通风槽。
+    //   它的"卖点"是终于放弃了"越来越快"，转而**越来越空**——
+    //   所以拖尾也是十二种里唯一的"减法"：不做加法，直接把尾根吃掉。
+    art: ART({
+      tire: 0.06, rim: false, spokes: 112, spokeW: 0.025, tube: 0.08,
+      topDrop: 50, coil: 0, bar: "drop", saddleW: 0.25,
+      helmR: 7.8, peak: false, vents: 18,
+      pose: POSE(16.5, 7.5, 19.5, 6.5, 7, 5.5),
+    }),
+    // ★ 拖尾：事件视界（event）—— 一圈圈**向内塌缩**的环，环内比环外更亮，
+    //   最后收成一个吞掉一切的暗点。这是十二种画法里唯一的"减法"：
+    //   其余十一种都在往尾根**加**能量，只有它一路把能量**拿走**，
+    //   读起来就是"连光都被甩掉了"。
+    trail: TRAIL("event", "#FFFFFF", "#7B00FF",
+      { len: 760, width: 17, count: 8, seed: 0.93 }),
+    // ★ inertia = 1 / airRot = 0.483
+    phys: P(3078.3, 0.483, 203.0, 1.5, 60, 1190.4, 1.644, /* wheelieK */ 1.2, /* wheelieUp */ 1.4),
+    ultra: { fx: {}, name: "无极", icon: "💠", mode: "omega", cost: 4304672100000000000000000000000000,
+      desc: "10792528488000 km/h（= 10000 倍光速）· 全程离地飞行 · 摔不坏 · 燃料无限 · 无视危险段" },
+  },
+
 
   // ================================================================
-  //  档位阶梯（共 26 辆）：普通 5 / 稀有 6 / 史诗 6 / 传说 5 / 神话 4
-  //  · costK = 升级费倍率（普通 1 / 稀有 5 / 史诗 12 / 传说 25 / 神话 40）。
+  //  档位阶梯（共 28 辆）：普通 4 / 稀有 5 / 史诗 3 / 传说 2 / 神话 4 / 宇宙 10
+  //
+  //  ★ **2026-10 精简**：删掉 8 台形态重复的地面车（蜂鸟 / 潮生 / 噬沙 / 雨燕 /
+  //    泰坦 / 破阵 / 焰裔 / 幽影）。删的判据不是"便宜"，而是**同 mode 里
+  //    已经有定位相同的两台**，玩家横向比出来得不到一次真正的选择。
+  //    保留判据：① 每种 mode 至少剩 2 台（absolut 是奇点号的内置特权，例外）；
+  //    ② 宇宙级车与三台光速车一台不删；③ 价格阶梯不许出现断层。
+  //    删完每档的台数是 普通 4 / 稀有 5 / 史诗 3 / 传说 2 / 神话 4 / 宇宙 10。
+  //
+  //  · costK = 升级费倍率（普通 1 / 稀有 5 / 史诗 12 / 传说 25 / 神话 40；
+  //    宇宙级车由"四项升满 = 车价 × 40"反解，见每台的注释）。
   //    四项升满 = 28,240 × costK：普通 28,240 / 稀有 141,200 / 史诗 338,880 /
   //    传说 706,000 / 神话 1,129,600。
-  //  · 除驮马（免费新手车）外每辆都有「最终形态」：七种 mode，
-  //    除 absolut（仅奇点号一辆、免解锁）外其余六种各 4 辆；
-  //    奇点号是唯一免解锁的内置形态（absolut），但它的四项升级照样要花钱买。
+  //  · 每辆都有「最终形态」：八种 mode，absolut 仅奇点号（免解锁的内置形态），
+  //    omega 是十台宇宙级车的通用形态。
   //  · 极速由**扭矩曲线的归零转速**决定，也就是 phys.rpm 才是"贵车更快"的唯一干净杠杆
   //    （堆 torque 只会在平路撞上抓地上限，堆 grip 只会更抗滑而不是更快）。
   //    所以 rpm 随档位递增。
@@ -727,51 +959,12 @@ export const VEHICLES = [
   //    torque 再高容易后空翻。
   //  ★ 注意：grip **不受 ≤2.2 之类的硬上限约束**（早先的这条限制写在 1.9 那代数据上，
   //    早已不成立）—— 真正的约束是"满级 μ 仍要留出打滑空间"，奇点号的 3 就是标定结果。
+  //  ★ **删车前必读**：存档的车库按**车辆 id** 索引（见 core/storage.js 的 v5 存档），
+  //    所以再删任何一台都不会让老存档指向错车。若哪天回退到"数组下标"存档，
+  //    删车会让全部下标前移、老存档整体错位 —— 那是不能做的。
   // ================================================================
 
   // ---------------- 普通档 ----------------
-{
-    id: "commuter",
-    name: "蜂鸟",
-    icon: "🐦",
-    desc: "城市里最灵活的一台，钻小巷、爬缓坡都不费力",
-    tier: "普通",
-    costK: 1,
-    price: 4000,
-
-    speed: 1.05,
-    grip: 1.32,
-    weight: 0.85,
-    airRot: 1.351,
-    fuel: 1.2,
-    color: "#7a9e7e",
-    art: ART({tire: 2.6, spokes: 8, spokeW: 1.3, tube: 3.2, topDrop: 4, coil: 0.7, bar: "flat", saddleW: 11, helmR: 4.3, pose: POSE(1, 1, 2, 1, 0.5, -1)}),
-    phys: P(0.85, 0.74, 1.1, 1.05, 15, 1.22, 1.55),
-    ultra: {
-      fx: {"speedN": 2.6, "accel": 2.2, "vCap": 26}, name: "通勤喷射", icon: "🛴", mode: "warp", cost: 12000, desc: "踩住油门持续加速，0.6 秒逼近极速" },
-  },
-{
-    id: "dirt",
-    name: "山魈",
-    icon: "🐒",
-    desc: "松软地面上的老手，颠簸路面也稳当",
-    tier: "稀有",
-    costK: 5,
-    price: 12000,
-
-    speed: 0.95,
-    grip: 1.48,
-    weight: 1.6,
-    airRot: 0.658,
-    fuel: 1.35,
-    color: "#b07d4f",
-    art: ART({tire: 4.6, spokes: 6, spokeW: 1.9, tube: 5.0, topDrop: 0, coil: 1.5, bar: "wide", saddleW: 13, helmR: 4.4, vents: 2, pose: POSE(-1, -2, -1, -2, -0.5, -2.5)}),
-    phys: P(1.66, 1.52, 0.9, 0.95, 19, 1.28, 0.98),
-    ultra: {
-      fx: {"speedN": 4.0, "rpmK": 2.8, "dragK": 0.45}, name: "泥地推进", icon: "🏇", mode: "railgun", cost: 49500, desc: "推力与红线同时暴涨，泥地也能飞" },
-  },
-
-  // ---------------- 稀有档 ----------------
 {
     id: "storm",
     name: "白毛风",
@@ -792,110 +985,7 @@ export const VEHICLES = [
     ultra: {
       fx: {"speedN": 3.6, "rpmK": 2.4, "dragK": 0.50}, name: "暴风增压", icon: "🌨️", mode: "surge", cost: 14500, desc: "红线与极速暴涨，雪地起飞" },
   },
-{
-    id: "reef",
-    name: "潮生",
-    icon: "🐚",
-    desc: "潮间带专属，湿滑礁石上稳如磐石",
-    tier: "史诗",
-    costK: 12,
-    price: 26000,
-
-    speed: 1.15,
-    grip: 2.05,
-    weight: 1.12,
-    airRot: 0.952,
-    fuel: 1.5,
-    color: "#ff8fab",
-    art: ART({tire: 5.0, spokes: 5, spokeW: 2.2, tube: 5.6, topDrop: -1, coil: 1.6, bar: "wide", saddleW: 14, helmR: 4.4, vents: 3, pose: POSE(-2, -3, -2, -3, -0.8, -3)}),
-    phys: P(1.12, 1.05, 0.88, 0.92, 19, 1.35, 1.55),
-    ultra: {
-      // ★ 归入 stable：潮生的定位是"礁石上的定海神针"（grip 2.05，全表前列），
-      //   它的形态就该是"贴着礁盘不飞起来"，而不是"摔不下去"。
-      fx: {"gripK": 1.45, "speedN": 1.25}, name: "礁石定根", icon: "🐚", mode: "stable", cost: 135500, desc: "轮轴钉死在礁盘上，抓地再涨四成半" },
-  },
-{
-    id: "canyon",
-    name: "赤鹫",
-    icon: "🦅",
-    desc: "台地上连落差，俯冲落地比谁都稳",
-    tier: "稀有",
-    costK: 5,
-    price: 5500,
-
-    speed: 1.6,
-    grip: 1.02,
-    weight: 1.02,
-    airRot: 1.515,
-    fuel: 1.25,
-    color: "#cd5c5c",
-    art: ART({tire: 2.8, rim: false, spokes: 12, spokeW: 1.1, tube: 3.4, topDrop: 6, coil: 1.2, bar: "drop", saddleW: 8, helmR: 4.9, pose: POSE(4, 4, 5, 4, 1.5, 3)}),
-    phys: P(1.05, 0.66, 1.3, 1.15, 17, 1.38, 1.18),
-    ultra: {
-      fx: {"speedN": 3.2, "accel": 2.8, "vCap": 34}, name: "台地飞驰", icon: "🏜️", mode: "warp", cost: 18000, desc: "持续喷射：踩住油门就一直加速" },
-  },
-{
-    id: "aurora",
-    name: "星轨",
-    icon: "🌠",
-    desc: "极夜里最亮的一辆，空中转得飞快",
-    tier: "普通",
-    costK: 1,
-    price: 3500,
-
-    speed: 1.55,
-    grip: 0.78,
-    weight: 0.5,
-    airRot: 2.941,
-    fuel: 1.3,
-    color: "#66f0c8",
-    art: ART({tire: 1.8, rim: false, spokes: 13, spokeW: 0.8, tube: 2.4, topDrop: 7, coil: 0.4, bar: "drop", saddleW: 7, helmR: 5.0, peak: false, pose: POSE(5, 6, 6, 5, 2, 4)}),
-    phys: P(0.48, 0.34, 1.35, 1.15, 13, 1.8, 1.42),
-    ultra: {
-      fx: {"speedN": 1.10}, name: "极光穿行", icon: "🌌", mode: "phase", cost: 10000, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" },
-  },
-
-  // ---------------- 史诗档 ----------------
-{
-    id: "sandstorm",
-    name: "噬沙",
-    icon: "🏜️",
-    desc: "能见度为零也照样全速",
-    tier: "稀有",
-    costK: 5,
-    price: 9000,
-
-    speed: 1.7,
-    grip: 0.92,
-    weight: 1.08,
-    airRot: 1.01,
-    fuel: 1.8,
-    color: "#d4a373",
-    art: ART({tire: 2.6, spokes: 10, spokeW: 1.2, tube: 3.2, topDrop: 4, coil: 0.6, bar: "drop", saddleW: 9, helmR: 4.6, pose: POSE(3, 3, 4, 3, 1, 2)}),
-    phys: P(1.1, 0.99, 1.4, 1.25, 15, 1.36, 1.4),
-    ultra: {
-      fx: {"speedN": 1.20}, name: "沙暴穿行", icon: "🌪️", mode: "phase", cost: 33000, desc: "摔不坏 + 燃料无限 + 危险段限速豁免" },
-  },
-{
-    id: "magma",
-    name: "焰裔",
-    icon: "🔥",
-    desc: "高重力熔岩滩上的重型战车",
-    tier: "传说",
-    costK: 25,
-    price: 47500,
-
-    speed: 1.4,
-    grip: 2.1,
-    weight: 2.2,
-    airRot: 0.575,
-    fuel: 2.1,
-    color: "#ff6b35",
-    art: ART({tire: 6.4, spokes: 5, spokeW: 2.6, tube: 7.2, topDrop: -2, coil: 2.1, bar: "wide", saddleW: 16, helmR: 5.0, vents: 4, pose: POSE(-3, -5, -2, -5, -1, -5)}),
-    phys: P(2.3, 1.74, 0.8, 0.88, 22, 1.85, 1.45),
-    ultra: {
-      fx: {"gripK": 1.40, "speedN": 1.20}, name: "熔岩护壳", icon: "🛡️", mode: "shield", cost: 303500, desc: "任何姿态都摔不下去，操控全保留" },
-  },
+// ---------------- 史诗档 ----------------
 {
     id: "glacier",
     name: "冰魄",
@@ -921,26 +1011,6 @@ export const VEHICLES = [
       fx: {"gripK": 1.75, "speedN": 1.10}, name: "冰魄浮壳", icon: "❄️", mode: "shield", cost: 371500, desc: "大悬挂继续晃，但怎么都摔不下去" },
   },
 {
-    id: "monsoon",
-    name: "雨燕",
-    icon: "🌧️",
-    desc: "暴雨泥石流里照样全油门",
-    tier: "史诗",
-    costK: 12,
-    price: 22000,
-
-    speed: 1.75,
-    grip: 1.18,
-    weight: 1.25,
-    airRot: 0.82,
-    fuel: 1.9,
-    color: "#4cc9f0",
-    art: ART({tire: 3.6, spokes: 9, spokeW: 1.6, tube: 4.4, topDrop: 5, coil: 1.1, bar: "drop", saddleW: 11, helmR: 4.7, vents: 2, pose: POSE(2, 2, 3, 2, 1, 1)}),
-    phys: P(1.28, 1.22, 1.2, 1.1, 18, 1.6, 1.8),
-    ultra: {
-      fx: {"speedN": 4.4, "rpmK": 3.0, "dragK": 0.42}, name: "季风过载", icon: "🌧️", mode: "surge", cost: 110500, desc: "红线与极速暴涨" },
-  },
-{
     id: "obsidian",
     name: "玄铁",
     icon: "⬛",
@@ -963,26 +1033,6 @@ export const VEHICLES = [
 
   // ---------------- 传说档 ----------------
 {
-    id: "titan",
-    name: "泰坦",
-    icon: "🗿",
-    desc: "传说档最重的一台，压过去就是了",
-    tier: "传说",
-    costK: 25,
-    price: 41000,
-
-    speed: 1.35,
-    grip: 1.7,
-    weight: 3.2,
-    airRot: 0.328,
-    fuel: 2.5,
-    color: "#6c757d",
-    art: ART({tire: 7.8, spokes: 4, spokeW: 3.2, tube: 8.6, topDrop: -4, coil: 2.8, bar: "wide", saddleW: 19, helmR: 5.6, vents: 5, pose: POSE(-4, -7, -3, -7, -1, -7)}),
-    phys: P(3.35, 3.05, 0.68, 0.8, 25, 1.12, 1.08),
-    ultra: {
-      fx: {"gripK": 1.55, "speedN": 1.05}, name: "泰坦领域", icon: "🗿", mode: "stable", cost: 248000, desc: "贴地推进，永不腾空" },
-  },
-{
     id: "solstice",
     name: "逐日",
     icon: "☀️",
@@ -1001,46 +1051,6 @@ export const VEHICLES = [
     phys: P(0.86, 0.8, 1.5, 1.3, 14, 2.2, 1.85),
     ultra: {
       fx: {"speedN": 4.2, "accel": 3.8, "vCap": 50}, name: "至日喷射", icon: "☀️", mode: "warp", cost: 60500, desc: "一脚油门不见尽头" },
-  },
-{
-    id: "vanguard",
-    name: "破阵",
-    icon: "🔺",
-    desc: "重装与速度的折中，攻守兼备",
-    tier: "传说",
-    costK: 25,
-    price: 35000,
-
-    speed: 1.75,
-    grip: 1.58,
-    weight: 2.1,
-    airRot: 0.417,
-    fuel: 2.4,
-    color: "#3a0ca3",
-    art: ART({tire: 6.0, spokes: 8, spokeW: 2.4, tube: 7.0, topDrop: 3, coil: 2.0, bar: "wide", saddleW: 15, helmR: 5.2, vents: 3, pose: POSE(-2, -4, -2, -4, -0.5, -4)}),
-    phys: P(2.2, 2.4, 0.75, 0.86, 22, 1.38, 1.52),
-    ultra: {
-      fx: {"speedN": 4.8, "rpmK": 3.4, "dragK": 0.36}, name: "先锋轨道炮", icon: "🔺", mode: "railgun", cost: 202500, desc: "推力与红线同时暴涨" },
-  },
-{
-    id: "phantom",
-    name: "幽影",
-    icon: "🌫️",
-    desc: "传说档里最轻，撞不坏还滑得远",
-    tier: "史诗",
-    costK: 12,
-    price: 16500,
-
-    speed: 2,
-    grip: 1.12,
-    weight: 0.72,
-    airRot: 1.786,
-    fuel: 2,
-    color: "#adb5bd",
-    art: ART({tire: 1.7, rim: false, spokes: 14, spokeW: 0.7, tube: 2.2, topDrop: 8, coil: 0.2, bar: "drop", saddleW: 6.5, helmR: 5.2, peak: false, pose: POSE(7, 8, 8, 7, 3, 5)}),
-    phys: P(0.7, 0.56, 1.55, 1.35, 12, 1.72, 2.55),
-    ultra: {
-      fx: {"gripK": 1.20, "speedN": 1.10}, name: "幻影护盾", icon: "🌫️", mode: "shield", cost: 74000, desc: "任何姿态都摔不下去，腾空与操控全部保留" },
   },
 {
     id: "eclipse",

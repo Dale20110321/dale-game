@@ -7,16 +7,15 @@
 // ============================================================
 
 /**
- * 启动标志：**必须**是本模块的第一条语句。
+ * 本模块是 index.html 的**唯一**入口（`<script type="module" src="./src/main.js">`）。
  *
- * index.html 同时挂了两个入口：dist/game.bundle.js（普通 script，发布用，也是
- * file:// 双击唯一能跑的那个）与本模块（仅作兜底）。本模块既可能被 bundle 内联执行、
- * 也可能被 index.html 直接 import，两条路都执行 = 整个游戏初始化两遍（两套 store、
- * 两条主循环，却共用同一个 DOM 与同一份 localStorage），所有交互都会触发两次。
- * index.html 的兜底逻辑据此判断：标志已置 → 打包入口已经启动，跳过。
+ * ★ 曾经还有第二条路：index.html 先挂 dist/game.bundle.js，本模块只作兜底，
+ *   靠首行置 `window.__daleBooted` 让两条路互斥。那条路已经删掉（打包文件只服务
+ *   file:// 双击，而本作只跑 GitHub Pages），所以标志与兜底判断一并没了。
+ *   ★ 别再往 index.html 里加第二个加载本模块的 script：两套 store + 两条主循环
+ *   共用同一个 DOM 和同一份 localStorage，所有交互都会触发两次，
+ *   最典型的症状是存档面板点一次「✨ 新建存档」会连建两个。
  */
-if (typeof window !== "undefined") window.__daleBooted = true;
-
 import { installRoundRect } from "./core/utils.js";
 import { resize } from "./core/canvas.js";
 import { START_X } from "./config/constants.js";
@@ -29,7 +28,7 @@ import { applyUpgrades, resetBike } from "./physics/bike.js";
 import { buildLevel } from "./game/world.js";
 import { updateCamera } from "./render/camera.js";
 import { drawScene } from "./render/scene.js";
-import { initPostFx } from "./render/postfx.js";
+import { initPostFx, autoTuneFrame } from "./render/postfx.js";
 import { hideOverlay, showMenu, togglePause, showResultCard } from "./ui/menu.js";
 import { initPanels } from "./ui/panels.js";
 import { initShop, toggleShop } from "./ui/shop.js";
@@ -70,6 +69,9 @@ const stepper = new Stepper((dt) => {
   updateCamera(dt);
 });
 startRaf((dt) => {
+  // ★ 自适应分辨率：连续掉帧就自动降渲染倍率（见 postfx.js 的说明）。
+  //   必须排在 drawScene **之前**，否则这一帧用的还是旧倍率。
+  if (dt > 0) autoTuneFrame(dt * 1000);
   stepper.advance(dt);
   drawScene(dt); // dt 必须传下去：渲染层的逐帧累加量（天气、踏频）依赖它
 });

@@ -10,10 +10,13 @@ import { drawTerrain } from "./terrain.js";
 import { drawBoosts, drawCanisters, drawCoins, drawDeco, drawFlag, drawGates, drawHazards, drawJumps } from "./entities.js";
 import { drawParticles } from "./particles.js";
 import { drawBike } from "./bike.js";
+import { drawRacers } from "./racers.js";
+import { inCruiseLayer, drawCruiseBike, drawCruiseRacers, drawCruiseGround } from "./cruise.js";
 import { drawTrail } from "./trail.js";
 import { shakeOffset } from "./camera.js";
 import { drawHud } from "./hud.js";
 import { applyPostFx } from "./postfx.js";
+import { drawSpeedLines } from "./hud.js";
 
 /**
  * @param {number} [dt] 本渲染帧的真实时长（秒）。**渲染层里凡是"逐帧累加"的量
@@ -31,6 +34,20 @@ export function drawScene(dt = 1 / 60) {
   cam.x += off.x;
   cam.y += off.y;
 
+  // ★ 巡航层：缩放小到车只剩几个亚像素时，整层换画法（见 render/cruise.js 的说明）。
+  //   提前 return 掉世界层，是为了让那些 ctx.scale(1e-8) 下的亚像素路径
+  //   **根本不被执行** —— 那正是移动 GPU 上最慢的一段。
+  const cruise = inCruiseLayer();
+  if (cruise) {
+    drawCruiseGround();
+    drawCruiseRacers();
+    drawCruiseBike();
+    drawSpeedLines();
+    applyPostFx(store.time, dt);
+    if (store.state === "play" || store.state === "pause" || store.state === "ended") drawHud();
+    return;
+  }
+
   ctx.save();
   ctx.scale(cam.zoom, cam.zoom);
   drawParticles(cam.x, cam.y);
@@ -43,6 +60,8 @@ export function drawScene(dt = 1 / 60) {
   drawCoins(cam.x, cam.y);
   drawCanisters(cam.x, cam.y);
   drawFlag(cam.x, cam.y, store.finishX);
+  // 对手画在玩家**之前**：这样玩家超过去时车身自然压住对手，遮挡关系才对
+  drawRacers(cam.x, cam.y);
   drawBikeShadow();
   if (store.state === "play" || store.state === "ended" || store.state === "pause") {
     // 拖尾在车**之前**画：能量属于车尾，画在车之后会盖住骑手与车架。

@@ -63,22 +63,87 @@ export function fromPlainDecimal(s) {
   return Number.isFinite(n) ? n : 0;
 }
 
+/**
+ * 秒 → "m:ss" / "Xs"（本局用时、关卡三星时限）。
+ *
+ * ★ 放这里而不是留在 ui 层：结算卡的「本局用时」由 game/game.js 填值，
+ *   无限模式的结算 toast 也由 game 层拼 —— 而 game 不许 import ui。
+ *   两边各写一份必然漂移（一边 1:05 一边 65.0s），所以提到 utils 作单一出处。
+ *
+ * @param {number} sec 秒
+ * @returns {string}
+ */
+export function fmtClock(sec) {
+  const s = Math.max(0, Math.round(Number(sec) || 0));
+  const m = Math.floor(s / 60);
+  return m > 0 ? m + ":" + String(s % 60).padStart(2, "0") : s + "s";
+}
+
 // ============================================================
 //  数字缩写（R11.3）
 //
-//  ★ 为什么需要：宇宙级资产合计 2.43e22，车价 1.5552e17，
-//    一项 Lv500 升级费 ~6e15。`toLocaleString()` 会把它们铺成
-//    16~23 位整数，卡片宽度根本放不下（升级车间与车库都会溢出）。
-//    HUD 的速度表同样：满级无相 771,605 km/h 塞进 100px 的圆里会糊掉。
+//  ★ 为什么需要：宇宙级资产合计 2.3e28，车价 4.3e26，
+//    一项 Lv500 升级费 ~6e20。`toLocaleString()` 会把它们铺成
+//    20~29 位整数，卡片宽度根本放不下（升级车间与车库都会溢出）。
+//    HUD 的速度表同样：满级裂界 1.08e11 km/h 塞进 100px 的圆里会糊掉。
 //
-//  ★ 口径：< 1e4 用千分位（¥28,240 好读）；1e4~1e8 用「万/亿」
-//    （中文语境下这两个单位最自然）；≥1e8 用科学计数（"3.4e18"）——
-//    「万亿」在中文里是 1e12，而玩家要面对的是 1e24，再堆中文单位
-//    会变成"24亿亿亿"，反而更读不懂。
+//  ★ 两条口径，**不要混**：
+//    goldNum   —— 金币专用，≥1e4 一律科学计数（玩家要跨 26 个数量级比大小）
+//    abbrevNum —— 非金币（里程 / 配速 / 赛道长度），1e4~1e12 用「万/亿」
+//  两者共用 sciBody，所以同一段代码算出来的量级永远一致。
 // ============================================================
 
 /**
- * 把大数缩写成可读形式。
+ * 科学计数法格式化一个正的非零数（mant 的位数由 d 决定）。
+ *
+ * ★ 指数必须是 **10 的幂**。这里原来按 3 的幂取档（`3^e`）却把 e 标成 `10^e` ——
+ *   于是 ¥28,240 显示成「1.43×10^9」，而 10^9 是十亿，实际只有两万八，
+ *   量级差了五万倍。同样一笔钱在菜单余额、车价、联赛奖金三处都读不出来。
+ *   指数取 `floor(log10)`、尾数取 `a / 10^e`（落在 1~10），这才是科学计数法。
+ */
+function sciBody(a, d) {
+  const e = Math.floor(Math.log10(a));
+  const m = a / Math.pow(10, e);
+  // log 的浮点误差可能把尾数顶到 10.000 或压到 0.999…，两种都要归一化，
+  // 否则会出现「9.99×10^8」紧跟「1.00×10^9」这种同一数量级写两种格式的情况
+  const norm = m >= 9.9995 ? [m / 10, e + 1]
+    : m < 1 ? [m * 10, e - 1]
+      : [m, e];
+  return norm[0].toFixed(d) + "×10^" + norm[1];
+}
+
+/**
+ * 金币专用格式化：**统一科学计数法**（用户要求）。
+ *
+ * ★ 为什么金币不用「万 / 亿」：中文量词在 1e12 之后就只能写成
+ *   "24 亿亿亿" 这种没人读的串，而本作的金币跨度是 0 → 1e30（横跨 30 个数量级）。
+ *   一律走科学计数，量级对比是线性的 —— 5.00×10^18 和 5.00×10^21 一眼看出差 1000 倍。
+ *
+ * ★ **所有**金币都必须走它。裸 `String(n)` / `toLocaleString()` 在 1e21 以上
+ *   会输出 "1e+21"，或铺成 29 位整数 —— 结算卡的金币滚动计数原来就是裸 String，
+ *   于是同一笔钱在菜单（科学计数）、车库（科学计数）、结算卡（29 位整数）三处
+ *   各长各样，这就是"金币统计口径不一"。滚动计数也走这里，一处不漏。
+ *
+ * 阈值：< 10000 走千分位（¥600 / ¥2,840 这类小额本来就该一眼可数），
+ *   ≥ 10000 一律科学计数。
+ *
+ * @param {number} n 数值（非有限值原样返回）
+ * @param {object} [o]
+ * @param {boolean} [o.yuan] 前缀加 ¥
+ * @param {number} [o.d] 有效小数位（默认 2）
+ */
+export function goldNum(n, o) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return String(n);
+  const sign = v < 0 ? "-" : "";
+  const a = Math.abs(v);
+  const pre = o && o.yuan ? "¥" : "";
+  if (a < 1e4) return pre + sign + Math.round(a).toLocaleString("en-US");
+  return pre + sign + sciBody(a, (o && o.d) || 2);
+}
+
+/**
+ * 把大数缩写成可读形式（非金币用途：里程、次数、星级等）。
  * @param {number} n 数值（非有限值原样返回）
  * @param {object} [o]
  * @param {boolean} [o.yuan] 前缀加 ¥
@@ -108,12 +173,8 @@ export function abbrevNum(n, o) {
     const yi = a / 1e8;
     return pre + sign + (yi < 10 ? fixed(yi, 2) : yi < 1000 ? fixed(yi, 1) : String(Math.floor(yi))) + "亿";
   }
-  // ≥1e12：科学计数，保留 3 位有效数字（3.4e18 而不是 3.42e18 —— 卡片里够读即可）
-  let e = Math.floor(Math.log10(a));
-  // 精度守卫：log10 在 1e12 附近可能算出 11.999…，导致 e 取小一档
-  const mant = a / Math.pow(10, e);
-  if (mant >= 9.9995) { e += 1; }
-  return pre + sign + fixed(mant, 2) + "e" + e;
+  // ≥1e12：交给科学计数（与 goldNum 同一套实现，两边不会各写一份算法）
+  return pre + sign + sciBody(a, 2);
 }
 
 /**

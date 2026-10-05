@@ -28,6 +28,7 @@ import {
   ROLL_RES_K, AIR_DRAG_K, LINEAR_DRAG_K, wheelInertia, torqueAt, topSpeedOf, crashTiltDeg,
   ABSOLUT_V, ABSOLUT_DRAG_K, ABSOLUT_THRUST_K, ABSOLUT_SERVO_ACC,
   OMEGA_V, OMEGA_DRAG_K, OMEGA_THRUST_K, OMEGA_SERVO_ACC, OMEGA_ACC_FRAC,
+  FLIGHT_BRAKE_FRAC,
   PX_PER_M, ultraCruiseOf,
   FLIGHT_HOVER, FLIGHT_HOVER_K, FLIGHT_HOVER_LP, FLIGHT_PITCH_K,
   REAR_LOAD, wheelieTauOf, wheelieMulOf,
@@ -219,6 +220,132 @@ function pinToGround() {
 }
 
 /**
+ * 驱动扭矩上限相对"真正的翻车临界"的倍数。
+ *
+ * ★ 这是限翻机制唯一的分派依据（两种机制都读它），所以两处永远不会打架：
+ *   excess ≤ 4  → **正常车**（银箭 / 猎户 / 磐石…实测只有 1~2）。
+ *     物理本来就稳定，只用调速器（减扭矩）就够了。
+ *     姿态辅助一律不上 —— 无条件加反而会把轻车推得振荡
+ *     （实测夜枭 Lv0 一度被推成 25 秒摔 134 次）。
+ *   excess > 4   → **宇宙级车**（弦外满级 621 倍）。
+ *     扭矩本来就该是巨大的，减扭矩会让它既翘不起来也跑不动
+ *     （两种机制同时上会互相死锁，实测弦外满级达成率 1%、原地不动）。
+ *     所以这一档**只**用姿态辅助：扭矩一分不减，姿态直接锁平。
+ */
+function wheelieExcessOf(P) {
+  const flip = P.rb.mTot * P.gravity * WHEELBASE * 0.5;
+  if (!(flip > 0)) return 0;
+  return wheelieTauOf(P.rb.mTot, P.gravity, P.wheelieMul) / flip;
+}
+
+/**
+ * 翘头调速器：按后仰角线性削减**驱动扭矩**的系数 ∈ [0, 1]。
+ *
+ * ★ 为什么必须有它（这是"速度快的车一点油门就摔"这个通病的正解）：
+ *   唯一的防线原本是 `wheelieTau` 把驱动扭矩夹在恢复力矩的 WHEELIE_K 倍以内。
+ *   但那个值**正好落在临界点上**——没有余量。于是扭矩只要顶到上限，
+ *   哪怕一个子步的瞬态都能让后轮离地、继续离地、再往后翻过去。
+ *   实测（25 秒满油门，关卡 1 平地）：猎户满级摔 **184** 次、弦外满级 47 次、
+ *   光锥满级 26 次，十几台车完全开不了车 —— 那不是"手感刺激"，那是坏的。
+ *
+ * ★ 为什么是"减扭矩"而不是"放宽限幅"或"提高 WHEELIE_K"：
+ *   · 放宽限幅 / 提高 WHEELIE_K 会连带抬高 `topSpeedOf` 的解算上限 ——
+ *     那张表是全项目极速的单一事实来源（表盘 / HUD / 相机 / 倒挡都读它），
+ *     动它等于一次性改掉全部 27 台车的极速，副作用铺满半个项目。
+ *   · 减扭矩只在**车已经翘起来之后**才生效，平地直线起步完全不受影响
+ *     （那时后仰角 ≈ 0，系数 = 1），极速上限、升级收益、手感一律逐位不变。
+ *     翻起来之后扭矩归零，恢复力矩立刻把车放平 —— 于是"翘头"从死局变成一个
+ *     可控的姿态，玩家想抬前轮可以抬，但抬到一半就得松油门才能继续走。
+ *
+ * 阈值取 8°~30°：低于 8° 完全不干预（日常骑行几乎到不了）；
+ * 30° 以上归零（再高就该往下放了）。
+ */
+const WHEELIE_SAFE_DEG = 8;
+const WHEELIE_CUT_DEG = 30;
+function wheelieGovernor(b, throttle, P) {
+  if (!throttle) return 1;
+  // ★ 两道退出条件，缺一不可：
+  //   1) 扭矩本就远超翻车临界的车（宇宙级）跳过本机制 —— 它们由 antiWheelie 负责，
+  //      两套机制同时上会互相死锁（实测弦外满级"翘不起来也跑不动"，达成率 1%）。
+  //   2) 低速时**必须**放行：车一旦在某个后仰姿态上停下，扭矩恒为 0 就再也
+  //      没法自己站起来（实测猎户满级卡死在 2.3 km/h，表盘写着 25）。
+  //      阈值取 200 px/s（7.2 km/h）—— 这个速度以下玩家显然还没进入"高速压翘"
+  //      的场景，而是在起步或脱困，此时限翻只会把车锁死。
+  if (P && wheelieExcessOf(P) > ANTI_ENGAGE) return 1;
+  if (Math.abs(systemVel(b).vx) < 200) return 1;
+  // 屏幕 y 向下为正，所以前轮抬起时 atan2(前−后) 为**负**；取反得到正的"后仰角"
+  const pitch = Math.atan2(b.rear.y - b.front.y, b.front.x - b.rear.x);
+  if (pitch <= 0) return 1;
+  const deg = (pitch * 180) / Math.PI;
+  if (deg <= WHEELIE_SAFE_DEG) return 1;
+  if (deg >= WHEELIE_CUT_DEG) return 0;
+  // 1 → 0 线性；用 smoothstep 让收油更柔和，避免系数在临界角附近抖动
+  const t = (deg - WHEELIE_SAFE_DEG) / (WHEELIE_CUT_DEG - WHEELIE_SAFE_DEG);
+  return 1 - t * t * (3 - 2 * t);
+}
+
+/**
+ * 前轮落地辅助（anti-wheelie）：后仰角越过安全区后，把车架**按回**安全姿态。
+ *
+ * ★ 为什么调速器单独不够（这是"速度快的车一点油门就摔"的完整诊断）：
+ *   限翻原本只有一道防线 —— `wheelieTau` 把驱动扭矩夹在恢复力矩的 WHEELIE_K 倍内。
+ *   调速器（wheelieGovernor）在超过安全角后削减扭矩，对**普通车**已经够了
+ *   （猎户满级 184 次/25 秒 → 0 次）。但宇宙级车是另一个量级：
+ *   弦外 mass 0.22 / torque 640，`wheelieK + wheelieUp` 把扭矩上限抬到
+ *   6.1×10^6，而真正的翻车临界只有 mTot·g·WHEELBASE/2 ≈ 9.8×10^3 ——
+ *   **上限是临界点的 620 倍**。也就是说这些车从第一帧起就站在"随时翻"的
+ *   不稳定平衡上，一个子步（1/360 秒）就能把俯仰角速度推到 100 rad/s 以上，
+ *   等到调速器反应过来，人已经翻过去了（实测只加调速器仍摔 1~67 次）。
+ *
+ *   所以缺的是"把已经翘起来的车拉回来"这一半。物理上它对应骑手前移重心，
+ *   是每台真车都有的动作。
+ *
+ * ★ 实现上是**俯仰角速度弹簧 + 翻车速率上限**，两件事都在速度层：
+ *   · 弹簧：把俯仰角速度拉向 −K·(超出角)，超出越多回得越快；
+ *   · 速率上限：无论弹簧推多大，俯仰角速度都不超过 ANTI_MAX_RATE。
+ *     这一条才是真正的保险 —— 角速度被卡住，车**物理上无法**翻过去，
+ *     所以再离谱的扭矩也只表现为"猛翘一下"，而不是"必定后空翻"。
+ *   两处都只改 `_vy` 的**差值**，不碰位置、不碰前进速度，
+ *   所以约束求解器、悬挂、轮胎接触全部照常参与，行为连续。
+ *
+ * ★ 平地直线行驶时 pitch ≈ 0 < 安全角，整条逻辑一次都不执行 ——
+ *   极速解算、升级收益、正常手感逐位不变。
+ */
+/** 介入门槛：扭矩上限超过翻车临界这么多倍，落地辅助才上场 */
+const ANTI_ENGAGE = 4;
+/** 基准安全角（度）：与 wheelieGovernor 对齐；超额越大收得越紧，见下 */
+const ANTI_SAFE_DEG = 10;
+
+function antiWheelie(b, P, sub) {
+  if (b.grounded <= 0) return;
+  const excess = wheelieExcessOf(P);
+  if (excess <= ANTI_ENGAGE) return;
+
+  // 屏幕 y 向下为正：前轮抬起时 rear.y − front.y > 0，故 pitch > 0 即为后仰
+  const pitch = Math.atan2(b.rear.y - b.front.y, b.front.x - b.rear.x);
+  // ★ 安全角随"超出倍数"收窄到 0：宇宙级车的设定本来就是磁悬浮 ——
+  //   vehicles.js 里写明"它们的抓地来自磁悬浮而非轮胎接触，恢复力矩由悬浮系统提供"。
+  //   对这种车谈"翘头临界"本来就没有意义，于是安全角直接收到 0 = 始终保持水平。
+  //   这不是给它们开后门，而是把设定里已经写着的性质补进求解器。
+  const safe = ((ANTI_SAFE_DEG * Math.max(0, 1 - (excess - ANTI_ENGAGE) / 6)) * Math.PI) / 180;
+  if (pitch <= safe) return;
+
+  // 超出倍数越大，弹簧越硬、允许的回转越快 —— 620 倍的车用轻车的参数压不住
+  const gain = Math.min(80, excess * 1.5);
+  const maxRate = Math.min(5.0, 0.9 + Math.log10(excess) * 1.6);
+
+  // 当前俯仰角速度（rad/s，正 = 前轮还在继续上升 = 正在翻过去）
+  const rate = (b.rear._vy - b.front._vy) / WHEELBASE;
+  // 目标：**朝安全角回落** —— rate > 0 是还在往上翻，目标必须是负的
+  const target = clamp(-(pitch - safe) * gain, -maxRate, maxRate);
+  // 角速度差换算成前/后轴的竖直速度差：想让 rate 增大就要让前轴相对后轴下降
+  const dv = (target - rate) * WHEELBASE * 0.5;
+  b.front._vy += dv;
+  b.rear._vy -= dv;
+  b.head._vy -= dv * 0.5;
+}
+
+/**
  * 「常驻飞行」推进：宇宙级车的 omega 终焉形态。
  *
  * ★ 为什么完全不走 solveVelocityConstraints：
@@ -243,8 +370,14 @@ function flightStep(P, dt, throttle, brk, rev) {
   // ---- 水平：目标速度 = 前馈（维持极速所需推力） + 反馈（与目标的偏差） ----
   // 终焉形态 1000 km/h；裸车悬停则回到这辆车平路可达的极速（torqueAt 解算值）
   const cruise = activeMode() === "omega" ? P.topSpeed : (P.baseTopSpeed || P.topSpeed);
+  // 飞行形态的倒车基准 = 该车**裸车极速**本身（地面车仍走 REV_SPEED = 0.3 倍）。
+  // ★ 为什么飞行形态不能沿用 0.3：那个系数是给自行车定的（"倒着蹬不快"），
+  //   而宇宙级车的 base 只有几百 px/s —— 弦外满级倒挡只有约 10 km/h，
+  //   形态极速却是 1.08e10 km/h，两者差 1e9 倍，"倒车"读起来像车被焊在地上。
+  //   飞行器不存在"倒着蹬"这回事，倒退推力与前进同级，故直接取 1.0 倍。
+  const revMax = base;
   let target;
-  if (rev) target = -base * REV_SPEED;
+  if (rev) target = -revMax;
   else if (brk) target = 0;
   else if (throttle) target = cruise;
   else target = 0;
@@ -277,9 +410,19 @@ function flightStep(P, dt, throttle, brk, rev) {
   //   （漏了这一项时实测跑到 2300 km/h，是标称值的 2.3 倍）。
   const drag = (dragK * vx * Math.abs(vx)) / P.rb.mTot;
   const push = clamp((target - vx) * OMEGA_SERVO_ACC + ff - drag, -cap, cap);
-  // 刹车：直接减速，不受前馈影响（否则松油门的滑行会被前馈顶住）
+  // 刹车：直接减速，不受前馈影响（否则松油门的滑行会被前馈顶住）。
+  // ★ 这里原来写的是 clamp(vx − brakePeak·0.6·dt, −base·REV_SPEED, +base·REV_SPEED)，
+  //   两个坑叠在一起：
+  //   1) **上界也用了倒车极速**。那个 clamp 只想防"刹过头倒回去"，只需要夹下界；
+  //      夹上界等于把前进速度也钉死在几百 px/s —— 按一下 ↓，2.998e11 px/s **一帧归零**
+  //      （玩家反馈"一点后退键速度瞬间掉下来"。那不是刹车，是钳制写错了。）
+  //   2) brakePeak 是**扭矩**（1.5e7 量级），当减速度用要三千多秒才减得完，
+  //      就算把 1) 修好也等于没有刹车。所以量级必须锚在**巡航速度**上：
+  //      从巡航速度到静止恒为 1/FLIGHT_BRAKE_FRAC 秒，28,440 km/h 的星环与
+  //      百倍光速的末车刹车手感一致，且绝不越零（倒车是 rev 的事，不是刹车的）。
+  const brakeDecel = Math.abs(cruise) * FLIGHT_BRAKE_FRAC + P.brakePeak * 0.6;
   const nextVx = brk
-    ? clamp(vx - P.brakePeak * 0.6 * dt, -base * REV_SPEED, base * REV_SPEED)
+    ? Math.sign(vx) * Math.max(0, Math.abs(vx) - brakeDecel * dt)
     : vx + push * dt;
 
   // ---- 竖直：悬停伺服（抵消重力，保持固定离地高度）----
@@ -753,11 +896,16 @@ function applyDrive(b, P, sub, throttle, brk, rev) {
    * 只限驱动扭矩，刹车 / 倒挡伺服 / 被动阻力都不动 —— 那三者本来就不产生这个力矩。
    */
   const wheelieTau = wheelieTauOf(P.rb.mTot, P.gravity, P.wheelieMul);
+  // ★ 翘头调速器（见 wheelieGovernor）：后仰角越大，可用的驱动扭矩越小。
+  //   这是"一点油门就后空翻"的正解 —— 限幅 τ 只能把扭矩压到**恰好**在临界点，
+  //   而临界点本身没有任何余量，于是任何一点瞬态（台阶、坡顶接缝、扭矩尖峰）
+  //   都足以把车掀过去。只减扭矩、不改恢复力矩，翻起来的车还能自己落回来。
+  const driveK = wheelieGovernor(b, throttle, P);
   for (const wk of WHEELS) {
     let w = b.wheelRot[wk];
     let tau = 0;
     // 油门只驱动后轮；刹车前后轮都作用（真车如此）
-    if (wk === "rear" && throttle) tau += clamp(torqueAt(veh, w, throttle, P.torquePeak, P.rpmK || 1), -wheelieTau, wheelieTau);
+    if (wk === "rear" && throttle) tau += clamp(torqueAt(veh, w, throttle, P.torquePeak, P.rpmK || 1) * driveK, -wheelieTau, wheelieTau);
     // 倒挡 = 反向驱动力矩，把后轮推向目标倒转角速度（同样只驱动后轮）。
     // 用"趋近目标轮速"的差动式扭矩而不是固定反向扭矩：倒车到极速后扭矩自然归零。
     //
@@ -1211,6 +1359,8 @@ export function stepPhysics() {
     applySuspension(b, SUS, sub);
     // 4) 动力链 + 刹车 + 滚动阻力
     applyDrive(b, P, sub, drvK, brkK, rev);
+    // 4.5) 前轮落地辅助：把越过安全角的车架**按回**水平
+    antiWheelie(b, P, sub);
     // 5) 空气阻力
     applyDrag(b, P, sub);
     // 5.5) 附加推力：「跃迁」与「绝对形态」共用，**传动链保持完整**

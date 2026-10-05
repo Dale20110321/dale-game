@@ -4,18 +4,25 @@ import {
   START_X, WHEELBASE, toM, toKmh, LAND_REF,
   RATING_MIN, RANK_GAIN_BASE, RANK_GAIN_BASE_ADV, RATING_LOSS, RATING_LOSS_ADVANCED,
   rankName, rankStars, rankPromoReward, rankDelta, rankGold,
-  RACE_FORMATS, RACE_PLACE_GOLD } from "../config/constants.js";
-import { LEVELS, levelAt, courseAt, segmentThemeAt, variantRule, FINALE_INDEX, FINALE, FINALE_SEGS, MODE_SPACE, SPACE_TIERS, setSpaceTier, spaceTierOf, spaceCourse, pinSpaceCourse } from "../config/levels.js";
+  RACE_FORMATS, RACE_FORMAT_IDS, RACE_PLACE_GOLD } from "../config/constants.js";
+import {
+  LEVELS, levelAt, courseAt, segmentThemeAt, variantRule, FINALE_INDEX, FINALE, FINALE_SEGS,
+  MODE_SPACE, SPACE_LEAGUES, SPACE_DIVS, SPACE_RACES, setSpaceRace, spaceDivOf, spaceRaceOf,
+  spaceLeagueOf, spaceDefOf, spaceCourse, pinSpaceCourse, spaceRatingDelta,
+} from "../config/levels.js";
 import { THEMES } from "../config/themes.js";
 import { VEHICLES } from "../config/vehicles.js";
 import { store, bike, world } from "../core/store.js";
 import { key } from "../core/input.js";
 import { view } from "../core/canvas.js";
-import { clamp } from "../core/utils.js";
+import { clamp, goldNum, fmtClock } from "../core/utils.js";
 import { showToast } from "../core/toast.js";
 import { playCrashSound } from "../core/audio.js";
 import { token } from "../config/ui-tokens.js";
-import { save, addStat, settleProgress, isAdvancedUnlocked } from "../core/storage.js";
+import {
+  save, addStat, settleProgress, isAdvancedUnlocked,
+  noteVehicleRun, noteSpaceResult, noteLevelRun, noteRaceRun,
+} from "../core/storage.js";
 import { groundInfo, groundY, safeSpot } from "../physics/terrain.js";
 import { applyUpgrades, bikeVx, crash, resetBike, stepPhysics, ignoresHazardLimit } from "../physics/bike.js";
 import { initPhysicsEvents } from "../physics/events.js";
@@ -23,7 +30,7 @@ import { drainFuel, setFuel } from "../physics/fuel.js";
 import { updateParticles, emitParticles } from "../render/particles.js";
 import { addShake } from "../render/camera.js";
 import { updateStats, settleLanding } from "./stats.js";
-import { addGold, checkAch } from "./progress.js";
+import { addGold, checkAch, syncStateAch, checkSpeedAch } from "./progress.js";
 import {
   buildLevel, freeInit, freeFill, syncSegmentTheme, streamChunks,
   updateBoosts, updateCanisters, updateCoins, emitRideDust, updateJumps,
@@ -117,12 +124,19 @@ const QUEST_VEHICLE = "cv1";
 export function spaceQuestState() {
   const idx = VEHICLES.findIndex((v) => v.id === QUEST_VEHICLE);
   const owned = (store.ownedVehicles || []).includes(idx);
-  // 任务条件：累计金币收入达到 ¥8e8
-  // —— 起步车（驮马）四项升满是 ¥28,240，全通 432 关约 ¥213 万，
-  //    所以 ¥8e8 是一个"认真玩几十关才能达成、但不需要刷到吐"的门槛，
-  //    相对新的入门宇宙车价 ¥1e10 只占 8%，仍是最早期目标。
-  const need = 8e8;
-  const got = (store.stat && store.stat.earnedGold) || 0;
+  // 任务条件：累计金币收入达到 ¥5e7
+  //
+  // ★ 从 8e8 降到 5e7：432 关全通只能攒到约 ¥500 万（goldBase 700~2500/关 +
+  //   赛道金币），原门槛 ¥8 亿比**全部主线产出高两个数量级** ——
+  //   也就是说主线通关根本推不动它，宇宙场对认真玩的人实际是永久锁死的。
+  //   ¥5e7 ≈ 通关主线 + 若干场比赛，是"认真玩就能到"而不是"刷到吐"。
+  // ★ 判据是「通关 30 关」，由 stars 直接数出来 —— 不需要"累计金币收入"这种字段。
+  //   那个字段唯一的用途就是这一个判据：每次吃金币都要往存档里累加一个
+  //   会一直涨到 1e25 的数，而它答不了任何别的问题（玩家不关心历史总收入，
+  //   余额与车库明细已经覆盖了）。用它当任务进度，代价大、收益只有一处。
+  const need = 30;
+  let got = 0;
+  for (let i = 0; i < store.stars.length; i++) if ((store.stars[i] || 0) >= 1) got++;
   return {
     done: owned,
     hasQuest: !owned,
@@ -206,14 +220,18 @@ function beginRun() {
   resetRunState();
   store.cam.x = 0;
   fillTank();
-  // 排位赛永远是单挑；普通比赛按玩家在面板上选的赛制（1V1 / 多人 / 团赛）
-  if (store.mode === "ranked") raceInit("duel");
-  else if (store.mode === "race") raceInit(store.raceFormat);
-  // 宇宙场：5 位对手同场（多人竞技的阵容），配速另算（见 race.js 的 spaceUpdate）。
+  // 比赛：赛制与档位都由面板选好（3 赛制 × 普通/排位 两档 = 6 个入口）
+  if (store.mode === "race") raceInit(store.raceFormat);
+  // 宇宙联赛：阵容取**该场赛事自己的赛制**（短距=1V1 / 群雄=6人 / 长程=3v3）。
   // 第二个参数 true = 借阵容但不改玩家在比赛面板选的赛制。
-  else if (store.mode === MODE_SPACE) raceInit("melee", true);
+  else if (store.mode === MODE_SPACE) raceInit(spaceDefOf().fmt, true);
   resumeFinaleCheckpoint();
   store.state = "play";
+  // 逐关记录：开局先记一次尝试，通关时 finishLevel 再刷新最佳用时与金币
+  if (store.mode === "level" && store.selLevel < LEVELS.length) {
+    noteLevelRun(store.selLevel, null);
+    save();
+  }
   presenter.hideOverlay();
 }
 
@@ -288,6 +306,7 @@ export function settleRanked(won) {
   const promo = rankPromoReward(before, P.rating, claimed);
   if (promo > 0) addGold(promo);
   if (P.rating > claimed) P.promoClaimed = P.rating;
+  syncStateAch();   // 段位晋升 / 里程 / 时长等状态型成就
   settleProgress(); // 刷新 peak / freeThemes 等派生态并立即落盘
   showToast(
     (won ? "🏆 排位胜利" : "🏳 排位失利") +
@@ -311,11 +330,15 @@ export function settleRanked(won) {
  */
 export function startGame(m, lv, opt) {
   try {
-    const mode = m || store.lastMode;
-    // 排位赛准入：未收到邀请（通关最终任务）时拒绝开局，且不改动任何状态
-    if (mode === "ranked" && !store.progress.invited) {
-      showToast("🔒 尚未收到排位赛邀请（通关最终任务后解锁）", 1500);
-      return;
+    const mode = m === "ranked" ? "race" : (m || store.lastMode);
+    // 排位**档位**的准入：未收到邀请（通关最终任务）时，退回普通比赛而不是拒绝开局 ——
+    //   排位档现在是比赛里的一个选项，直接拒绝会让玩家以为整个比赛坏了。
+    const wantRanked = opt && opt.ranked !== undefined ? !!opt.ranked : store.raceRanked;
+    if (wantRanked && mode === "race" && !store.progress.invited) {
+      store.raceRanked = false;
+      showToast("🔒 排位档未解锁（通关最终任务后开放）· 本局按普通比赛进行", 1600);
+    } else {
+      store.raceRanked = wantRanked;
     }
     // 宇宙场准入（两道门，用户要求"跑完排位赛才有"）：
     //  1) 排位赛赢过至少一场 —— 否则宇宙场只是竞速模式换个皮，
@@ -337,26 +360,29 @@ export function startGame(m, lv, opt) {
     // 高级赛请求：显式传入 opt.advanced 时以它为准（rating 未达标则降级为普通）；
     // 未传入时保留上一局的档位（重开 startGame() 不丢档）。
     const wantAdv = opt && opt.advanced !== undefined ? !!opt.advanced : store.rankedAdvanced === true;
-    store.rankedAdvanced = mode === "ranked" && wantAdv && isAdvancedUnlocked(store.progress.rating);
+    store.rankedAdvanced = store.raceRanked && wantAdv && isAdvancedUnlocked(store.progress.rating);
     store.selLevel = lv !== undefined ? lv : store.selLevel || 0;
     // 赛制：显式传入优先，否则沿用上一次选择（重开一局不丢赛制）
     if (mode === "race" && opt && opt.format && RACE_FORMATS[opt.format]) {
-      store.raceFormat = opt.format;
+      store.raceFormatPick = opt.format;
     }
     if (store.mode === "free") freeInit(opt && opt.theme);
     else {
       if (store.mode === MODE_SPACE) {
-        // ★ 顺序：定分级 → **重算极速** → 钉住赛道 → buildLevel。
+        // ★ 顺序：定场次 → 重算极速 → 钉住赛道 → buildLevel。
         //
-        //   1) 分级不传时**沿用本局的上次选择**，而不是回落 0 ——
-        //      旧代码写 setSpaceTier((opt && opt.tier) || 0)，
-        //      而 restart() 不传 opt，于是"在终极级跑到一半按 R"会被重置成
-        //      「易」级的另一条赛道（10M px），进度与分级双双错位且无任何提示。
-        //   2) applyUpgrades() 必须在算长度**之前**跑：赛道长度 = 玩家极速 × 360s，
-        //      而极速由车辆 / 升级 / 形态决定。顺序反了会拿旧极速算长度。
-        setSpaceTier(opt && opt.tier !== undefined ? opt.tier : spaceTierOf());
+        //   1) 三级下标不传时**沿用本局的上次选择**：restart() 不传 opt，
+        //      若回落 0，"在丙区打到一半按 R"会被重置成甲区另一条赛道，进度与名次双双错位。
+        //   2) 赛道长度现在只由联赛 × 分区 × 赛次决定，**与玩家极速无关**，
+        //      所以 applyUpgrades() 不再参与长度计算 —— 但仍要跑，
+        //      因为 store.phys.topSpeed 是配速面板与"能不能赢"的判据。
+        setSpaceRace(
+          opt && opt.league !== undefined ? opt.league : spaceLeagueOf(),
+          opt && opt.div !== undefined ? opt.div : spaceDivOf(),
+          opt && opt.race !== undefined ? opt.race : spaceRaceOf(),
+        );
         applyUpgrades();
-        pinSpaceCourse(spaceCourse(spaceTierOf(), store.phys.topSpeed));
+        pinSpaceCourse(spaceCourse(spaceLeagueOf(), spaceDivOf(), spaceRaceOf()));
       }
       buildLevel();
     }
@@ -458,8 +484,13 @@ function endFreeRun(reason) {
   let record = false;
   if (dist > store.best) {
     store.best = dist;
+    store.space.free.runs += 1;
+    store.space.free.bestMeters = dist;
+    store.space.free.bestAt = new Date().toISOString();
     save();
     record = true;
+  } else {
+    store.space.free.runs += 1;
   }
   store.state = "ended";
   store.run.settling = true;
@@ -468,8 +499,18 @@ function endFreeRun(reason) {
     runs: 1,
     meters: dist,
     seconds: Math.max(0, store.time - store.run.levelStartTime),
+    mode: "free",
   });
-  showToast(reason + " · 本次 " + dist + "m" + (record ? " 🏅 新纪录！" : ""), 1600);
+  const freeVeh = VEHICLES[store.currentVehicle];
+  if (freeVeh) noteVehicleRun(freeVeh.id, dist);
+  // ★ 里程类成就在这里核对：单次纪录（无限之巅 / 光年之旅）与累计里程
+  //   （环游 / 马拉松 / 深空行者）都是本局结算后才有的数。
+  syncStateAch();
+  // ★ 无限模式只弹 toast、不走结算卡（见下方注释），所以"本局用时"必须写在这里 ——
+  //   否则无限模式是全场唯一看不到用时的地方。
+  const secs = Math.max(0, store.time - store.run.levelStartTime - store.run.crashStall);
+  showToast(reason + " · " + dist + "m · " + fmtClock(secs) +
+    (record ? " · 🏅 新纪录！" : ""), 1600);
   setTimeout(runGuard(() => {
     store.state = "menu";
     presenter.toMenu();
@@ -496,16 +537,22 @@ function finishLevel() {
   const run = store.run;
   const L = courseAt(store.selLevel, store.mode);
   run.settling = true;
+  // ★ 本局用时在这里**一次算清、写给所有玩法**。
+  //   过去它只在闯关那一支赋值，比赛 / 排位 / 宇宙场三支都不写，
+  //   结果卡的「本局用时」就永远是「—」—— 玩家看到的不是"这项没做"，
+  //   而是"计时功能没了"。计时是每局都有���，不该按玩法分叉。
+  //   摔车昏迷（crashStall）不计入：那是惩罚，不该让"骑了多久"变长。
+  const elapsed = store.time - run.levelStartTime - run.crashStall;
   // 结算结果卡：由 presenter 注入到 ui 层渲染（game 不 import ui）
   const result = {
     title: "🏁 本局结束",
     stars: undefined,
     goldGain: 0,
     goldTotal: 0,
-    time: undefined,
+    time: elapsed,
     nextLabel: "下一关 →",
   };
-  if (store.mode === "race") {
+  if (store.mode === "race" && !store.raceRanked) {
     const f = raceFormat();
     const won = !(store.raceAI && store.raceAI.finish);
     // 名次：多人竞技按名次发奖，团赛按队伍名次发奖（1V1 就是 1 或 2）
@@ -515,6 +562,7 @@ function finishLevel() {
     // 名次奖金：第 1 名拿满，越靠后拿得越少，但**只要完赛就有**——
     // 6 人场跑第 5 也比 1V1 输一把的 0 块强，"多跑一场多赚一点"才有正反馈。
     const gold = RACE_PLACE_GOLD[Math.min(p - 1, RACE_PLACE_GOLD.length - 1)];
+    noteRaceRun(RACE_FORMAT_IDS.indexOf(store.raceFormatPick), store.raceRanked, p, won);
     addGold(gold);
     result.nextLabel = "继续 →";
     result.goldGain = gold;
@@ -526,8 +574,10 @@ function finishLevel() {
     showToast((won ? "🏆 抵达终点 · " : "🏁 抵达终点 · ") + tag + " · 名次奖金 🪙+" + gold,
       1100, won ? "success" : "warn");
     result.title = (won ? "🏆 " : "🏁 ") + tag;
-  } else if (store.mode === "ranked") {
-    // 排位赛：胜负直接决定段位分变化（结算提示由 settleRanked 内部输出）
+  } else if (store.mode === "race" && store.raceRanked) {
+    // 排位档：胜负决定段位分变化（结算提示由 settleRanked 内部输出）。
+    // ★ 与普通比赛共用同一个 mode —— 差别只在"结果算不算段位分"，
+    //   所以名次奖金照发，段位分也照算，两者不冲突。
     const won = !(store.raceAI && store.raceAI.finish);
     const before = store.progress.rating;
     const after = settleRanked(won);
@@ -541,21 +591,43 @@ function finishLevel() {
     showToast((won ? "🏆 排位胜利 🪙+" : "🏳 排位失利 🪙+") + gain, 900, won ? "success" : "warn");
     result.nextLabel = "继续 →";
   } else if (store.mode === MODE_SPACE) {
-    // 宇宙场结算（R3.6）：收益随分级递增，不受名次影响（本地 AI 模拟，无联网对抗）
-    const tier = SPACE_TIERS[spaceTierOf()] || SPACE_TIERS[0];
-    const gold = tier.gold;
-    addGold(gold);
-    result.goldGain = gold;
-    result.title = `${tier.icon} 宇宙场 · ${tier.name}`;
+    // 宇宙联赛结算：金币**只跟场次有关**（人人拿满，完赛就有 —— 输了也有，
+    //   否则新分区里反复试错会被惩罚到不敢试）；联赛段位分才跟名次有关。
+    const def = spaceDefOf();
+    const fmt = RACE_FORMATS[def.fmt] || RACE_FORMATS.duel;
+    const place = racePlace(store.racers, bike.rear.x);
+    const p = fmt.team ? place[0] : place;
+    const total = fmt.team ? 2 : fmt.riders + 1;
+    const won = p === 1;
+    addGold(def.gold);
+    const delta = spaceRatingDelta(def.leagueIdx, def.divIdx, won);
+    store.space.rating = Math.max(0, store.space.rating + delta);
+    noteSpaceResult(def.key, p, won);
+    if (won) checkAch("spacewin");
+    // 全联赛横扫要读 records，所以必须在 noteSpaceResult **之后**核对
+    syncStateAch();
+    settleProgress();
+    result.goldGain = def.gold;
+    result.place = p;
+    result.placeTotal = total;
+    result.title = `${def.icon} 宇宙联赛 · ${fmt.team ? "我方" + (won ? "获胜" : "惜败") : "第 " + p + " / " + total + " 名"}`;
     result.nextLabel = "继续 →";
-    showToast(`🌌 宇宙场「${tier.name}」完成 · 🪙+${gold}`, 1400, "success");
+    showToast(
+      `🌌 ${def.name} 完成 · 第 ${p}/${total} 名 · 🪙+${goldNum(def.gold)} · 联赛分 ${delta >= 0 ? "+" : ""}${delta} → ${store.space.rating}`,
+      1800, won ? "success" : "warn"
+    );
   } else if (store.mode === "level") {
-    // 计时惩罚（摔车）计入本关用时，直接影响三星时限
-    const elapsed = store.time - run.levelStartTime + run.penaltyTime;
+    // ★ 逐关记录与三星判定用的是**另一套口径**：elapsedScore = 全程墙钟 + 摔车时间惩罚。
+    //   与上面写给结果卡的 elapsed（纯骑行、不含昏迷）刻意不同 ——
+    //   展示给玩家的是"你骑了多久"，拿去评星的是"这一关总共花了多少代价"。
+    //   这个式子与三星门槛的标定口径逐字一致，别顺手改成 elapsed。
+    const elapsedScore = store.time - run.levelStartTime + run.penaltyTime;
+    // 逐关记录：最佳用时 / 最佳金币在这里一次性写回
+    noteLevelRun(store.selLevel, { done: true, ms: elapsedScore * 1000, coins: run.coinGot });
     const ratio = run.totalCoins > 0 ? run.coinGot / run.totalCoins : 1;
     let s = 1;
     if (ratio >= 0.7) s = 2;
-    if (elapsed < L.len / L.den3) s = 3; // 三星时限按关卡分层
+    if (elapsedScore < L.len / L.den3) s = 3; // 三星时限按关卡分层
     store.stars[store.selLevel] = Math.max(store.stars[store.selLevel] || 0, s);
     if (store.selLevel >= store.unlocked && store.selLevel < LEVELS.length - 1) {
       store.unlocked = store.selLevel + 1;
@@ -575,20 +647,32 @@ function finishLevel() {
     result.title = "🏁 通关";
     result.stars = s;
     result.goldGain = L.goldBase;
-    result.time = elapsed;
     result.nextLabel = store.selLevel < LEVELS.length - 1 ? "下一关 →" : "🏠 返回菜单";
     if (!run.hasCrashed) checkAch("noc");
     if (run.totalCoins > 0 && run.coinGot >= run.totalCoins) checkAch("coinall");
     if (store.stars.length >= LEVELS.length && store.stars.every((v) => v >= 3)) checkAch("allstar");
+    // 「十连无瑕」的计数：连续零摔车通关（摔了就清零，不累计）。
+    // 口径必须是**连续**而不是累计 —— 累计的话玩家随便玩也会凑够 30 局，
+    // 成就就没有分量了。
+    store.stat.cleanRuns = run.hasCrashed ? 0 : (store.stat.cleanRuns || 0) + 1;
+    if (store.selLevel === FINALE_INDEX) checkAch("finale");
     // 通关结算：刷新阶梯派生态（支线通关 / 邀请 / 登顶）并立即写盘
     settleProgress();
   }
-  // 累计统计：本局 +1 次、里程按 100px=1m 换算、时长为本局有效游玩时间
+  // 累计统计：本局 +1 次、里程按 100px=1m 换算、时长为本局有效游玩时间。
+  // mode 一并记进 byMode（v5 新增的分模式统计），并给当前车记一程里程。
+  const runMeters = toM(store.finishX);
   addStat({
     runs: 1,
-    meters: toM(store.finishX),
+    meters: runMeters,
     seconds: Math.max(0, store.time - run.levelStartTime),
+    mode: store.mode,
   });
+  const curVeh = VEHICLES[store.currentVehicle];
+  if (curVeh) noteVehicleRun(curVeh.id, runMeters);
+  // 结算尾声统一核对一次状态型成就：里程 / 时长 / 排位 / 车库 / 联赛 / 最终任务。
+  // 幂等，所以"这里再调一次"不会重复弹提示。
+  syncStateAch({ cleanRuns: store.stat.cleanRuns || 0 });
   result.goldTotal = store.gold;
   // 有结果卡渲染器时交给它（玩家自选下一关/返回）；否则回退到定时自动推进
   if (typeof presenter.presentResult === "function") presenter.presentResult(result);
@@ -672,7 +756,7 @@ export function update(dt) {
   //   绝不触碰 bike.rear / bike.front / bike.head 的 x / y / px / py；重力与抓地是按分段
   //   取值的常量，切换只改变"后续子步的加速度"，已经积分的当前帧状态不受影响。
   //   因此跨越分界点绝不会出现位置瞬移、速度突变或 NaN。
-  if (store.mode === "level" || store.mode === "race" || store.mode === "ranked" || store.mode === MODE_SPACE) {
+  if (store.mode === "level" || store.mode === "race" || store.mode === MODE_SPACE) {
     syncSegmentTheme(courseAt(store.selLevel, store.mode), (b.rear.x + b.front.x) / 2);
   }
   // 流式实体（宇宙场）：按相机位置铺/丢 chunk。放在物理之后，
@@ -709,6 +793,9 @@ export function update(dt) {
   if (!fuelOk) handleFuelEmpty();
 
   if (toKmh(Math.abs(b.speed)) >= 30) checkAch("fast");
+  // ★ 光速梯队的五个成就（c / 10c / 100c / 1000c / 10000c）在这里判定。
+  //   checkSpeedAch 内部按门槛递增提前 break，每帧最多一次比较 + 少量幂等调用。
+  checkSpeedAch(toKmh(Math.abs(b.speed)));
 
   // ---- 机制判定：危险段超速必摔 / 限时门准时通过 ----
   // ★ 宇宙场也走危险段判定：world.hazards 在 space 下照样生成、scene.js 也照样画，
@@ -747,14 +834,19 @@ export function update(dt) {
   if (store.mode === MODE_SPACE) {
     // 宇宙场：AI 先到终点不判负（本地模拟，奖励只看是否完赛，见 finishLevel）
     spaceUpdate(dt);
-  } else if (store.mode === "race" || store.mode === "ranked") {
+  } else if (store.mode === "race") {
     raceUpdate(dt);
     if (store.raceAI && store.raceAI.finish && !run.settling) {
       run.settling = true;
-      if (store.mode === "ranked") {
+      // ★ 这条路**不走结算卡**（900ms 后自动进下一场），所以"本局用时"必须
+      //   写进 toast —— 否则输掉一场比赛就是全场唯一看不到用时的地方，
+      //   玩家会以为计时功能又坏了。
+      const lost = fmtClock(Math.max(0, store.time - run.levelStartTime - run.crashStall));
+      if (store.raceRanked) {
         settleRanked(false); // 对手先到终点 → 排位判负，立即结算段位分
+        showToast("😵 对手先到终点！本局 " + lost, 1400, "warn");
       } else {
-        showToast("😵 对手先到终点！");
+        showToast("😵 对手先到终点！本局 " + lost, 1400, "warn");
       }
       setTimeout(runGuard(() => nextLevel()), 900);
     }

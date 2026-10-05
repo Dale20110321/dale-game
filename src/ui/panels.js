@@ -12,21 +12,22 @@ import { THEMES } from "../config/themes.js";
 import {
   LEVELS, BRANCHES, LEVELS_PER_BRANCH, N_BRANCHES, FINALE, FINALE_INDEX, FINALE_SEGS,
   branchLevel, globalIndexOf, branchOfGlobal, branchProgress, starTime, VARIANT_INFO,
-  SPACE_TIERS, spaceLenOf, spaceAIScale, SPACE_TARGET_SEC,
+  SPACE_LEAGUES, SPACE_DIVS, SPACE_RACES,
+  spaceRaceDef, spaceDivOpen, spaceDivRatingNeed, spaceAIScale, spaceDurOf,
 } from "../config/levels.js";
 import { VEHICLES } from "../config/vehicles.js";
 import { store, uiHooks } from "../core/store.js";
-import { abbrevNum } from "../core/utils.js";
+import { abbrevNum, goldNum, fmtClock } from "../core/utils.js";
 import {
   save, downloadSave, parseSave, importSave, resetSave,
-  isStorageAvailable, availableFreeThemes, isAdvancedUnlocked,
+  isStorageAvailable, availableFreeThemes, isAdvancedUnlocked, takeLoadError,
   listSlots, switchSlot, createSlot, deleteSlot, currentSlot, MAX_SLOTS,
 } from "../core/storage.js";
 import { showToast } from "../core/toast.js";
 import { initAudio, playCoinSound } from "../core/audio.js";
 import { hasAch, clearedCount } from "../game/progress.js";
 import { spaceQuestState, claimSpaceQuest, rankedCleared } from "../game/game.js";
-import { rankedAIScale } from "../game/race.js";
+import { rankedAIScale, raceFormatPick } from "../game/race.js";
 import { getQuality, setQuality, QUALITY, QUALITY_LABEL } from "../render/postfx.js";
 import { getRenderScale, setRenderScalePersisted, RENDER_SCALES, RENDER_SCALE_LABEL } from "../render/postfx.js";
 import { showPanel, hidePanel, showMenu, refreshMenuButtons } from "./menu.js";
@@ -38,6 +39,14 @@ let openBranch = -1;
 let panelKind = "level";
 /** 主页面容器（关卡地图）：菜单态显示，面板态隐藏 —— 与 #modePanel 是"一屏一视图"关系 */
 const homeView = document.getElementById("homeView");
+/** 当前视图由主页面（关卡地图）承载还是由弹出面板承载 */
+let inHomeView = true;
+/** 上次选中的玩法 tab：返回主页时回到它，而不是永远弹回「闯关」 */
+let lastTab = "level";
+/** 上一场比赛抽到的赛道（下次抽签要避开它）。-1 = 还没跑过 */
+let lastRaceLevel = -1;
+/** 宇宙联赛面板当前展开的联赛下标（-1 = 全收起） */
+let openSpaceLeague = 0;
 /** 存档面板的临时视图状态（导入待确认数据 / 对比摘要 / 提示 / 二次确认） */
 const saveView = { pending: null, summary: null, error: "", note: "", confirmReset: false };
 
@@ -82,29 +91,37 @@ export function initPanels(a) {
   }
   // menu.js 的 showMenu() 也要重画主页面；panels 已 import menu，反向 import 会成环，
   // 故经 store 的钩子槽单向接线（见 core/store.js 的 uiHooks 注释）。
-  uiHooks.onHome = () => { openBranch = -1; selectMode("level"); };
+  uiHooks.onHome = () => { openBranch = -1; selectMode(lastTab); };
   uiHooks.onHome(); // 首屏就要有关卡地图：#homeView 在 HTML 里是空的
   refreshMenuButtons();
 }
 
 /** 玩法 tab 切换：闯关/比赛渲染关卡地图；排位/无限走全屏面板 */
 export function selectMode(mode) {
-  const m = mode === "race" || mode === "ranked" || mode === "free" || mode === "space" ? mode : "level";
+  const m = mode === "race" || mode === "free" || mode === "space" ? mode : "level";
   for (const b of document.querySelectorAll("#modeTabs .mtab")) {
     const on = b.dataset.mode === m;
     b.classList.toggle("is-on", on);
     b.setAttribute("aria-selected", on ? "true" : "false");
   }
-  if (m === "level" || m === "race") {
+  lastTab = m;
+  if (m === "race") {
+    // ★ 比赛必须走 renderRacePanel，而不是像以前那样 renderHomeView("race") ——
+    //   后者渲染的是**和闯关一模一样的关卡地图**，赛制选择器（1V1 / 多人 / 团赛）
+    //   根本没被画出来。于是"点比赛 tab"和"点闯关 tab"看到的是同一屏，
+    //   玩家报告的"比赛点击过后显示的还是首页的内容"就是这个。
+    //   hidePanel() 会把 homeView 重新显示出来，这里要主动盖掉它（一屏一视图）。
+    if (homeView) homeView.style.display = "none";
+    renderRacePanel(openBranch);
+  } else if (m === "level") {
     // 从"排位/无限/宇宙"切回地图时，上一个面板还开着，必须先收起来，
     // 否则 modePanel 会盖住刚渲染好的关卡地图。
     hidePanel();
     if (homeView) homeView.style.display = "";
-    renderHomeView(m);
+    renderHomeView("level");
   } else {
     if (homeView) homeView.style.display = "none";
-    if (m === "ranked") renderRankedPanel();
-    else if (m === "space") renderSpacePanel();
+    if (m === "space") renderSpacePanel();
     else renderFreePanel();
   }
 }
@@ -119,6 +136,7 @@ export function selectMode(mode) {
 export function renderHomeView(mode) {
   const host = document.getElementById("homeView");
   if (!host) return;
+  inHomeView = true;
   panelKind = mode === "race" ? "race" : "level";
   // 展开哪条支线：**优先当前关卡所在的支线**（返回首页 = 回到正在打的那一关），
   // 其次才是"前沿"。openBranch ≥ 0 说明玩家手动点开了某条支线，尊重之。
@@ -251,15 +269,30 @@ function onPanelClick(e) {
       api.startGame("level", FINALE_INDEX);
       return;
     case "ranked":
-      api.startGame("ranked", store.selLevel || 0, { advanced: el.dataset.adv === "1" });
+      store.raceRanked = el.dataset.adv === "1";
+      renderRacePanel(openBranch);
+      scrollStepIntoView("raceGoHead");   // 档位选完 → 直接把「开跑」滚进视野
       return;
     case "raceFmt": {
       // 切赛制只改选择，不开局 —— 面板重绘即可，赛制在 store 里留存
       const id = el.dataset.fmt;
       if (RACE_FORMATS[id]) {
-        store.raceFormat = id;
+        store.raceFormatPick = id;
         renderRacePanel(openBranch);
+        scrollStepIntoView("raceTierHead"); // 赛制选完 → 滚到档位
       }
+      return;
+    }
+    case "raceGo": {
+      // 随机抽一条已解锁赛道直接开跑。上一场用过的会被排除，
+      // 免得"随机"连着两次给你同一张图。
+      const gi = randomRaceLevel(lastRaceLevel);
+      if (gi < 0) {
+        showToast("🔒 还没有已解锁的赛道，先去闯关开一局", 1400, "warn");
+        return;
+      }
+      lastRaceLevel = gi;
+      api.startGame("race", gi, { format: raceFormatPick(), ranked: store.raceRanked });
       return;
     }
     case "freeRandom":
@@ -268,12 +301,21 @@ function onPanelClick(e) {
     case "free":
       api.startGame("free", undefined, { theme: +el.dataset.theme });
       return;
+    case "spaceLeague":
+      openSpaceLeague = openSpaceLeague === +el.dataset.league ? -1 : +el.dataset.league;
+      renderSpacePanel();
+      return;
     case "spaceStart":
-      api.startGame("space", undefined, { tier: +el.dataset.tier });
+      openSpaceLeague = +el.dataset.league;
+      api.startGame("space", undefined, {
+        league: +el.dataset.league,
+        div: +el.dataset.div,
+        race: +el.dataset.race,
+      });
       return;
     case "spaceClaim":
       if (claimSpaceQuest()) {
-        showToast("🛰️ 已获得「第一宇宙速度」！宇宙场向你开放", 2000, "success");
+        showToast("🛰️ 已获得「星环」！宇宙联赛向你开放", 2000, "success");
         renderSpacePanel();
       } else {
         showToast("金币任务还没完成", 1200);
@@ -336,12 +378,17 @@ function onPanelChange(e) {
   if (f) readSaveFile(f);
 }
 
-/** 重绘当前支线墙面板（保持展开状态） */
+/**
+ * 重绘当前支线墙面板（保持展开状态）。
+ *
+ * ★ 宿主由 `inHomeView` 判定，**不再靠 `homeView.innerHTML` 是否为空** ——
+ *   那个启发式在"比赛改走面板"之后必然出错：主页面可能还留着上一次渲染的
+ *   关卡地图，于是比赛面板里点一下支线卡，重绘会落到 homeView 上，
+ *   看起来就是"点了没反应"。
+ */
 function rerender() {
-  // 主页面（关卡地图）与弹出面板各有自己的宿主，重绘到对的那个
-  const home = document.getElementById("homeView");
-  if (home && home.innerHTML) { renderHomeView(panelKind === "race" ? "race" : "level"); return; }
-  if (panelKind === "race") renderRacePanel(openBranch);
+  if (inHomeView) renderHomeView(panelKind === "race" ? "race" : "level");
+  else if (panelKind === "race") renderRacePanel(openBranch);
   else renderLevelsPanel(openBranch);
 }
 
@@ -378,13 +425,6 @@ function firstLockedK(bi) {
 
 
 // ---------------- 格式化 ----------------
-
-/** 秒 → "m:ss" / "Xs"（关卡三星时限） */
-function fmtClock(sec) {
-  const s = Math.max(0, Math.round(Number(sec) || 0));
-  const m = Math.floor(s / 60);
-  return m > 0 ? m + ":" + String(s % 60).padStart(2, "0") : s + "s";
-}
 
 /** 米 → "km"（累计里程） */
 function fmtKm(m) {
@@ -463,6 +503,7 @@ function levelCell(bi, k) {
     <div class="thm">坡度 ${Math.round(L.maxSlope)}° · ${Math.round(toM(L.len))}m</div>
     <div class="thm">三星 ≤ ${fmtClock(starTime(L))}</div>
     <div class="stars">${stars}</div>
+    ${levelRecHtml(gi, L)}
   </div>`;
 }
 
@@ -472,6 +513,22 @@ function levelCell(bi, k) {
  *   renderRacePanel）需要它切回卡片墙；主页面（renderHomeView）下方本就紧跟 12 支线
  *   总览，再放一个"收起"只会挤占首屏。
  */
+/**
+ * 逐关记录行：最佳用时 / 最佳金币 / 尝试次数 / 上次通过。
+ *
+ * ★ 星级只答"有没有通关、几星"，答不出"打了多久才三星、试了几次"。
+ *   有了这三行，同一个三星关卡反复重打的收益才看得见，玩家才知道该刷哪一关。
+ */
+function levelRecHtml(gi, L) {
+  const r = (store.levelRecords || {})[gi];
+  if (!r || !r.tries) return "";
+  const bits = ["试过 " + r.tries + " 次"];
+  if (r.bestMs > 0) bits.push("最佳 " + (r.bestMs / 1000).toFixed(1) + "s");
+  if (r.bestCoins > 0) bits.push("金币 " + r.bestCoins + "/" + L.coinN);
+  if (r.lastAt) bits.push("上次 " + fmtDate(r.lastAt).slice(5, 16));
+  return '<div class="lvRec">📋 ' + bits.join(" · ") + "</div>";
+}
+
 function levelBlock(withClose) {
   const b = BRANCHES[openBranch];
   const th = THEMES[b.theme] || THEMES[0];
@@ -490,6 +547,7 @@ function levelBlock(withClose) {
 /** 闯关模式：支线卡片墙 + 展开选关 */
 export function renderLevelsPanel(openBi) {
   panelKind = "level";
+  inHomeView = false;
   openBranch = Number.isInteger(openBi) && branchOpen(openBi) ? openBi : -1;
   showPanel(`<div class="modeTitle">🏁 闯关模式 · 支线任务</div>
   <div class="branchWall">${BRANCHES.map((_, i) => branchCard(i)).join("")}</div>
@@ -498,12 +556,50 @@ export function renderLevelsPanel(openBi) {
   <button class="btn backBtn" data-act="back">返回</button>`);
 }
 
-/** 比赛模式：赛制选择 + 同一套支线卡片墙（点某关与 AI 竞速） */
+/**
+ * 比赛面板：**3 种赛制 × 2 个档位（普通 / 排位）**。
+ *
+ * ★ 排位赛不再是独立 tab（用户要求合并）：它和比赛玩的是同一件事 —— 跟 AI 竞速 ——
+ *   差别只在"结果算不算段位分"。而赛制选择（1V1 / 多人 / 团赛）本来就与段位无关，
+ *   分成两个入口只会让玩家为了刷段位先想"我该点哪个 tab"。
+ *   现在 6 个入口在同一屏选完：先选赛制，再选档位，最后点关卡开跑。
+ *
+ * 档位行同时兼作**段位面板**：当前段位分 / 星数 / 距离下一段还差多少 / 升段奖励，
+ * 全部就地显示，不必再切到别处查。
+ */
+function rankTierCard(advanced, label, desc, note, ok) {
+  return card({
+    cls: "vehCard",
+    icon: store.raceRanked === advanced ? "◉" : "○",
+    title: label + (store.raceRanked === advanced ? " · 已选" : ""),
+    sub: desc,
+    meta: note,
+    interactive: ok,
+    locked: !ok,
+    selected: store.raceRanked === advanced,
+    attrs: ok ? `data-act="ranked" data-adv="${advanced ? 1 : 0}"` : "",
+  });
+}
+
 export function renderRacePanel(openBi) {
   panelKind = "race";
+  inHomeView = false;
   openBranch = Number.isInteger(openBi) && branchOpen(openBi) ? openBi : -1;
-  const cur = store.raceFormat && RACE_FORMATS[store.raceFormat] ? store.raceFormat : "duel";
-  showPanel(`<div class="modeTitle">🏆 比赛模式 · 与 AI 竞速</div>
+  const cur = raceFormatPick();
+  const P = store.progress;
+  const rating = P.rating || 0;
+  const invited = P.invited === true;
+  const adv = isAdvancedUnlocked(rating);
+  const curR = RANKS[rankIndexOf(rating)] || RANKS[0];
+  const next = rankNextOf(rating);
+  const curIdx = rankIndexOf(rating);
+  const pct = next
+    ? Math.max(0, Math.min(100, ((rating - curR.min) / Math.max(1, next.min - curR.min)) * 100))
+    : 100;
+  const starOf = (r, i) => (rating < r.min ? 0 : i < curIdx ? 3 : rankStars(rating));
+  const hi = pct.toFixed(1);
+  showPanel(`<div class="modeTitle">🏆 比赛 · 3 种赛制 × 2 个档位</div>
+  <div class="brHead">① 选赛制</div>
   <div class="fmtRow">${RACE_FORMAT_IDS.map((id) => {
     const f = RACE_FORMATS[id];
     const on = id === cur;
@@ -514,10 +610,52 @@ export function renderRacePanel(openBi) {
       <span class="fmtGold">名次奖金 ${RACE_PLACE_GOLD[0]} / ${RACE_PLACE_GOLD[1]} / …</span>
     </button>`;
   }).join("")}</div>
-  <div class="branchWall">${BRANCHES.map((_, i) => branchCard(i)).join("")}</div>
-  ${openBranch >= 0 ? levelBlock(true) : ""}
-  <div class="panelNote">按名次发奖（第 1 名 ${RACE_PLACE_GOLD[0]} 🪙，完赛即有）· 赛道需已解锁</div>
-  <button class="btn backBtn" data-act="back">返回</button>`);
+
+  <div class="brHead" id="raceTierHead">② 选档位 · 排位档会结算段位分，普通档只发名次奖金</div>
+  <div class="rankBox">
+    <div class="rankScore">${rating}</div>
+    <div class="rankSub">${rankName(rating)}
+      <span class="rankStars" aria-label="本段星数 ${rankStars(rating)} / 3">${"★".repeat(rankStars(rating))}<span class="dim">${"☆".repeat(3 - rankStars(rating))}</span></span>
+      · 战绩 ${P.wins} 胜 ${P.losses} 负</div>
+    <div class="rankBar" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"
+         aria-label="${rankName(rating)} 段内进度"><i style="width:${hi}%"></i></div>
+    <div class="rankSub">${next
+      ? `下一段「${next.name}」还差 <b>${next.min - rating}</b> 分 · 升段奖励 🪙 ${goldNum(next.reward)}`
+      : `段位表已刷满 · 累计升段奖励 🪙 ${goldNum(RANKS.reduce((a, r) => a + r.reward, 0))}`}</div>
+  </div>
+  ${rankTierCard(false, "普通比赛",
+    "AI 配速固定在三��节奏的 0.68 倍，带追赶修正 —— 输赢不影响段位分",
+    `名次奖金 ${RACE_PLACE_GOLD[0]} → ${RACE_PLACE_GOLD[RACE_PLACE_GOLD.length - 1]} 🪙 · 段位分不变`,
+    true)}
+  ${rankTierCard(true, "排位比赛",
+    `AI 配速随段位分提升（三星节奏的 ${paceRange(false)}）${adv ? ` · 高级排位可到 ${paceRange(true)}` : ""}`,
+    !invited ? "🔒 通关「最终任务」后解锁"
+      : `胜 +${rankDelta(rating, false, true)} / 负 -${RATING_LOSS} 段位分`
+        + (adv ? " · 已解锁高级排位" : ` · 段位分 ≥ ${RATING_ADVANCED} 开高级排位`),
+    invited)}
+  <details class="rankLadder"><summary>段位阶梯（${RANKS.length} 段 × 3 星）</summary>
+    <ol class="rankList">${RANKS.map((r, i) => {
+      const got = starOf(r, i);
+      return `<li class="${rating >= r.min ? "on" : ""}${i === curIdx ? " cur" : ""}">
+        <span class="rkMin">${r.min}</span>
+        <span class="rkName">${r.name}</span>
+        <span class="rkStar" aria-label="${got} 星">${i === 0 ? "" : "★".repeat(got) + "☆".repeat(3 - got)}</span>
+        <span class="rkRew">${r.reward ? "🪙 " + goldNum(r.reward) : "—"}</span>
+      </li>`;
+    }).join("")}</ol>
+    <div class="panelNote">升段奖励只在首次跨过该段门槛时发一次（掉段再升回来不补发）；
+      ★ 进段 · ★★ 段内过半 · ★★★ 段内 85%</div>
+  </details>
+
+  <div class="brHead" id="raceGoHead">③ 开跑</div>
+  <div class="panelNote">赛道<b>随机抽取</b> —— 在已解锁且还没通关的关卡里等概率摇一条，
+    所以每场比赛都是新地图，不必在一屏 12 支线 × 6 关里翻找。
+    连着两场不会抽到同一条。</div>
+  <div class="row2">
+    <button class="btn" data-act="raceGo" style="flex:1">🏁 随机赛道开跑</button>
+    <button class="btn backBtn" data-act="back">返回</button>
+  </div>
+  <div class="panelNote">按名次发奖（第 1 名 ${RACE_PLACE_GOLD[0]} 🪙，完赛即有）</div>`);
 }
 
 /** 点关卡格：按当前面板种类开局；锁定则给出明确的解锁提示 */
@@ -532,25 +670,65 @@ function playCell(gi) {
     }
     return;
   }
-  if (panelKind === "race") api.startGame("race", gi, { format: store.raceFormat });
+  if (panelKind === "race") api.startGame("race", gi, { format: raceFormatPick(), ranked: store.raceRanked });
   else api.startGame("level", gi);
+}
+
+/**
+ * 比赛随机抽一条已解锁赛道。
+ *
+ * ★ 为什么不再让玩家选：面板里"选赛制 → 选档位 → 选赛道分支 → 选关卡"
+ *   四层摞在一起，赛道那一层是 12 张分支卡 × 6 个关卡格，玩家得一路往下滚
+ *   才能找到自己在打的那条 —— 而比赛本来就该是"换个地方再跑一遍"，
+ *   选地图不是它的决策内容。抽签把这一层整个去掉，也顺手解决了滚动问题。
+ *
+ * ★ 抽签规则：优先在**已解锁且没通关**的关卡里等概率抽，抽到全通关的支线
+ *   说明玩家已经打穿了，那就在全部已解锁关卡里抽。全程一条没解锁就返回 -1，
+ *   由调用方提示（而不是静默开局到一条锁着的关）。
+ *
+ * @param {number} avoid 上一场的关卡下标；抽中它就再抽一次，避免连着两场同图
+ * @returns {number} 关卡全局下标；无可用赛道时 -1
+ */
+function randomRaceLevel(avoid) {
+  const pool = [];
+  const all = [];
+  for (let bi = 0; bi < BRANCHES.length; bi++) {
+    for (let k = 0; k < LEVELS_PER_BRANCH; k++) {
+      if (!levelUnlocked(bi, k)) continue;
+      const gi = globalIndexOf(bi, k);
+      all.push(gi);
+      if (!((store.stars[gi] || 0) >= 1) && gi !== avoid) pool.push(gi);
+    }
+  }
+  const from = pool.length ? pool : all.filter((gi) => gi !== avoid);
+  const src = from.length ? from : all;
+  if (!src.length) return -1;
+  return src[(Math.random() * src.length) | 0];
+}
+
+/**
+ * 分步引导：点完一步就把下一步滚进视野。
+ *
+ * ★ 为什么需要：面板三段加起来超过两屏，不滚就看不到自己刚点的选择生效了，
+ *   也不知道下一步在哪。滚过去之后"选赛制 → 选档位 → 开跑"读起来才是一条流程。
+ *   已经在视野内就不动（避免每次点击都把页面顶到最上）。
+ */
+function scrollStepIntoView(id) {
+  const host = document.getElementById("modePanel");
+  if (!host || typeof host.querySelector !== "function") return;
+  const el = host.querySelector("#" + id);
+  if (!el || typeof el.scrollIntoView !== "function") return;
+  const box = el.getBoundingClientRect();
+  const hostBox = host.getBoundingClientRect ? host.getBoundingClientRect() : null;
+  const top = hostBox ? box.top - hostBox.top : box.top;
+  // 已经在上半屏就当可见，不打扰玩家
+  if (top >= 0 && top < (hostBox ? hostBox.height : window.innerHeight || 600) * 0.6) return;
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // ---------------- 13.2 最终任务 / 排位赛 ----------------
 
 
-function rankedTier(advanced, label, desc, ok, note) {
-  return card({
-    cls: "vehCard",
-    icon: ok ? (advanced ? "🔥" : "🏆") : "🔒",
-    title: label,
-    sub: desc,
-    meta: note,
-    interactive: ok,
-    locked: !ok,
-    attrs: ok ? `data-act="ranked" data-adv="${advanced ? 1 : 0}"` : "",
-  });
-}
 
 /**
  * 排位赛 AI 配速区间文案：直接由 rankedAIScale() 算两端，不再手写数字。
@@ -564,84 +742,12 @@ function paceRange(advanced) {
   return `${lo}× → ${hi}×`;
 }
 
-/**
- * 排位赛：段位阶梯（14 段 × 3 星）+ 普通/高级两档 + 升段奖励一览。
- *
- * ★ 面板要做的事是"让玩家看得见阶梯"：段位星数、距离下一段还差多少分、
- *   下一段的升段奖励是多少，全部摆在明面上。比赛阶段扩到 14 段之后，
- *   如果只显示一个孤零零的段位分，玩家会以为还是原来那 8 段。
- */
-export function renderRankedPanel() {
-  const P = store.progress;
-  const rating = P.rating || 0;
-  const invited = P.invited === true;
-  const adv = isAdvancedUnlocked(rating);
-  const segIdx = Number.isInteger(store.selLevel) ? store.selLevel : 0;
-  const seg = LEVELS[segIdx] || LEVELS[0];
-  const stars = rankStars(rating);
-  const next = rankNextOf(rating);
-  // 本段内的进度（1★ 门槛 → 下一段门槛，用来画条）
-  const cur = rankIndexOf(rating);
-  const curR = RANKS[cur] || RANKS[0];
-  // 阶梯表里每一段的显示星数：未达成不亮星、已离开的段满星、当前段按实际星数。
-  // ★ 当前段直接调 rankStars(rating) —— 这就是发星的那份口径，
-  //   所以阶梯上当前段那几颗星与上方标题里的星数必然一致。
-  //   旧实现在这里另写了一份"倍数口径"（门槛 ×1.5 / ×2），而 constants 早已改成
-  //   "段内跨度口径"（1★ 进段 / 2★ 段内过半 / 3★ 段内 85%）。两份口径算出的星数
-  //   在多处对不上（白银 620 分、钻石 1500 分、虚空 9500 分都分叉），
-  //   面板显示的星数与实际到手的不是一回事。现已只留一个事实来源。
-  const starOf = (r, i) => {
-    if (rating < r.min) return 0;
-    if (i < cur) return 3;
-    return rankStars(rating);
-  };
-  const lo = curR.min;
-  const hi = next ? next.min : curR.min * 2;
-  const pct = next ? Math.max(0, Math.min(100, ((rating - lo) / Math.max(1, hi - lo)) * 100)) : 100;
-  const gainN = rankDelta(rating, false, true);
-  const gainA = rankDelta(rating, true, true);
-  showPanel(`<div class="modeTitle">🏆 排位赛${P.peak ? " · 已登顶" : ""}</div>
-  <div class="rankBox">
-    <div class="rankScore">${rating}</div>
-    <div class="rankSub">${rankName(rating)}
-      <span class="rankStars" aria-label="本段星数 ${stars} / 3">${"★".repeat(stars)}<span class="dim">${"☆".repeat(3 - stars)}</span></span>
-      · 战绩 ${P.wins} 胜 ${P.losses} 负</div>
-    <div class="rankBar" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"
-         aria-label="${rankName(rating)} 段内进度"><i style="width:${pct.toFixed(1)}%"></i></div>
-    ${next
-      ? `<div class="rankSub">下一段「${next.name}」还差 <b>${next.min - rating}</b> 分 · 升段奖励 🪙 ${abbrevNum(next.reward)}</div>`
-      : `<div class="rankSub">段位表已刷满 · 累计升段奖励 🪙 ${abbrevNum(RANKS.reduce((a, r) => a + r.reward, 0))}</div>`}
-  </div>
-  ${invited ? "" : `<div class="panelNote">🔒 尚未收到排位赛邀请：通关「最终任务」后解锁</div>`}
-  ${rankedTier(false, "普通排位赛", `AI 配速随段位分提升（三星节奏的 ${paceRange(false)}）`,
-    invited, invited ? `胜 +${gainN} / 负 -${RATING_LOSS}` : "未解锁")}
-  ${rankedTier(true, "高级排位赛", `AI 配速显著更高，可超过三星节奏（${paceRange(true)}）`,
-    invited && adv,
-    !invited ? "未解锁"
-      : adv ? `胜 +${gainA} / 负 -${RATING_LOSS_ADVANCED}`
-        : `段位分 ≥ ${RATING_ADVANCED}（${RANKS.find((r) => r.min === RATING_ADVANCED).name}）解锁（当前 ${rating}）`)}
-  <details class="rankLadder"><summary>段位阶梯（${RANKS.length} 段 × 3 星）</summary>
-    <ol class="rankList">${RANKS.map((r, i) => {
-      const got = starOf(r, i);
-      return `<li class="${rating >= r.min ? "on" : ""}${i === cur ? " cur" : ""}">
-        <span class="rkMin">${r.min}</span>
-        <span class="rkName">${r.name}</span>
-        <span class="rkStar" aria-label="${got} 星">${i === 0 ? "" : "★".repeat(got) + "☆".repeat(3 - got)}</span>
-        <span class="rkRew">${r.reward ? "🪙 " + abbrevNum(r.reward) : "—"}</span>
-      </li>`;
-    }).join("")}</ol>
-    <div class="panelNote">升段奖励只在首次跨过该段门槛时发一次（掉段再升回来不补发）；
-      ★ 进段 · ★★ 段内过半 · ★★★ 段内 85%</div>
-  </details>
-  <div class="panelNote">赛道：第 ${segIdx + 1} 关 · ${seg.name}（随你最近选择的关卡）</div>
-  <div class="panelNote">登顶「${RANKS.find((r) => r.min === RATING_PEAK).name}」（段位分 ≥ ${RATING_PEAK}）解锁无限模式自由选图${P.peak ? " · 已达成" : ""}</div>
-  <button class="btn backBtn" data-act="back">返回</button>`);
-}
-
 // ---------------- 13.3 无限模式 ----------------
 
 /** 无限模式：未登顶只有随机地形；登顶后可自选"已通关场景" */
 export function renderFreePanel() {
+  panelKind = "free";
+  inHomeView = false;
   const peak = store.progress.peak === true;
   const themes = peak ? availableFreeThemes(store.stars) : [];
   showPanel(`<div class="modeTitle">♾️ 无限模式</div>
@@ -698,6 +804,8 @@ function abbrevLen(px) {
  * 因为宇宙场是本作的中长期目标，白嫖会跳过整个经济曲线。
  */
 export function renderSpacePanel() {
+  panelKind = "space";
+  inHomeView = false;
   const q = spaceQuestState();
   const pending = store.pendingSpace;
   store.pendingSpace = false;
@@ -722,21 +830,21 @@ export function renderSpacePanel() {
 
   if (q.hasQuest) {
     showPanel(`<div class="modeTitle">🌌 宇宙场 · 金币任务</div>
-      ${pending ? `<div class="panelNote">完成下面的任务即可获得基础宇宙车「第一宇宙速度」</div>` : ""}
+      ${pending ? `<div class="panelNote">完成下面的任务即可获得基础宇宙车「星环」</div>` : ""}
       ${card({
         cls: "vehCard",
         icon: "☄️",
-        title: "累计赚取 " + abbrevNum(q.need, { yuan: true }),
-        sub: "完成后可获得基础宇宙车「第一宇宙速度」（价值 ¥100亿 · 极速 28,440 km/h）",
-        meta: `进度 ${abbrevNum(q.got)} / ${abbrevNum(q.need)}（${Math.round(q.progress * 100)}%）`,
+        title: "通关主线 " + q.need + " 关",
+        sub: "完成后可获得基础宇宙车「星环」（极速 28,440 km/h）",
+        meta: `进度 ${q.got} / ${q.need} 关（${Math.round(q.progress * 100)}%）`,
         body: progress(q.progress * 100, { label: "金币任务" }),
         interactive: q.got >= q.need,
         locked: q.got < q.need,
         attrs: q.got >= q.need ? 'data-act="spaceClaim"' : "",
       })}
       ${q.got < q.need
-        ? `<div class="panelNote">金币来自通关、赛道拾取、比赛名次与段位奖励。${pending ? "点击下方返回可稍后再来。" : ""}</div>`
-        : `<div class="panelNote">✅ 条件已达成，点击上方卡片领取「第一宇宙速度」</div>`}
+        ? `<div class="panelNote">任意一次**首次通关**都算数；重玩已通关的关卡不再重复计数。${pending ? "点击下方返回可稍后再来。" : ""}</div>`
+        : `<div class="panelNote">✅ 条件已达成，点击上方卡片领取「星环」</div>`}
       <button class="btn backBtn" data-act="back">返回</button>`);
     return;
   }
@@ -744,29 +852,121 @@ export function renderSpacePanel() {
   const cur = VEHICLES[store.currentVehicle];
   // ★ 必须用**实车**极速（store.phys.topSpeed，已含升级与形态），
   //   不能用 nominalKmh（形态标称）：Lv0 的实车极速远低于标称值，
-  //   拿标称 1000 去算会显示"对手 ≈900 km/h"，与真实开局差一个数量级。
-  //   实车极速由 applyUpgrades 维护，进入菜单时已算好。
-  const topPx = store.phys.topSpeed > 1 ? store.phys.topSpeed : (cur ? (cur.nominalKmh || 60) * (100 / 3.6) : 1667);
-  const topKmh = Math.round(toKmh(topPx));
-  showPanel(`<div class="modeTitle">🌌 宇宙场</div>
-    <div class="panelNote">太空背景 · 5 个难度分级 · <b>越难的赛道越长、对手越快</b>（长度按你的车速缩放：易 6 分钟 → 终极 30 分钟）。每位对手还有 ±7% 的个体随机。</div>
-    ${SPACE_TIERS.map((t, i) => {
-      const len = spaceLenOf(t, topPx);
-      const ai = spaceAIScale(topPx, t);
+  //   拿标称去和对手配速比会显示成"稳赢"，实际开局差着几个数量级。
+  const topPx = store.phys.topSpeed > 1 ? store.phys.topSpeed : 100;
+  const rating = Math.max(0, store.space.rating || 0);
+  const openLeague = openSpaceLeague;
+
+  showPanel(`<div class="modeTitle">🌌 宇宙联赛</div>
+    <div class="panelNote">${SPACE_LEAGUES.length} 个联赛 × 3 个分区 × 3 场赛事。<b>分区按联赛段位分解锁</b>，
+      不按车 —— 买不起新车只是暂时跑不快，不会把整块玩法锁死在门外。
+      对手配速是该联赛的<b>固定值</b>（不跟着你的车速变），赛道长度由配速 × 时长决定，
+      所以任何车跑任何一场都是 <b>30~122 秒</b>。</div>
+    <div class="rankBox">
+      <div class="rankScore">${rating}</div>
+      <div class="rankSub">宇宙联赛段位分 · 已解锁分区
+        ${SPACE_DIVS.map((d) => `${d.name}${spaceDivOpen(0, SPACE_DIVS.indexOf(d), rating) ? "" : "🔒"}`).join(" ")}
+        （分区需求按联赛递增）</div>
+    </div>
+    <div class="brHead">联赛 · 选一个展开分区</div>
+    <div class="branchWall">${SPACE_LEAGUES.map((L, li) => {
+      const ref = spaceAIScale(li, 0) / (SPACE_DIVS[0].aiK || 1);
+      const rec = leagueRecord(li);
       return card({
-        cls: "vehCard",
-        icon: t.icon,
-        title: `宇宙场 · ${t.name}`,
-        sub: `${abbrevLen(len)} · ${Math.round((SPACE_TARGET_SEC * (t.lenK || 1)) / 60)} 分钟 · ${t.segs} 段地形`,
-        meta: `对手配速 ≈ ${abbrevNum(Math.round(toKmh(ai)))} km/h（你的 ${Math.round((ai / topPx) * 100)}% ±7%）· 通关 🪙${abbrevNum(t.gold)}`,
+        cls: "branchCard" + (openLeague === li ? " frontier" : ""),
+        icon: L.icon,
+        title: `联赛 ${li + 1} · ${L.name}`,
+        sub: `参考配速 ${abbrevNum(Math.round(toKmh(ref)))} km/h · ${L.segs} 段地形 · 坡度 ${L.slopeDeg}°` +
+          (rec.runs ? ` · 已打过 ${rec.runs} 场` : ""),
+        meta: rec.runs ? `最高分区 ${rec.top} · 最好第 ${rec.best || "—"} 名 · ${rec.wins} 胜`
+          : `起步分区 甲（段位分 ${spaceDivRatingNeed(li, 0)}）`,
+        right: openLeague === li ? "▾" : "▸",
         interactive: true,
-        attrs: `data-act="spaceStart" data-tier="${i}"`,
+        selected: openLeague === li,
+        styleVars: spaceThemeVars(L),
+        attrs: `data-act="spaceLeague" data-league="${li}"`,
       });
-    }).join("")}
-    <div class="panelNote">当前车辆：${cur ? cur.name : "—"}（${abbrevNum(topKmh)} km/h）。
-      AI 恒为你的 90%，上限 50,000 km/h —— 你永远跑得过他们，但磨蹭仍会输。
-      越高难的分级坡越陡、段落切换越频繁。</div>
+    }).join("")}</div>
+    ${openLeague >= 0 ? spaceDivisionsHtml(openLeague, rating, topPx) : ""}
+    <div class="panelNote">当前车辆：${cur ? cur.name : "—"} · 形态极速
+      <b>${abbrevNum(Math.round(toKmh(topPx)))} km/h</b>。对面配速高于这个数就是跑不赢，
+      面板会在每一场赛事上直接标出来。</div>
     <button class="btn backBtn" data-act="back">返回</button>`);
+}
+
+/** 联赛的场景配色（取它用的第一个太空场景） */
+function spaceThemeVars(L) {
+  const th = THEMES[L.themes[0]] || THEMES[0];
+  return themeVars(th);
+}
+
+/** 展开中的联赛下标（-1 = 全收起）；面板每次重绘都会读它 */
+/**
+ * 某个联赛打过多少场 / 赢几场 / 最好第几（由成绩记录反推）。
+ * `top` 是打进过的**最高分区名**（甲/乙/丙），没有记录时为空串。
+ */
+function leagueRecord(li) {
+  const recs = store.space.records || {};
+  const tag = SPACE_LEAGUES[li].id + "-";
+  let runs = 0;
+  let wins = 0;
+  let top = "";
+  let best = 0;
+  for (const k in recs) {
+    if (k.indexOf(tag) !== 0) continue;
+    runs += recs[k].runs;
+    wins += recs[k].wins;
+    // 名次越小越好，取全联赛的最好成绩（0 = 没进过前三，记 0 表示"无纪录"）
+    if (recs[k].best && (!best || recs[k].best < best)) best = recs[k].best;
+    if (!top || SPACE_DIVS.findIndex((d) => d.id === k.split("-")[1]) >
+      SPACE_DIVS.findIndex((d) => d.id === top)) top = k.split("-")[1];
+  }
+  return { runs, wins, top, best };
+}
+
+/** 单场赛事的格子（每个分区 3 个） */
+function spaceRaceCell(li, di, ri, topPx) {
+  const def = spaceRaceDef(li, di, ri);
+  const fmt = RACE_FORMATS[def.fmt] || RACE_FORMATS.duel;
+  const total = fmt.team ? 2 : fmt.riders + 1;
+  const winnable = topPx >= def.ai;
+  const rec = (store.space.records || {})[def.key];
+  const aiKmh = abbrevNum(Math.round(toKmh(def.ai)));
+  const label = def.name + "，" + fmt.name + "，" + abbrevLen(def.len) + "，" + def.dur + " 秒，" +
+    "对手配速 " + aiKmh + " 千米每小时，奖金 " + goldNum(def.gold) + " 金币，" +
+    (winnable ? "你的极速足够跑赢" : "当前极速跑不赢") +
+    (rec ? "，最好第 " + rec.best + " 名，打过 " + rec.runs + " 场" : "");
+  const verdict = winnable
+    ? '<span style="color:var(--success)">✔ 你的极速足够</span>'
+    : '<span style="color:var(--danger)">⚠ 配速高于你的极速</span>';
+  const stars = rec ? '<div class="stars">最好第 ' + rec.best + " / " + total + " 名</div>" : "";
+  return '<div class="lvCell' + (winnable ? " next" : " locked") + '" data-act="spaceStart"' +
+    ' role="button" tabindex="0" data-league="' + li + '" data-div="' + di + '" data-race="' + ri + '"' +
+    ' aria-label="' + label + '">' +
+    "<div>" + SPACE_RACES[ri].icon + " " + SPACE_RACES[ri].name + "</div>" +
+    '<div class="thm">' + badge(fmt.name, "variant") + "</div>" +
+    "<div class=\"thm\">" + abbrevLen(def.len) + " · " + def.dur + "s</div>" +
+    "<div class=\"thm\">🪙 " + goldNum(def.gold) + "</div>" +
+    '<div class="thm">' + verdict + "</div>" + stars + "</div>";
+}
+
+/** 一个联赛的 3 个分区（甲 / 乙 / 丙），分区按联赛段位分解锁 */
+function spaceDivisionsHtml(li, rating, topPx) {
+  const L = SPACE_LEAGUES[li];
+  const head = '<div class="branchLevels"><div class="brHead">' + L.name + " · 3 个分区</div>";
+  const body = SPACE_DIVS.map((d, di) => {
+    const open = spaceDivOpen(li, di, rating);
+    const need = spaceDivRatingNeed(li, di);
+    const pace = abbrevNum(Math.round(toKmh(spaceAIScale(li, di))));
+    const title = (open ? "" : "🔒 ") + d.name + "区 · 对手配速 " + pace + " km/h · 单场 " +
+      spaceDurOf(di, 1) + " 秒" + (open ? "" : "（需联赛段位分 " + need + "，当前 " + rating + "）");
+    if (!open) return '<div class="brHead">' + title + "</div>";
+    const cells = SPACE_RACES.map((r, ri) => spaceRaceCell(li, di, ri, topPx)).join("");
+    return '<div class="brHead">' + title + '</div><div class="lvGrid">' + cells + "</div>";
+  }).join("");
+  const note = '<div class="panelNote">甲区对手 60% 参考配速、乙区 74%、丙区 86% —— 全都低于 1，' +
+    "所以只要你的形态极速达到该区配速就一定跑得过。差的那部分只能靠升级补。</div></div>";
+  return head + body + note;
 }
 
 // ---------------- 车库 ----------------
@@ -832,6 +1032,7 @@ const TIER_CLS = {
  */
 export function renderGaragePanel() {
   panelKind = "garage";
+  inHomeView = false;
   // 按档位分组，组内保持价格升序（BY_PRICE 已经是价格升序）
   const groups = [];
   for (const { v, i } of BY_PRICE) {
@@ -845,7 +1046,7 @@ export function renderGaragePanel() {
     const lo = prices.length ? Math.min(...prices) : 0;
     const hi = prices.length ? Math.max(...prices) : 0;
     const owned = g.items.filter((x) => store.ownedVehicles.includes(x.i)).length;
-    const range = lo === hi ? abbrevNum(lo) : abbrevNum(lo) + " → " + abbrevNum(hi);
+    const range = lo === hi ? goldNum(lo) : goldNum(lo) + " → " + goldNum(hi);
     return `<section class="vehGroup">
       <h3 class="vehGroupHead ${TIER_CLS[g.tier] || ""}">
         <b>${g.tier}</b>
@@ -860,11 +1061,11 @@ export function renderGaragePanel() {
           title: v.name + `<span class="vehTier ${TIER_CLS[v.tier] || ""}">${v.tier}</span>`,
           sub: v.desc,
           body: vehStatGrid(v),
-          right: sel ? "✅<br>使用中" : own ? "已<br>拥有" : "🪙<br>" + abbrevNum(v.price),
+          right: sel ? "✅<br>使用中" : own ? "已<br>拥有" : "🪙<br>" + goldNum(v.price),
           interactive: true,
           selected: sel,
           attrs: `data-act="veh" data-veh="${i}"`,
-        }) + (own ? "" : buyBlock(v, i)) + (v.ultra ? ultraBlock(v, i) : "");
+        }) + ownDetail(v.id) + (own ? "" : buyBlock(v, i)) + (v.ultra ? ultraBlock(v, i) : "");
       }).join("")}
     </section>`;
   }).join("")}
@@ -879,15 +1080,30 @@ export function renderGaragePanel() {
  *   移动端点不准（金币一栏还会随屏宽被 ellipsis 截断）。这里给一个
  *   ≥44px 高、≥120px 宽的独立按钮，热区大、文案直白、不误触。
  */
+/**
+ * 已拥有车辆的**明细行**（v5 存档新增的逐车记录）。
+ *
+ * ★ 这些数字以前存不下：升级等级只答得出"这台车现在多强"，
+ *   答不出"我什么时候买的、骑了多少公里、形态花了多少钱"。
+ *   逐车留痕之后车库卡片才真的像一本账，而不是一排参数。
+ */
+function ownDetail(id) {
+  const m = store.garageMeta[id];
+  if (!m) return "";
+  const parts = [];
+  if (!m.runs) return "";
+  return `<div class="ultraRow">📋 骑过 ${m.runs} 局 · 累计 ${fmtKm(m.odometerM)}</div>`;
+}
+
 function buyBlock(v, i) {
   const lack = Math.max(0, v.price - store.gold);
   const afford = lack === 0;
   return `<div class="buyRow">
     <button class="btn buyNow${afford ? "" : " ghost"}" data-act="buyVeh" data-veh="${i}"
       ${afford ? "" : 'aria-disabled="true"'}>
-      🪙 立即购买并使用 · ${abbrevNum(v.price)}
+      🪙 立即购买并使用 · ${goldNum(v.price)}
     </button>
-    <div class="buyHint">${afford ? "点击即可购买并切换到这台车" : "还差 " + abbrevNum(lack) + " 金币"}</div>
+    <div class="buyHint">${afford ? "点击即可购买并切换到这台车" : "还差 " + goldNum(lack) + " 金币"}</div>
   </div>`;
 }
 
@@ -910,8 +1126,8 @@ function buyVehicleNow(i) {
   const lack = Math.max(0, v.price - store.gold);
   if (lack > 0) {
     const n = note();
-    if (n) n.textContent = "金币不足，还差 " + abbrevNum(lack) + " 🪙（需要 " + abbrevNum(v.price) + "）";
-    showToast("🪙 还差 " + abbrevNum(lack) + " 金币", 1100);
+    if (n) n.textContent = "金币不足，还差 " + goldNum(lack) + " 🪙（需要 " + goldNum(v.price) + "）";
+    showToast("🪙 还差 " + goldNum(lack) + " 金币", 1100);
     return;
   }
   store.gold -= v.price;
@@ -954,7 +1170,7 @@ function ultraBlock(v, i) {
     return `<div class="ultraRow lock">🔒 ${v.ultra.icon} ${v.ultra.name}：${v.ultra.desc}${fxLine(v)}（全部升级满级 Lv${maxLvOf(v)} 后解锁）</div>`;
   }
   return `<div class="ultraRow buy">
-    <button class="btn sm" data-act="buyUltra" data-veh="${i}">${v.ultra.icon} 解锁「${v.ultra.name}」 · ${abbrevNum(v.ultra.cost)} 🪙</button>
+    <button class="btn sm" data-act="buyUltra" data-veh="${i}">${v.ultra.icon} 解锁「${v.ultra.name}」 · ${goldNum(v.ultra.cost)} 🪙</button>
     <div class="ultraDesc">${v.ultra.desc}${fxLine(v)}</div>
   </div>`;
 }
@@ -971,7 +1187,7 @@ function buyUltra(i) {
     return;
   }
   if (store.gold < v.ultra.cost) {
-    showToast("🪙 金币不足，需要 " + abbrevNum(v.ultra.cost), 900);
+    showToast("🪙 金币不足，需要 " + goldNum(v.ultra.cost), 900);
     return;
   }
   store.gold -= v.ultra.cost;
@@ -1006,7 +1222,7 @@ export function buyOrSelectVeh(i) {
       api.applyVehicle();
     } else {
       const n = note();
-      if (n) n.textContent = "金币不足，需要 " + v.price + " 🪙";
+      if (n) n.textContent = "金币不足，需要 " + goldNum(v.price) + " 🪙";
     }
   }
 }
@@ -1015,6 +1231,7 @@ export function buyOrSelectVeh(i) {
 
 export function renderAchPanel() {
   panelKind = "ach";
+  inHomeView = false;
   showPanel(`<div class="modeTitle">🏅 成就 · 已达成 ${store.achGot.length}/${ACHS.length}</div>
   <div class="achList">${ACHS.map((a) => {
     const got = hasAch(a.id);
@@ -1030,6 +1247,8 @@ export function renderAchPanel() {
 // ---------------- 13.4 存档面板 ----------------
 
 export function openSavePanel() {
+  panelKind = "save";
+  inHomeView = false;
   saveView.pending = null;
   saveView.summary = null;
   saveView.error = "";
@@ -1046,7 +1265,99 @@ function currentSummary() {
     const s = store.stars[i] || 0;
     if (s > 0) { cleared++; stars += s; }
   }
-  return { cleared, stars, rating: store.progress.rating || 0, gold: store.gold || 0 };
+  return {
+    cleared,
+    stars,
+    rating: store.progress.rating || 0,
+    spaceRating: store.space.rating || 0,
+    vehicles: (store.ownedVehicles || []).length,
+    createdAt: store.createdAt || "",
+    gold: store.gold || 0,
+  };
+}
+
+/**
+ * 分模式统计表（v5 新增）。
+ *
+ * ★ 为什么值得单独摆一张表：全局的"总局数 / 总里程 / 总时长"只回答"我玩了多久"，
+ *   玩家真正要判断的是"该继续刷哪里" —— 而那需要知道时间到底花在哪种玩法上。
+ */
+/**
+ * 详细档案：把散落在存档各处的**成绩**汇到一屏。
+ *
+ * ★ 为什么单独做一块：v5 存档里成绩分属 campaign / ranked / space / records 四个分区，
+ *   而玩家想回答的却是同一个问题 —— "我在哪儿刷得最好"。这张表就是那个问题的答案，
+ *   也是"存档是不是真的记了东西"最直接的证据。
+ *   每一行都是"试过几次 / 最好多少 / 上次什么时候"，不是只有一个累计值。
+ */
+function dossierHtml() {
+  const F = store.space.free || {};
+  const lv = store.levelRecords || {};
+  const race = store.raceRecords || {};
+  const sp = store.space.records || {};
+
+  // 逐关：三星最快、最少尝试、最高金币
+  let bestLv = null;
+  let fastest = 0;
+  let fewest = Infinity;
+  for (let gi = 0; gi < LEVELS.length; gi++) {
+    const r = lv[gi];
+    if (!r || !r.tries) continue;
+    if (r.bestMs > 0 && (fastest === 0 || r.bestMs < fastest)) { fastest = r.bestMs; bestLv = gi; }
+    if (r.tries < fewest) fewest = r.tries;
+  }
+  const lvDone = Object.keys(lv).filter((k) => lv[k].bestMs > 0).length;
+
+  const raceRows = Object.keys(race).map((k) => {
+    const r = race[k];
+    const [f, t] = k.split("-");
+    const fName = (RACE_FORMATS[RACE_FORMAT_IDS[+f]] || {}).name || ("赛制 " + f);
+    return [fName + (t === "1" ? " · 排位" : ""), r.runs + " 局",
+      (r.best ? "最好第 " + r.best + " 名" : "未进过前三"),
+      r.wins + " 胜", r.lastAt ? fmtDate(r.lastAt).slice(5, 16) : "—"];
+  });
+
+  const spaceRows = Object.keys(sp).slice(0, 6).map((k) => {
+    const r = sp[k];
+    const parts = k.split("-");
+    const L = SPACE_LEAGUES.find((x) => x.id === parts[0]);
+    const D = SPACE_DIVS.find((x) => x.id === parts[1]);
+    const Ra = SPACE_RACES[+parts[2]];
+    return [(L ? L.name : parts[0]) + " " + (D ? D.name : "") + "区 · " + (Ra ? Ra.name : ""),
+      r.runs + " 局", (r.best ? "最好第 " + r.best + " 名" : "—"), r.wins + " 胜",
+      r.lastAt ? fmtDate(r.lastAt).slice(5, 16) : "—"];
+  });
+
+  const rows = [];
+  rows.push(["∞ 无限模式", F.runs + " 局",
+    F.bestMeters ? "最佳 " + fmtKm(F.bestMeters) : "尚无纪录",
+    "累计 " + fmtKm(F.totalMeters), F.bestAt ? fmtDate(F.bestAt).slice(0, 10) : "—"]);
+  if (bestLv !== null) {
+    rows.push(["⛳ 关卡最快三星", LEVELS[bestLv].name,
+      (fastest / 1000).toFixed(1) + " 秒", "全 " + lvDone + " 关有记录", "—"]);
+  }
+  rows.forEach((r) => raceRows.push(r));
+  spaceRows.forEach((r) => rows.push(r));
+  if (rows.length <= 1) {
+    return '<div class="brHead">🗂 详细档案</div>' +
+      '<div class="panelNote">还没有成绩记录 —— 跑一局闯关或无限模式，这里就会记下用时、里程与名次。</div>';
+  }
+  return '<div class="brHead">🗂 详细档案 · 成绩明细</div>' +
+    '<table class="dossier"><thead><tr><th>项目</th><th>次数</th><th>最佳</th><th>补充</th><th>时间</th></tr></thead><tbody>' +
+    rows.map((r) => "<tr>" + r.map((c) => "<td>" + c + "</td>").join("") + "</tr>").join("") +
+    "</tbody></table>";
+}
+
+const MODE_LABEL = { level: "闯关", race: "比赛", ranked: "排位", space: "宇宙联赛", free: "无限" };
+function modeStatHtml(st) {
+  const by = st.byMode || {};
+  const keys = Object.keys(MODE_LABEL).filter((k) => by[k] && by[k].runs);
+  if (!keys.length) return "";
+  return '<div class="brHead">🧭 分模式统计</div>' +
+    statRow(keys.map((k) => ({
+      label: MODE_LABEL[k],
+      value: by[k].runs + " 局 · " + fmtHours(by[k].seconds) + " · " + fmtKm(by[k].meters),
+    })));
 }
 
 function compareBox(cur, imp) {
@@ -1056,7 +1367,9 @@ function compareBox(cur, imp) {
     ${row("已通关", cur.cleared, imp.cleared)}
     ${row("总星数", cur.stars, imp.stars)}
     ${row("段位分", cur.rating, imp.rating)}
-    ${row("金币", cur.gold, imp.gold)}
+    ${row("宇宙联赛分", cur.spaceRating, imp.spaceRating)}
+    ${row("车辆", cur.vehicles, imp.vehicles)}
+    ${row("金币", goldNum(cur.gold), goldNum(imp.gold))}
   </div>`;
 }
 
@@ -1065,8 +1378,16 @@ export function renderSavePanel() {
   const cur = currentSummary();
   const rating = store.progress.rating || 0;
   const stor = isStorageAvailable();
+  // ★ 读档失败过一次（存档原文已保留，但这次进度读不出来）——必须显式告诉玩家，
+  //   否则症状就是"金币和星级凭空归零"，看着像被清了档。
+  const loadErr = takeLoadError();
+  const loadErrBox = loadErr
+    ? `<div class="panelNote" style="color:var(--danger)">⚠️ <b>上次读档失败</b>：${loadErr}<br>
+       你的存档原文<strong>没有被删除</strong>，刷新页面会重新尝试读取；导出存档可先留一份备份。</div>`
+    : "";
   const cmp = saveView.pending && saveView.summary
     ? `${compareBox(cur, saveView.summary)}
+       <div class="panelNote">这份存档含 ${saveView.summary.vehicles} 辆车 · 宇宙联赛分 ${saveView.summary.spaceRating} · 建于 ${fmtDate(saveView.summary.createdAt)}</div>
        <div class="panelNote">⚠️ 导入将覆盖当前进度，且不可撤销</div>
        <div class="row2">
          <button class="btn sm" data-act="importConfirm">确认导入</button>
@@ -1087,11 +1408,15 @@ export function renderSavePanel() {
     { label: "总星数", value: `${cur.stars}/${LEVELS.length * 3}` },
     { label: "段位分", value: `${rating} · ${rankName(rating)}` },
     { label: "成就", value: `${store.achGot.length}/${ACHS.length}` },
-    { label: "金币", value: `🪙 ${abbrevNum(store.gold)}` },
+    { label: "金币", value: `🪙 ${goldNum(store.gold)}` },
     { label: "累计里程", value: fmtKm(st.totalMeters) },
     { label: "累计时长", value: fmtHours(st.totalSeconds) },
+    { label: "宇宙联赛分", value: `${store.space.rating || 0}` },
     { label: "最后游玩", value: fmtDate(st.lastPlayed) },
+    { label: "存档建立", value: fmtDate(store.createdAt) },
   ])}
+  ${dossierHtml()}${modeStatHtml(st)}
+  ${loadErrBox}
   ${stor ? "" : `<div class="panelNote">⚠️ 浏览器存储不可用（隐私模式 / 空间已满 / 被禁用）：本次无法保存进度，导出 / 导入 / 重置均不可用</div>`}
   <div class="brHead">🎚 画面设置 · 画质</div>
   <div class="tabs" role="tablist">${QUALITY.map((q) =>
