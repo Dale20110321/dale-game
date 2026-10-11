@@ -387,6 +387,18 @@ function buildIndex(L) {
   const waveB = new Array(nBuckets);
   /** 每个桶影响到的 steps 下标区间（steps 按 cx 升序） */
   const stepB = new Array(nBuckets);
+  /**
+   * 桶 b 之前"已完结"断层（cx + STEP_W ≤ bx0）的落差累计（前缀和）。
+   *
+   * ★ 修复桶边界台阶：hillRaw 里断层的语义是**永久下移**（`t` clamp 到 1 后落差
+   *   一直保持到赛道末），而分桶索引只把 [cx, cx+STEP_W] 内的断层算进当前桶 ——
+   *   于是 x 每跨过一个桶边界，"影响带已过"的断层贡献**瞬间归零**，地形凭空抬升
+   *   一个台阶：普通关/低级宇宙场是 1~5px 的小坎，高级宇宙场因桶宽暴增（62,500px 起）
+   *   一个桶内积压数百~上万条断层，台阶变成 **523~23346px 的垂直墙**，任何速度都撞墙摔车。
+   *   用前缀和把"已完结"断层的落差补回来：台阶消失、地形恢复连续，且 fitSlope
+   *   不再采到假坡度把整个赛道压平。
+   */
+  const preDrop = new Array(nBuckets);
   /** 每个桶影响到的 feats 下标区间（feats 按 x0 升序） */
   const featB = new Array(nBuckets);
 
@@ -398,16 +410,22 @@ function buildIndex(L) {
   const ws = L.waves;
   const wLen = ws.length;
 
-  // ---- steps：影响范围 = [cx, cx + STEP_W] ----
+  // ---- steps：影响范围 = [cx, cx + STEP_W]，已完结的落差由 preDrop 前缀和兜底 ----
   let sLo = 0;
+  let pre = 0;
   for (let b = 0; b < nBuckets; b++) {
     const bx0 = b * bw;
     const bx1 = bx0 + bw;
-    // 起点：第一个 cx + STEP_W > bx0 的元素
-    while (sLo < L.steps.length && L.steps[sLo].cx + STEP_W <= bx0) sLo++;
+    // 起点：第一个 cx + STEP_W > bx0 的元素。被跳过的即"已完结"（影响带彻底结束），
+    // 其落差必须进入本桶的 preDrop —— 否则 x 跨过桶边界时它们会凭空消失（桶边界台阶）。
+    while (sLo < L.steps.length && L.steps[sLo].cx + STEP_W <= bx0) {
+      pre += L.steps[sLo].drop;
+      sLo++;
+    }
     let sHi = sLo;
     while (sHi < L.steps.length && L.steps[sHi].cx < bx1) sHi++;
     stepB[b] = [sLo, sHi];
+    preDrop[b] = pre;
   }
 
   // ---- feats：影响范围 = [x0, x1] ----
@@ -423,7 +441,7 @@ function buildIndex(L) {
   }
 
   // ★ bw 必须存进索引：hillRaw 取桶下标要用它，不能再拿模块常量当桶宽
-  L._idx = { nBuckets, bw, waveB, stepB, featB, wLen };
+  L._idx = { nBuckets, bw, waveB, stepB, featB, wLen, preDrop };
   return L._idx;
 }
 
@@ -437,10 +455,14 @@ function hillRaw(L, x) {
     const w = ws[i];
     relief += w.amp * Math.sin(x * w.f + w.ph);
   }
-  // ---- steps：按桶取下标区间，不再从 0 扫全表 ----
+  // ---- steps：已完结断层的落差前缀和 + 桶内影响中的断层插值 ----
+  // ★ 必须先加 preDrop 再叠加桶内断层：preDrop 补回"影响带已过"的断层落差，
+  //   桶内断层则继续按现有逻辑（影响中取 smoothstep 插值、t≥1 已完整生效）。
+  //   两者相加才等于断层的完整"永久下移"语义，桶边界处不再出现台阶/垂直墙。
   const b = (x / idx.bw) | 0;
   const steps = L.steps;
   if (b >= 0 && b < idx.nBuckets) {
+    relief += idx.preDrop[b];
     const r = idx.stepB[b];
     for (let i = r[0], e = r[1]; i < e; i++) {
       const s = steps[i];
@@ -649,7 +671,14 @@ export function freeHill(x) {
   const DRIFT_K = 0.00022, DRIFT_CAP = 900;
   const drift = (d * DRIFT_K * DRIFT_CAP) / (DRIFT_CAP + d * DRIFT_K);
   const y = baseYOf(d) + drift + relief;
-  return 300 + (y - 300) * ramp;
+  // ★ 起步平台渐入：y 是**相对 300 基准的偏移量**（base 基准线 ±260 / drift 越跑越深 0→900 /
+  //   relief 起伏 ±40），起点平台恒为 300，之后用 ramp 把偏移渐入。
+  //   ★ 曾写作 `300 + (y - 300) * ramp`：那等于把 y 当成"绝对高度"再减 300，
+  //   而 y 本身就是偏移量（relief 以 0 为中心、起点附近 y≈37px）——于是
+  //   (y-300)≈-263px 的假下移被 ramp 渐入放大成起点 42.5° 的陡坡（实测 292px 长），
+  //   且无限模式全程地形都偏低约 260px。改为 `300 + y * ramp` 后地形回到
+  //   300 基准，起点只剩 relief 自身的正常渐入起伏（实测 ~7°）。
+  return 300 + y * ramp;
 }
 
 /**
@@ -685,11 +714,28 @@ const SLOPE_E = 2;
 function measureMaxSlopeTan(P, len) {
   const stride = Math.max(4, Math.ceil(len / SLOPE_SAMPLES));
   let mx = 0;
-  for (let x = 70; x <= len; x += stride) {
+  // ★ 均匀采样步长随 len 放大后，断层的 smoothstep 过渡带（150px 宽）可能整段漏在
+  //   采样点之间（终局关 stride 834px、宇宙场数万 px）→ raw 偏低 → fitSlope 的 k 偏大
+  //   → 缩放后实测 maxSlope 超标（终局关曾到 56.2°，目标 54°）。
+  //   在每个断层的过渡带内补采样 3 个特征点（smoothstep 中点 t=0.5 坡度最大）。
+  //   断层多的赛道（终局关/宇宙场）抽样到 ≤4000 条，控制一次性构建耗时。
+  const at = (x) => {
+    if (x < 70) x = 70;
+    if (x > len) x = len;
     const yL = levelHillY(P, x - SLOPE_E);
     const yR = levelHillY(P, x + SLOPE_E);
     const m = Math.abs((yR - yL) / (2 * SLOPE_E));
     if (m > mx) mx = m;
+  };
+  for (let x = 70; x <= len; x += stride) at(x);
+  if (P.steps) {
+    const every = P.steps.length > 4000 ? Math.ceil(P.steps.length / 4000) : 1;
+    for (let i = 0; i < P.steps.length; i += every) {
+      const cx = P.steps[i].cx;
+      at(cx + STEP_W * 0.25);
+      at(cx + STEP_W * 0.5);
+      at(cx + STEP_W * 0.75);
+    }
   }
   return mx;
 }
@@ -722,6 +768,13 @@ function fitSlope(L, targetDeg) {
   for (const w of L.waves) w.amp *= k;
   for (const s of L.steps) s.drop *= k;
   if (L.feats) for (const f of L.feats) f.amp *= k;
+  // ★ 分桶索引里的 preDrop 若已构建（measureMaxSlopeTan 阶段），必须与 drop 同步缩放：
+  //   否则 preDrop（原始落差累计）与 stepB 内 step（缩放后落差）量级不一致，
+  //   桶边界仍会留下残留台阶。索引缓存与地形参数必须始终处于同一标度。
+  if (L._idx && L._idx.preDrop) {
+    const pd = L._idx.preDrop;
+    for (let i = 0; i < pd.length; i++) pd[i] *= k;
+  }
   // ★ 回填值直接取 targetDeg，**不再重跑一遍采样**（原为 measureMaxSlope(L)）。
   //   既然 maxSlope 对全部振幅严格线性，缩放 k 之后它必然等于 raw·k = tanT，
   //   第二次采样是恒等变换 —— 纯浪费一半生成耗时。

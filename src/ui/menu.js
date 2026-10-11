@@ -208,6 +208,10 @@ export function showPanel(html) {
   // （叠着会把顶部挤出视口，看起来坏且点不到）
   setMenuGroupsVisible(false);
   modePanel.innerHTML = PANEL_BAR + html;
+  // ★ 每次打开都从顶部开始：#modePanel 是滚动容器，旧的 scrollTop 在内容被清空后
+  //   仍残留，下次渲染时会被 clamp 到新内容的末尾 —— 于是点比赛/宇宙场/无限
+  //   看到的总是面板最下面一屏。先归零，需要定位的面板（车库→选中车）再自行滚动。
+  modePanel.scrollTop = 0;
   modePanel.classList.remove("hidden");
   // 进场过渡：先落到 .enter（位移 + 透明），强制回流后移除 → 过渡到基础态
   modePanel.classList.add("enter");

@@ -295,13 +295,23 @@ export function topSpeedOf(veh, up, o) {
   //   实测全 32 台车达成率只有 52%~70%，零摔车的白毛风也只有 56% ——
   //   那不是地形损耗，是这张表在自说自话。
   const dragK = ov.airDragK != null ? ov.airDragK : AIR_DRAG_K;
-  const loss = (v) => dragK * v * v + LINEAR_DRAG_K * v + roll;
+  // ★ SYS-4：两股加速度项（风阻 ∝v²、线性阻力 ∝v）乘 mTot 归到**力**的量纲，
+  //   与 avail(力) 直接可比，避免"力 vs 加速度"混合导致轻车/重车极速偏差方向不一致。
+  const loss = (v) => mTot * (dragK * v * v + LINEAR_DRAG_K * v) + roll;
   let lo = 0;
   let hi = TOP_SPEED_CAP;
-  for (let i = 0; i < 40; i++) {
+  // ★ SYS-3：迭代次数 = ceil(log2(上界)) + 8 —— TOP_SPEED_CAP=1e16 顶格也要收敛到位
+  //   （旧 40 次停在粗区间，重车/超大极速会被判出 0）。
+  const MAX_IT = Math.ceil(Math.log2(TOP_SPEED_CAP)) + 8;
+  for (let i = 0; i < MAX_IT; i++) {
     const mid = (lo + hi) * 0.5;
     if (avail(mid) > loss(mid)) lo = mid;
     else hi = mid;
+  }
+  // ★ SYS-3.2 数值健全性：真极速必须在 (0, CAP/2)，否则是坏数据/数值事故。
+  //   用错误日志而非抛错 —— 抛错会让任何一辆坏车在启动时整页崩掉。
+  if (!(lo > 0) || !(lo < TOP_SPEED_CAP * 0.5)) {
+    console.error("topSpeedOf 数值异常", veh && veh.id, "v=", lo);
   }
   return lo;
 }
@@ -1073,9 +1083,16 @@ export function racePlaceOf(list, playerX, fmt) {
     for (const a of list || []) if (a.x > playerX) p++;
     return p;
   }
+  // ★ SYS-6：队名次按**两队累计里程**判定（spec：旧版只数"领先的成员个数"，
+  //   一两个冲前面的队员会掩盖整队的整体位置）。己方总里程 = 队友 + 玩家本人。
+  let ours = playerX;
+  let theirs = 0;
+  for (const a of list || []) {
+    if (a.team === PLAYER_TEAM) ours += a.x;
+    else theirs += a.x;
+  }
   const ahead = (list || []).filter((a) => a.team === PLAYER_TEAM && a.x > playerX).length;
-  const rivalAhead = (list || []).filter((a) => a.team === RIVAL_TEAM && a.x > playerX).length;
-  return [ahead <= rivalAhead ? 1 : 2, ahead + 1];
+  return [ours >= theirs ? 1 : 2, ahead + 1];
 }
 
 /** 段位分 → 段位名（纯函数：任意输入都返回非空段位名，负数/NaN 视为青铜） */

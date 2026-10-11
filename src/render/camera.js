@@ -128,12 +128,13 @@ export function updateCamera(dt) {
   const worldH = view.H / zoom;
 
   // ---- 水平跟随：指数逼近 + 速度前馈 ----
-  // 前瞻量随速度增长：高速时要多看一点前方，才有时间对地形做出反应。
-  // 分母用 worldW 而不是 view.W —— 缩放变化时前瞻的**世界**长度保持稳定。
+  // ★ 车（及陨石 / 水滴）**始终**停在屏幕偏右 62% 处（横向约 2/3 的位置）：
+  //   比"中央稍微右一点"更靠右一档，陨石主体在右 1/3 区、水滴流线尾完全铺在左侧 ——
+  //   不随速度左右乱跑，也不被推到极右缘。
+  //   缩放变化时前瞻的**世界**长度保持稳定（分母用 worldW 而不是 view.W）。
   const spdN = clamp(v / Math.max(1, store.phys.topSpeed), 0, 1);
-  const lead = (Math.sign(bike.speed || 1) * spdN * worldW * 0.10) / 1;
   const maxX = store.mode === "free" ? Infinity : Math.max(0, store.finishX - worldW * 0.45);
-  const targetX = clamp(mx + lead - worldW * 0.38, 0, maxX);
+  const targetX = clamp(mx - worldW * 0.62, 0, maxX);
 
   // ★ 速度前馈：指数逼近只负责吃掉"目标跳变"，匀速前进由前馈项直接补上。
   //   不加这一项时稳态滞后恒为 v·τ（见文件头不变量 1）。

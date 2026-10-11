@@ -18,6 +18,7 @@ import { token } from "../config/ui-tokens.js";
 import { THEMES } from "../config/themes.js";
 import { VEHICLES } from "../config/vehicles.js";
 import { WHEEL_R } from "../config/constants.js";
+import { drawMeteorCruise, METEOR_SCALE } from "./trail.js";
 
 /**
  * 进入巡航层的阈值（屏幕缩放）。
@@ -32,57 +33,35 @@ export const CRUISE_ZOOM = 0.05;
 export const inCruiseLayer = () => store.cam.zoom < CRUISE_ZOOM;
 
 /**
- * 巡航层里画车：一个固定屏幕尺寸的光点 + 一道前向的短辉光。
+ * 巡航层里画车：一颗固定屏幕尺寸的**陨石**（取代旧的光圈 + 前向拖尾）。
  *
- * ★ 尺寸取屏幕比例而不是世界比例 —— 世界比例在 10⁻⁸ 的缩放下等于 0。
- *   玩家要看见的是"一团稳定的光在高速掠过"，尺寸变化只用来传达速度感，
- *   不该让车大到糊住画面或小到消失。
+ * ★ 旧版本画的是一团光晕（两层圆）+ 一道矩形拖尾 —— 高速下玩家看到的就是
+ *   "光圈 + 尾巴"，跟"车"完全对不上。现在宇宙级车进巡航层后整颗车 = 陨石，
+ *   与普通速度下的陨石形态（bike.js drawBike）一致，只是这里按屏幕坐标画。
  */
 export function drawCruiseBike() {
   const veh = VEHICLES[store.currentVehicle];
-  const color = (veh && veh.color) || "#ffffff";
   const W = view.W;
   const H = view.H;
-  // 车固定在屏幕 38% 处（与相机前瞻一致），纵向跟着地形走向略微下沉
-  const x = W * 0.38;
+  // 车固定在屏幕 62% 处（与相机 updateCamera 的 targetX 口径一致，见 camera.js ——
+  // 巡航层不走相机，这里必须同参，否则普通速度在 62%、满速却跳回左边）
+  const x = W * 0.62;
   const y = H * 0.62;
-  // 半径随速度在 7~13px 之间：够亮眼，又不会大到糊住画面
   const top = store.phys.topSpeed || 1;
   const spdN = Math.min(1, Math.abs(bike.speed) / Math.max(1, top));
-  const r = 7 + spdN * 6;
 
-  ctx.save();
-
-  // 外晕：两层不同大小的圆，纯填充，不走 arc+stroke 的抗锯齿路径
-  ctx.globalAlpha = 0.18;
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(x, y, r * 3.2, 0, 7);
-  ctx.fill();
-
-  ctx.globalAlpha = 0.45;
-  ctx.beginPath();
-  ctx.arc(x, y, r * 1.8, 0, 7);
-  ctx.fill();
-
-  // 核心：接近白色的一小点
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = "#ffffff";
-  ctx.beginPath();
-  ctx.arc(x, y, r * 0.62, 0, 7);
-  ctx.fill();
-
-  // 前向辉光：一道向左（身后）的渐短横条，给出"在冲"的方向感
-  if (spdN > 0.05) {
-    const len = 40 + spdN * 150;
-    ctx.globalAlpha = 0.28 * spdN;
-    ctx.fillStyle = color;
-    ctx.fillRect(x - len, y - r * 0.42, len, r * 0.84);
-    ctx.globalAlpha = 0.5 * spdN;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(x - len * 0.45, y - r * 0.16, len * 0.45, r * 0.32);
+  // 宇宙级车：直接画陨石（从点起步 → 满速大陨石；不会缩成点，没有光圈/横条）。
+  const T = veh && veh.trail;
+  if (T) {
+    drawMeteorCruise(T, 0.35 + 0.65 * spdN, x, y, (2 + 60 * spdN) * METEOR_SCALE);
+    return;
   }
+
+  // 兜底（普通车本不该进巡航层）：一个纯色小方块，不用圆（避免读成"光圈"）。
+  ctx.save();
+  ctx.fillStyle = "#ffffff";
   ctx.globalAlpha = 1;
+  ctx.fillRect(x - 5, y - 5, 10, 10);
   ctx.restore();
 }
 
@@ -99,7 +78,7 @@ export function drawCruiseRacers() {
   const H = view.H;
   // 屏幕宽度代表多少世界像素（与相机的可视宽度同源）
   const visW = W / store.cam.zoom;
-  const base = store.cam.x + visW * 0.38;
+  const base = store.cam.x + visW * 0.62; // 玩家在 62%，对手基准同参（见 drawCruiseBike）
   const COLORS = ["#ff6b6b", "#ffd93d", "#6bcb77", "#4d96ff", "#c780e8", "#ff9f43"];
   ctx.save();
   for (let i = 0; i < list.length; i++) {

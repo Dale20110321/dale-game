@@ -1071,6 +1071,16 @@ export function renderGaragePanel() {
   }).join("")}
   <div class="panelNote" id="pnNote"></div>
   <button class="btn backBtn" data-act="back">返回</button>`);
+  // ★ 进车库直接定位到当前选中的车：否则每次打开都停在普通档第一辆，
+  //   玩家要滑过整个车展才能看到"我在用的那台"。
+  scrollToSelCard();
+}
+
+/** 滚动到当前选中的车卡片（#modePanel 是滚动容器，scrollIntoView 会把卡片滚到其可视区中央） */
+function scrollToSelCard() {
+  const sel = document.querySelector("#modePanel .vehCard.isSel");
+  if (!sel) return;
+  try { sel.scrollIntoView({ block: "center" }); } catch (e) { sel.scrollIntoView(); }
 }
 
 /**
@@ -1175,8 +1185,15 @@ function ultraBlock(v, i) {
   </div>`;
 }
 
-/** 购买特殊终极模式：满级 + 100 万金币 */
-function buyUltra(i) {
+/**
+ * 购买特殊终极模式：满级 + 金币。
+ *
+ * @param {number} i 车辆下标
+ * @param {Function} [refresh] 解锁成功后的重画回调（升级车间传入 renderShop）。
+ *   缺省时重画车库 —— 让"车库里解锁"与"升级页里解锁"走同一份动作，
+ *   而不会在 shop 页面点解锁后被拽去车库。
+ */
+export function buyUltra(i, refresh) {
   const v = VEHICLES[i];
   if (!allMaxed(v.id)) {
     showToast("🔒 先把这辆车的全部升级升到满级", 900);
@@ -1195,7 +1212,8 @@ function buyUltra(i) {
   save();
   // 若买的就是当前使用的车，立即应用效果
   if (store.currentVehicle === i && api.applyVehicle) api.applyVehicle();
-  renderGaragePanel();
+  if (typeof refresh === "function") refresh();
+  else renderGaragePanel();
   showToast("🚀 已解锁「" + v.ultra.name + "」！", 1200);
 }
 

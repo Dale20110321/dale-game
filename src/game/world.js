@@ -40,6 +40,19 @@ export const BOOST_HAZARD_GAP = 400;
  */
 let currentL = null;
 
+/**
+ * 重置流式分块状态（跨模式隔离：切模式 / 重开都必须重新起块）。
+ * ★ SYS-9：freeInit 若不调它会留下上一局的 chunks / takenX / 相机残值，
+ *   宇宙场（或普通关）的分块金币会被无限模式顺走，反之亦然。
+ */
+export function resetStreaming() {
+  world.chunks = new Map();
+  world.takenX = new Set();
+  world.chunksDirty = false;
+  lastLo = -1; lastHi = -1;   // 强制 streamChunks 重建第一屏
+  lastCamX = 0;               // 预算按"本帧位移"算，不能用上一局的残值
+}
+
 /** 关卡地形真实最低点（世界 y 最大，即屏幕最下方），用于"掉出地图"判定：直接用纯地形函数，避免依赖当前关卡状态 */
 function measureBottomY(L) {
   // ★ 采样步长随赛道长度放大：固定 25px 时，终局关（16.7M px）要跑 66 万次、
@@ -400,11 +413,8 @@ export function buildLevel() {
   const rng = mulberry32(1000 + idx * 97);
   // 流式模式：chunk 生成器要读回这条赛道（seed / len / 主题），存模块态
   currentL = L;
-  world.chunks = new Map();
-  world.takenX = new Set();
-  world.chunksDirty = false;
-  lastLo = -1; lastHi = -1;   // 强制 streamChunks 重建第一屏
-  lastCamX = 0;               // 预算按"本帧位移"算，开局相机在 0，不能拿上一局的残值
+  // 流式分块状态整体重置（buildLevel 与 freeInit 共用同一函数，SYS-9）
+  resetStreaming();
   store.finishX = L.len;
   const th0 = segmentThemeAt(L, 0);
   store.phys.theme = th0;
@@ -561,6 +571,8 @@ export function freeInit(theme) {
   world.jumps = [];
   world.prepFuel = 0;
   world.freeGenX = 0;
+  // ★ SYS-9：清掉上一局（关卡 / 宇宙）留下的流式分块，金币与装饰不会串进无限模式
+  resetStreaming();
 }
 
 /**

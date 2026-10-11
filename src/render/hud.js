@@ -195,6 +195,27 @@ export function drawHud() {
   if (L.quit) drawQuitButton(L.quit);
   if (w) drawWarning(L.warn, w);
   drawSpeedLines();
+  drawStartGate(); // ★ SYS-10：开局等待起步的视觉提示
+}
+
+/**
+ * 起跑闸门提示（★ SYS-10）：开局等待起步（bike.awaitingStart）期间，
+ * 屏幕下方弹「◀ A / D ▶ 起步」，明示"本局还没在计时、按左右任意一键发车"。
+ * 之前只有物理静默冻结，没有任何视觉，玩家以为卡死了。
+ */
+function drawStartGate() {
+  if (!(store.state === "play" && bike.awaitingStart)) return;
+  const W = view.W;
+  const H = view.H;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#fff";
+  ctx.shadowColor = "rgba(0,0,0,0.85)";
+  ctx.shadowBlur = 6;
+  ctx.font = "700 " + Math.max(16, Math.min(26, Math.round(view.W / 26))) + "px sans-serif";
+  ctx.fillText("◀  A / D ▶  起步", W / 2, H * 0.72);
+  ctx.shadowBlur = 0;
+  ctx.textAlign = "start";
 }
 
 /**

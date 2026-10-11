@@ -582,9 +582,6 @@ button:focus-visible, [tabindex]:focus-visible, [data-act]:focus-visible,
 }
 .tleft { left: calc(var(--space-4) + env(safe-area-inset-left, 0px)); }
 .tright { right: calc(var(--space-4) + env(safe-area-inset-right, 0px)); }
-/* 倒车键：与左右键同尺寸，但缩一号并抬高一档，排在左侧 —— 倒车是低频操作，
-   不该和加速/刹车抢同一个视觉权重，也不该挡住速度表。 */
-.trev { left: calc(var(--space-4) + 80px + env(safe-area-inset-left, 0px)); bottom: calc(124px + env(safe-area-inset-bottom, 0px)); width: 56px; height: 56px; font-size: 20px; }
 .tfull { position: absolute; top: calc(var(--space-2) + env(safe-area-inset-top, 0px)); right: calc(var(--space-4) + env(safe-area-inset-right, 0px)); z-index: 10; bottom: auto; width: 44px; height: 44px; font-size: 15px; opacity: .5; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
 .ttoggle { position: absolute; top: calc(56px + env(safe-area-inset-top, 0px)); right: calc(var(--space-4) + env(safe-area-inset-right, 0px)); z-index: 10; bottom: auto; width: 44px; height: 44px; font-size: 14px; background: var(--glass-fill); opacity: .5; transition: opacity var(--dur-base) var(--ease-std), background var(--dur-base) var(--ease-std); }
 /* 游戏画面内的"返回主页"按钮：只在游玩时由 menu.js 显示 */

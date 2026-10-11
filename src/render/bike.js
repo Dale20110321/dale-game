@@ -6,6 +6,7 @@ import { WHEEL_R, WHEELBASE, SEAT_H, DT } from "../config/constants.js";
 import { VEHICLES } from "../config/vehicles.js";
 import { store, bike } from "../core/store.js";
 import { clamp } from "../core/utils.js";
+import { meteorFactor, drawMeteorBike, METEOR_SWITCH, METEOR_FADE_LO } from "./trail.js";
 
 /** 两个 #rrggbb 之间线性插值（弹簧变色：两端色相仍来自令牌） */
 function mixHex(a, b, t) {
@@ -76,6 +77,12 @@ export function drawBike(dt = 1 / 60) {
   const cxm = (P.rear.x + P.front.x) / 2;
   const cym = (P.rear.y + P.front.y) / 2;
   const ang = Math.atan2(P.front.y - P.rear.y, P.front.x - P.rear.x);
+  const V = VEHICLES[store.currentVehicle];
+
+  // ★ 高速陨石形态：**不再做"到阈值瞬间替换整辆车"**。车照常画满全过程，
+  //   陨石在 m 上升区间以**同中心、同朝向淡入覆盖**在车上（见函数尾部），
+  //   读出的是同一辆车慢慢被陨石罩住，而不是车消失、陨石从别处冒出来。
+  const mMet = meteorFactor();
 
   ctx.save();
   ctx.translate(cxm - store.cam.x, cym - store.cam.y);
@@ -85,7 +92,6 @@ export function drawBike(dt = 1 / 60) {
   const hr = SEAT_H;
   const sq2 = bike.squash || 0;
   const mdy = hr * 0.55 + sq2 * 4;
-  const V = VEHICLES[store.currentVehicle];
   const vehCol = V.color;
   // 形态规格：同一物理包络（WHEEL_R / WHEELBASE / SEAT_H 是物理常量）里的样子差异
   const A = V.art || {};
@@ -403,4 +409,16 @@ export function drawBike(dt = 1 / 60) {
   arm(3.2, suitCol, suitDark);
 
   ctx.restore();
+
+  // ---- 车 → 陨石 覆盖（与车同中心、同朝向）----
+  // 不淡入：从 m 小的整段陨石都是**实心**出现 —— 一开始只是车中心的一个小灰点，
+  // 随速度一路胀大到两倍车宽（半径由 drawMeteorBike 的 (2 + 60m)/z 控制）。
+  // 这样从头到尾都是"同一颗石子逐渐长大"，没有任何闪变/半透明混色。
+  if (mMet > METEOR_FADE_LO) {
+    ctx.save();
+    ctx.translate(cxm - store.cam.x, cym - store.cam.y);
+    ctx.rotate(ang);
+    drawMeteorBike(V, mMet, 0.78 + 0.22 * mMet);
+    ctx.restore();
+  }
 }

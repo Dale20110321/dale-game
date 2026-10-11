@@ -42,19 +42,8 @@ const qFac = () => (getQuality() === "low" ? 0.5 : getQuality() === "high" ? 1 :
  */
 const nz = (x, s) => Math.sin(x * 1.7 + s) * 0.62 + Math.sin(x * 4.3 + s * 2.7) * 0.38;
 
-/**
- * 一笔"发光"描边：外层宽而淡（晕）+ 内层窄而亮（芯）。
- * 比单纯描一次更像能量，且对同一个 path 描两遍即可，不必重建路径。
- */
-function glowStroke(col, wGlow, aGlow, wCore, aCore) {
-  ctx.strokeStyle = col;
-  ctx.lineWidth = Math.max(0.5, wGlow);
-  ctx.globalAlpha = aGlow;
-  ctx.stroke();
-  ctx.lineWidth = Math.max(0.35, wCore);
-  ctx.globalAlpha = aCore;
-  ctx.stroke();
-}
+/** 平滑阶跃（两端导数为 0）：用于"随速度渐现"的过渡 */
+const ss3 = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 
 /** 整车质心速度（px/s）。取不到分量时回退 0，绝不返回 NaN（见 bike 的 pts 注释）。 */
 function velOf() {
@@ -85,514 +74,398 @@ const meteorOf = (k) =>
   clamp((k - TRAIL_METEOR_LO) / (TRAIL_METEOR_HI - TRAIL_METEOR_LO), 0, 1);
 
 // ============================================================
-//  十二种签名形态（每台宇宙级车一种，见 vehicles.js 的 TRAIL 注释）
+//  陨石形态体系：12 台宇宙级车统一为"陨石 / 流星"画法
 //
-//  约定：全部画在**局部坐标系**里 —— 原点在车身中心、+x = 速度方向、
-//  拖尾一律落在 -x 侧（车后方）。调用方已经 translate + rotate 到位。
-//  所有长度/宽度都已由调用方从屏幕 px 换算成世界 px。
+//  ★ 为什么把 12 种签名形态全部换成陨石：旧版是"线条描边"风格 ——
+//    每种都是几根发光的线（电弧 / 螺旋 / 涟漪…），没有体积、没有层次，
+//    速度再快看起来也只是"线变长"。陨石 / 流星是"实体在飞"：
+//    一团湍流翻滚的火球拖着火焰尾巴、一路撒火星，
+//    速度越快火球越大、尾越长越亮 —— 这才读得出"炫酷"。
+//  ★ 每台车的辨识度从"画法"改成"尾形 + 颜色"：T.style 映射火焰尾的
+//    分叉数与螺旋缠绕度，颜色仍走 TRAIL 规格的 glow / core。
+//  ★ 全部用 nz 连续相位，零逐帧分配（见文件头纪律 2）。
 // ============================================================
 
-/** 电弧（cv1 冰蓝）：三条分叉电弧，越靠后越散开 */
-function drawArc(T, a, A, L, W, k, q) {
-  const n = Math.max(2, Math.round(T.count * q));
-  const steps = 9;
-  for (let b = 0; b < n; b++) {
-    const s = T.seed + b * 2.399; // 黄金角：三条弧的抖动互不同步
-    const off = (b - (n - 1) / 2) * W * 0.95;
+/** style → 尾形个性：forks = 火焰尾分叉数，spin = 螺旋缠绕度（负 = 反向内吸） */
+const STYLE_TRAITS = {
+  arc:    { forks: 3, spin: 0.22 },
+  helix:  { forks: 2, spin: 1.0 },
+  corona: { forks: 5, spin: 0.1 },
+  ember:  { forks: 1, spin: 0.06 },
+  ripple: { forks: 3, spin: 0 },
+  vortex: { forks: 1, spin: 1.35 },
+  lance:  { forks: 1, spin: 0 },
+  cone:   { forks: 3, spin: 0.12 },
+  rift:   { forks: 2, spin: 0.2 },
+  lattice:{ forks: 4, spin: 0.32 },
+  braid:  { forks: 4, spin: 0.85 },
+  event:  { forks: 1, spin: -0.95 },
+};
+
+/**
+ * 陨石本体（彗核）：圆润、斑驳、有质感的灰石头 —— 没有任何光圈 / 发光层。
+ *  · 岩体：近圆（Ry/Rx ≈ 0.9），整体比早期小 20%（Rx = 0.80R）；14 顶点轻微参差
+ *  · 明暗：上侧受光亮、下侧背光暗，再叠五块深浅灰斑 —— 不是一片纯灰
+ *  · 表面：24 个带亮沿的陨石坑 + 48 颗深/浅乱序颗粒，粗粝有石头质感
+ */
+function drawMeteoroid(T, a, hx, R, m) {
+  const Rx = R * 0.8;   // 按用户要求放小
+  const Ry = Rx * 0.9;  // 更圆：近圆（略扁一丢丢）
+  const rot = ph * 0.35 + T.seed;
+
+  // 1) 岩体（亮灰 —— 陨石整体提亮，破空罩叠在上面时不会被压暗）
+  const V = 14;
+  ctx.fillStyle = "#9aa3ab";
+  ctx.globalAlpha = a;
+  ctx.beginPath();
+  for (let i = 0; i <= V; i++) {
+    const ang = rot + (i / V) * Math.PI * 2;
+    const jx = 1 + nz(ang * 1.4, T.seed + 9) * 0.05;
+    const jy = 1 + nz(ang * 2.1, T.seed + 5) * 0.09;
+    const x = hx + Math.cos(ang) * Rx * jx;
+    const y = Math.sin(ang) * Ry * jy;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+
+  // 2) 整体光照：上亮下暗（受光面 vs 背光面）—— 亮部更亮、对比更强
+  ctx.fillStyle = "#d4dbe1";
+  ctx.globalAlpha = a * 0.35;
+  ctx.beginPath();
+  ctx.ellipse(hx, -Ry * 0.42, Rx * 0.68, Ry * 0.36, rot * 0.4, 0, 7);
+  ctx.fill();
+  ctx.fillStyle = "#454c53";
+  ctx.globalAlpha = a * 0.4;
+  ctx.beginPath();
+  ctx.ellipse(hx, Ry * 0.45, Rx * 0.72, Ry * 0.4, -rot * 0.3, 0, 7);
+  ctx.fill();
+
+  // 3) 深浅灰斑（五块，明暗对比强烈、错落分布）—— 亮斑更亮、暗斑不过度发黑
+  const PATCH = ["#4a5159", "#d6dce3", "#6a727a", "#bcc3cb", "#3c434b"];
+  for (let i = 0; i < 5; i++) {
+    const s = T.seed + i * 3.7;
+    const ang = rot * 1.4 + s;
+    const px = hx + Math.cos(ang) * Rx * (0.18 + 0.35 * Math.abs(Math.sin(i * 1.3)));
+    const py = Math.sin(ang) * Ry * (0.18 + 0.4 * Math.abs(Math.sin(i * 2.1)));
+    ctx.fillStyle = PATCH[i];
+    ctx.globalAlpha = a * 0.65;
     ctx.beginPath();
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps;
-      // 电弧在离开车体之后才散开，所以振幅正比于 t
-      const x = A - t * L;
-      const y = off + nz(t * 3.1 + ph * 9, s) * W * 0.6 * t;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+    ctx.ellipse(px, py, Rx * (0.14 + 0.05 * Math.abs(Math.sin(i * 0.7))), Ry * (0.12 + 0.04 * Math.abs(Math.sin(i * 1.1))), ang * 0.8, 0, 7);
+    ctx.fill();
+  }
+
+  // 4) 密集小陨石坑（24 个）：坑沿亮 + 坑体暗 → 立体的小凹坑
+  const CRATERS = 24;
+  for (let i = 0; i < CRATERS; i++) {
+    const ang = rot * 1.7 + i * 2.399 + T.seed; // 黄金角：相邻坑不扎堆
+    const rr = Math.sqrt((i + 0.5) / CRATERS);  // 0→1 均匀覆盖圆面
+    const cx = hx + Math.cos(ang) * Rx * rr * 0.95;
+    const cy = Math.sin(ang) * Ry * rr * 0.95;
+    const cr = Rx * (0.032 + 0.02 * ((i * 7) % 3)) * (1 - rr * 0.3);
+    ctx.fillStyle = "#e5eaf0";
+    ctx.globalAlpha = a * 0.5;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + 1.7, cr, cr * 0.62, ang, 0, 7);
+    ctx.fill();
+    ctx.fillStyle = "#333a41";
+    ctx.globalAlpha = a * 0.85;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, cr, cr * 0.6, ang, 0, 7);
+    ctx.fill();
+  }
+
+  // 5) 表面颗粒噪点：48 颗深/浅"乱序"细点（用 nz 而非机械交替）→ 粗粝质感
+  const GRAIN = 48;
+  for (let i = 0; i < GRAIN; i++) {
+    const ang = rot * 1.7 + i * 2.399 + T.seed;
+    const rr = Math.sqrt((i + 0.5) / GRAIN);
+    const cx = hx + Math.cos(ang) * Rx * rr * 0.96;
+    const cy = Math.sin(ang) * Ry * rr * 0.96;
+    ctx.fillStyle = nz(i * 1.9, T.seed * 1.3) > 0 ? "#e9edf2" : "#50565c";
+    ctx.globalAlpha = a * (0.4 + 0.3 * Math.abs(nz(i * 2.3, T.seed * 0.7)));
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(0.5, Rx * (0.014 + 0.014 * ((i * 5) % 3)) * (1 - rr * 0.6)), 0, 7);
+    ctx.fill();
+  }
+
+  // 6) 裂纹（两条深灰细线，从岩面发散）
+  ctx.strokeStyle = "#333a41";
+  ctx.lineWidth = Math.max(0.7, R * 0.028);
+  ctx.globalAlpha = a * 0.7;
+  for (let i = 0; i < 2; i++) {
+    const s = T.seed + i * 2.9;
+    const a0 = rot * 1.6 + s;
+    ctx.beginPath();
+    ctx.moveTo(hx + Math.cos(a0) * Rx * 0.3, Math.sin(a0) * Ry * 0.3);
+    for (let j = 1; j <= 3; j++) {
+      const aj = a0 + j * 0.3;
+      ctx.lineTo(hx + Math.cos(aj) * Rx * (0.32 + j * 0.2), Math.sin(aj) * Ry * (0.32 + j * 0.2));
     }
-    glowStroke(T.glow, W * 0.34, a * 0.16, W * 0.11, a * 0.6);
-    glowStroke(T.core, W * 0.09, a * 0.28, W * 0.045, a * 0.85);
+    ctx.stroke();
   }
 }
 
-/** 螺旋（cv2 翡翠）：两股反向螺旋束，两端收口中段张开（束腰） */
-function drawHelix(T, a, A, L, W, k, q) {
-  const n = Math.max(2, Math.round(T.count * q));
-  const steps = 16;
-  for (let b = 0; b < n; b++) {
-    const dir = b % 2 === 0 ? 1 : -1;
-    const s = T.seed + b * 1.7;
-    ctx.beginPath();
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps;
-      const x = A - t * L;
-      const env = 0.35 + 0.65 * Math.sin(t * Math.PI);
-      const y = Math.sin(t * Math.PI * 2.5 * dir + ph * 3.4 + b) * W * 0.9 * env;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    glowStroke(T.glow, W * 0.4, a * 0.15, W * 0.13, a * 0.55);
-    glowStroke(T.core, W * 0.09, a * 0.26, W * 0.05, a * 0.8);
-  }
-}
+/**
+ * 破空特效（炫目金色，**分两段**）：
+ *  · **前缘破空罩**（低速就有）：椭圆穹顶套在陨石前缘，像钝头撞开空气的那种半圆罩 ——
+ *    淡金罩面 + 两道同心亮弧（前沿压缩），形状固定、不随速度变。
+ *  · **后侧流线尾**（高速才出现）：m 超过阈值才淡入，且**越拖越长**（2R → 18R）——
+ *    一条细长的金色流线，从罩的尾部向后收成尖。
+ * 全程零逐帧分配（ss3 / 固定循环）。
+ */
+function drawShockBubble(T, m, hx, R) {
+  // ============ 头部罩：右端贴合陨石圆头 + 陨石生长中段由虚化变实 ============
+  // 罩右缘 = cx0 + rx = hx + 0.8R —— 正好压在陨石（Rx=0.8R）右缘上，不再向前突出。
+  const cx0 = hx - R * 0.25;            // 罩圆心（陨石中心稍后）
+  const rx = R * 1.05;                  // 罩长半轴
+  const ry = R * 0.85;                  // 罩短半轴（仍包住陨石上下）
+  // 出现时机：**陨石还小的时候不出现半圆** —— m 0.36 才从虚化渐显，0.76 完全变实。
+  // 只有陨石长到足够大，半圆破空罩才浮现，且是"由虚化凝实"，不是啪一下出现。
+  const occ = ss3((m - 0.36) / 0.4);
+  if (occ <= 0) return;
 
-/** 日冕（cv3 明黄）：自尾根向后成扇形炸开的日珥，末端各带一枚亮斑 */
-function drawCorona(T, a, A, L, W, k, q) {
-  const n = Math.max(4, Math.round(T.count * q));
-  for (let i = 0; i < n; i++) {
-    const s = T.seed + i * 1.31;
-    // 与"正后方"的夹角 [-0.62, 0.62] rad ≈ ±36°，中段（i≈n/2）几乎正后
-    const ang = -0.62 + (1.24 * i) / Math.max(1, n - 1);
-    // 长度随相位脉动：日冕不是刚体，每根日珥都在伸缩
-    const len = L * (0.32 + 0.68 * Math.abs(Math.sin(ph * 2.2 + s)));
-    const ex = A - Math.cos(ang) * len;
-    const ey = Math.sin(ang) * len * 0.75;
-    ctx.beginPath();
-    ctx.moveTo(A, 0);
-    ctx.lineTo(ex, ey);
-    glowStroke(T.glow, W * 0.42, a * 0.14, W * 0.14, a * 0.5);
-    // 末端亮斑：日珥顶端的凝结点，是"日冕"和"放射线"的分界
-    ctx.fillStyle = T.core;
-    ctx.globalAlpha = a * 0.8;
-    ctx.beginPath();
-    ctx.arc(ex, ey, Math.max(0.5, W * 0.1), 0, 7);
-    ctx.fill();
-  }
-}
+  // ============ 后侧流线尾：速度够了才出现，越拖越长 ============
+  // r = 真实速度比例。r 0.7 才开始浮现，生长放慢（tailIn^2.6，≈旧版 1/5 速率）。
+  const [vx, vy] = velOf();
+  const top = store.phys && store.phys.topSpeed;
+  const spd = Math.hypot(vx, vy);
+  const r = top > 0 ? spd / top : 0;
+  const tailIn = ss3((r - 0.7) / 0.3);
+  const tail = R * (14 * Math.pow(tailIn, 2.6)); // 0 → 14R：无尾时 tail=0
+  const tx = cx0 - tail;                     // 尾尖 x：tail=0 → 罩后沿（与罩同一闭合线）
 
-/** 余烬（cv4 烈橙）：离散碎块，沿尾部散开、边飞边升、边冷边暗 */
-function drawEmber(T, a, A, L, W, k, q) {
-  const n = Math.max(4, Math.round(T.count * q));
-  for (let i = 0; i < n; i++) {
-    const s = T.seed + i * 2.11;
-    // 黄金分割散布：碎块在尾上各占一处，随相位缓慢向后流动
-    const t = (((i * 0.618033 + ph * 0.16 + T.seed) % 1) + 1) % 1;
-    const x = A - t * L;
-    const y = -t * L * 0.22 + nz(t * 2 + ph * 3, s) * W * 0.55; // 越靠后升得越高
-    const r = Math.max(0.5, W * (0.52 - 0.3 * t));
-    // 外焰（大而淡）→ 芯（小而亮）叠两层，就得到"刚碎开还是白热"的读法，
-    // 省掉一次颜色插值（也省掉逐帧的字符串拼接）
-    ctx.fillStyle = T.glow;
-    ctx.globalAlpha = a * (1 - t) * 0.4;
+  // ★★ 罩 + 尾 = **同一条闭合流线**：尖 →（下边缘流线）→ 罩下缘 →（椭圆右半罩）→
+  //    罩上缘 →（上边缘流线）→ 尖。端点共享、C¹ 衔接，从圆头到细尖是一整条连贯曲线，
+  //    把陨石完整包在中间，没有任何断档。（尾淡入时整条线一起拉长，全程无缝）
+  const shell = () => {
     ctx.beginPath();
-    ctx.ellipse(x, y, r * (1 + t * 1.8), r, 0, 0, 7);
-    ctx.fill();
-    ctx.fillStyle = T.core;
-    ctx.globalAlpha = a * (1 - t) * 0.75;
-    ctx.beginPath();
-    ctx.ellipse(x, y, r * (0.75 + t * 1.2), r * 0.6, 0, 0, 7);
-    ctx.fill();
-  }
-}
+    ctx.moveTo(tx, 0);
+    ctx.bezierCurveTo(tx + tail * 0.3, ry * 0.5, cx0 - rx * 0.5, ry * 0.95, cx0, ry);
+    ctx.ellipse(cx0, 0, rx, ry, 0, Math.PI * 0.5, -Math.PI * 0.5, true);
+    ctx.bezierCurveTo(cx0 - rx * 0.5, -ry * 0.95, tx + tail * 0.3, -ry * 0.5, tx, 0);
+    ctx.closePath();
+  };
 
-/** 涟漪（cv5 洋红）：垂直于行进方向的激波环，沿尾向外扩散并变淡 */
-function drawRipple(T, a, A, L, W, k, q) {
-  const n = Math.max(3, Math.round(T.count * q));
-  for (let i = 0; i < n; i++) {
-    const s = T.seed + i * 1.9;
-    const t = (((i / n + ph * 0.13 + T.seed) % 1) + 1) % 1;
-    const x = A - t * L;
-    const y = nz(t * 1.5 + ph * 2, s) * W * 0.3;
-    const rx = Math.max(0.5, W * (0.35 + t * 1.6));
-    const ry = rx * 0.42;
-    ctx.beginPath();
-    ctx.ellipse(x, y, rx, ry, 0, 0, 7);
-    glowStroke(T.glow, W * 0.16, a * 0.14, W * 0.07, a * 0.55 * (1 - t * 0.7));
-    glowStroke(T.core, W * 0.06, a * 0.16, W * 0.035, a * 0.5 * (1 - t * 0.8));
-  }
-}
-
-/** 涡旋（cv6 星紫）：环面倾角沿尾一路扭转并自转，越远越小 = 收束的虫洞 */
-function drawVortex(T, a, A, L, W, k, q) {
-  const n = Math.max(3, Math.round(T.count * q));
-  for (let i = 0; i < n; i++) {
-    const t = n > 1 ? i / (n - 1) : 0;
-    const s = T.seed + i * 0.9;
-    const x = A - t * L;
-    const y = nz(t * 1.2 + ph * 1.8, s) * W * 0.32;
-    const rx = Math.max(0.5, W * (1.5 - t * 0.85)); // 收束：给纵深（环要够大才读得出"隧道"）
-    const ry = rx * 0.3;
-    // 倾角 = 沿尾的固定扭转 + 随相位的缓慢自转，两者叠加才像"隧道在转"
+  // 罩/尾合体填充（**橙红 → 鲜艳金**，随 occ 由虚到深），**中心陨石区挖空**：
+  // · 用 evenodd 环状填充 —— 外圈是流线罩，中心椭圆（陨石所在区域）不填充，
+  //   于是破空罩只包在陨石外围发光，陨石本体完全不被遮挡、始终清晰可见。
+  // · 橙红主层先亮起，鲜橙层在 occ 升高时才明显，金黄芯最晚最浓 → 颜色逐渐加深。
+  // ---- 多层同心水滴：最内层金色贴住陨石，向外逐层放大、颜色由金渐变到橙红 ----
+  // 里层不勾轮廓、靠渐变色区分层次；仅最外层勾一条细亮边 → 读出"多层水滴"。
+  // 所有层都是低透明度重叠绘制，陨石透出来依然鲜艳；fade 随 occ 由虚化→实。
+  const fade = Math.min(1, 0.2 + 0.8 * occ);
+  const LAY = [
+    { s: 1.0,  c: "#ffc23c", a: 0.28 },  // 第1层 金色：紧贴陨石
+    { s: 1.18, c: "#ffa52a", a: 0.22 },  // 第2层 橙金
+    { s: 1.38, c: "#ff8a12", a: 0.16 },  // 第3层 鲜橙
+    { s: 1.6,  c: "#ff5f0a", a: 0.11 },  // 第4层 橙红
+    { s: 1.85, c: "#ff8246", a: 0.06 },  // 第5层 淡橙外晕
+  ];
+  // ★ 全程**只填充、不描任何轮廓** —— 层次全靠从金到橙红的渐变区分。
+  for (let li = 0; li < LAY.length; li++) {
+    const ly = LAY[li];
     ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(t * 1.5 + ph * 1.1);
-    ctx.beginPath();
-    ctx.ellipse(0, 0, rx, ry, 0, 0, 7);
-    glowStroke(T.glow, W * 0.2, a * 0.15, W * 0.08, a * 0.55);
-    glowStroke(T.core, W * 0.07, a * 0.18, W * 0.04, a * 0.6);
+    ctx.translate(hx, 0);
+    ctx.scale(ly.s, ly.s);
+    ctx.translate(-hx, 0);
+    shell();
+    ctx.fillStyle = ly.c;
+    ctx.globalAlpha = ly.a * fade + 0.18 * tailIn;
+    ctx.fill();
     ctx.restore();
   }
+
+  // 两条侧流线（贴着包络，尾长后更有感）
+  if (tailIn > 0) {
+    for (let i = 0; i < 2; i++) {
+      const yy = (i === 0 ? 1 : -1) * ry * 0.42;
+      ctx.strokeStyle = "#ffb34d";
+      ctx.lineWidth = Math.max(0.5, R * 0.014);
+      ctx.globalAlpha = 0.5 * tailIn;
+      ctx.beginPath();
+      ctx.moveTo(cx0 - rx * 0.35, yy * 0.7);
+      ctx.quadraticCurveTo(cx0 - tail * 0.45, yy * 1.1, tx * (0.9 + 0.1 * i), yy * (0.55 + 0.35 * i));
+      ctx.stroke();
+    }
+  }
 }
 
-/** 光矛（cv7 星白）：纺锤形光幕 + 贯穿芯线 + 稀疏星屑，全场唯一的直线画法 */
-function drawLance(T, a, A, L, W, k, q) {
-  // 光幕：纺锤形 —— 尾根窄、约 1/3 处最宽、远端收成一点。
-  // 用两个同心的填充多边形叠出"外晕 + 内芯"，避免逐帧建渐变对象。
-  for (let i = 0; i < 2; i++) {
-    const f = i === 0 ? 1 : 0.5;
-    ctx.fillStyle = i === 0 ? T.glow : T.core;
-    ctx.globalAlpha = a * (i === 0 ? 0.13 : 0.2);
+/**
+ * 尘埃尾：彗星标志性的**宽而弯曲**的尾。
+ * 6 层嵌套（外宽淡 → 内窄亮），轮廓用幂函数收窄 —— 从尾根约火球直径宽
+ * 平滑过渡到尖端一点，是"锥形"，不是"长条"。
+ * forks 股在尾根扇形散开、沿尾逐渐汇聚；中轴按 spin 蛇形摆动。
+ */
+function drawDustTail(T, a, hx, TL, R, k, q, forks, spin) {
+  const steps = 22;
+  const rootW = R * 0.6 / Math.sqrt(forks);
+  const LAY = [1, 0.68, 0.46, 0.3, 0.17, 0.08];
+  const AL = [0.05, 0.07, 0.1, 0.14, 0.2, 0.3];
+  for (let f = 0; f < forks; f++) {
+    const s = T.seed + f * 2.13;
+    const ph0 = forks > 1 ? (f / forks) * Math.PI * 2 : 0;
+    const off = forks > 1 ? (f - (forks - 1) / 2) * rootW * 1.15 : 0;
+    for (let li = 0; li < LAY.length; li++) {
+      const fw = LAY[li];
+      const tailFrac = 1 - li * 0.05;
+      ctx.fillStyle = li < 2 ? T.glow : T.core;
+      ctx.globalAlpha = a * AL[li] * (0.5 + 0.5 * k);
+      ctx.beginPath();
+      ctx.moveTo(hx, off * 0.7 - rootW * fw * 0.8);
+      for (let j = 1; j <= steps; j++) {
+        const t = (j / steps) * tailFrac;
+        const x = hx - t * TL;
+        const w = Math.max(0.4, rootW * fw * Math.pow(1 - t, 1.75));
+        const bend = -t * t * TL * 0.12 * tailFrac;   // 尘埃尾被推弯的弧
+        const sway = Math.sin(t * spin * 3.6 + ph0 + ph * (1.5 + Math.abs(spin))) * w * 0.9 * t;
+        const turb = nz(t * 2.6 + ph * 1.9, s) * w * 0.55 * t;
+        const cy = off * (1 - t * 0.85) + bend + sway + turb * (li < 2 ? 1.5 : 0.7);
+        ctx.lineTo(x, cy - w);
+      }
+      for (let j = steps; j >= 1; j--) {
+        const t = (j / steps) * tailFrac;
+        const x = hx - t * TL;
+        const w = Math.max(0.4, rootW * fw * Math.pow(1 - t, 1.75));
+        const bend = -t * t * TL * 0.12 * tailFrac;
+        const sway = Math.sin(t * spin * 3.6 + ph0 + ph * (1.5 + Math.abs(spin))) * w * 0.9 * t;
+        const turb = nz(t * 2.6 + ph * 1.9, s) * w * 0.55 * t;
+        const cy = off * (1 - t * 0.85) + bend + sway + turb * (li < 2 ? 1.5 : 0.7);
+        ctx.lineTo(x, cy + w);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+}
+
+/** 离子尾：笔直、窄、白热 —— 彗星那条细而亮的蓝白尾巴，比尘埃尾长 15% */
+function drawIonTail(T, a, hx, TL, R, k) {
+  const ionW = R * 0.13;
+  for (let li = 0; li < 2; li++) {
+    const fw = 1 - li * 0.45;
+    ctx.fillStyle = li === 0 ? T.glow : T.core;
+    ctx.globalAlpha = a * (li === 0 ? 0.12 : 0.24) * (0.45 + 0.55 * k);
     ctx.beginPath();
-    ctx.moveTo(A, -W * 0.28 * f);
-    ctx.lineTo(A - L * 0.34, -W * f);
-    ctx.lineTo(A - L, -W * 0.05 * f);
-    ctx.lineTo(A - L, W * 0.05 * f);
-    ctx.lineTo(A - L * 0.34, W * f);
-    ctx.lineTo(A, W * 0.28 * f);
+    ctx.moveTo(hx, -ionW * fw);
+    ctx.lineTo(hx - TL * 0.5, -ionW * fw * 0.16);
+    ctx.lineTo(hx - TL * 1.15, -ionW * fw * 0.04);
+    ctx.lineTo(hx - TL * 1.15, ionW * fw * 0.04);
+    ctx.lineTo(hx - TL * 0.5, ionW * fw * 0.16);
+    ctx.lineTo(hx, ionW * fw);
     ctx.closePath();
     ctx.fill();
   }
-  // 芯线：一路贯通到最远端，是"矛"而不是"带"的读法
-  glowStroke(T.core, W * 0.34, a * 0.2, W * 0.11, a * 0.85);
-  // 星屑：沿光矛稀疏散开，给这条直线一点"在飞"的动感
-  const n = Math.max(3, Math.round(T.count * q));
+}
+
+/** 火星碎屑：沿尾飞溅、闪烁的亮点（彗核解体掉下的碎片），数量随速度增多 */
+function drawSparks(T, a, hx, TL, R, k, q) {
+  const n = Math.max(8, Math.round((6 + T.count * 2.2) * q * (0.3 + 0.7 * k)));
   for (let i = 0; i < n; i++) {
-    const s = T.seed + i * 2.399;
-    const t = (((i * 0.382 + ph * 0.22 + T.seed) % 1) + 1) % 1;
-    const x = A - t * L;
-    const y = nz(t * 2.4 + ph * 4, s) * W * 0.8;
-    const r = Math.max(0.4, W * 0.09 * (1 - t * 0.5));
+    const s = T.seed + i * 1.63;
+    const t = (((i * 0.414 + ph * (0.25 + 0.2 * k) + T.seed) % 1) + 1) % 1;
+    const x = hx - t * TL * 1.05;
+    const y = nz(t * 3.2 + ph * 2.8, s) * R * (0.45 + t) * 0.75 - t * t * TL * 0.12;
+    const r = Math.max(0.5, R * 0.055 * (1 - t * 0.5) * (0.5 + 0.8 * Math.abs(Math.sin(ph * 3 + s))));
     ctx.fillStyle = T.core;
-    ctx.globalAlpha = a * 0.7 * (1 - t * 0.6);
+    ctx.globalAlpha = a * 0.75 * (1 - t * 0.6);
     ctx.beginPath();
     ctx.arc(x, y, r, 0, 7);
     ctx.fill();
   }
 }
 
-/**
- * 光锥（cv8 纯白）：九道**向后收束**的锥面，越远越窄越亮。
- *
- * ★ 为什么是唯一一种"会聚"的画法：其余八种画法一律从尾根向外散开
- *   （电弧散、日冕炸、余烬飘、涡旋收……），因为它们的物理原型都是"物质被抛下"。
- *   光速不该看起来像一团炸开的火 —— 它该看起来像一个**正在合拢的锥**：
- *   玩家看着自己的车把身后的光收细收亮，那正是"追上了光"的视觉说法。
- *   所以这里半宽随 t 递减（1 − 0.82t），而亮度递增。
- */
-function drawCone(T, a, A, L, W, k, q) {
-  const n = Math.max(3, Math.round(T.count * q));
-  const steps = 12;
-  for (let i = 0; i < n; i++) {
-    const s = T.seed + i * 2.399;
-    // 各锥面在尾根张开一个固定角度，越远越靠拢 —— 这就是"锥"
-    const ang = -0.5 + (1.0 * i) / Math.max(1, n - 1);
-    ctx.beginPath();
-    for (let j = 0; j <= steps; j++) {
-      const t = j / steps;
-      const x = A - t * L;
-      // 收束：半宽从 W 线性收到 W×0.18，并叠一点随相位的呼吸，避免死板
-      const w = W * (1 - 0.82 * t) * (0.9 + 0.1 * Math.sin(ph * 1.7 + s));
-      const y = Math.tan(ang) * w + nz(t * 2 + ph * 2.4, s) * W * 0.12;
-      if (j === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    glowStroke(T.glow, W * 0.3, a * 0.13, W * 0.1, a * 0.5);
-    // 芯线更细但更亮，且不收束（0.92 而非 0.18）—— 外焰收、芯不收才读得出"光柱"
-    glowStroke(T.core, W * 0.08, a * 0.3, W * 0.04, a * 0.9);
-  }
-}
-
-/**
- * 弦裂（cv9 品红）：两道平行的断裂面，彼此**剪切错开**并缓慢换位。
- *
- * ★ 全场唯一的"成对"画法：其余八种都是单束、放射或环，本质是"一个东西"；
- *   而十倍光速的设定是"空间本身被撕开一条缝" —— 缝一定有两条边，
- *   而且这两条边必须**互相错开**才读得出是被撕的（对齐了就只是一条粗带）。
- *   剪切量随相位缓慢换向，于是这条缝看起来在呼吸而不是在抖。
- */
-function drawRift(T, a, A, L, W, k, q) {
-  const n = Math.max(2, Math.round(T.count * q));
-  const shear = Math.sin(ph * 0.9) * 0.6;   // 两条边的剪切量（-0.6 ~ +0.6）
-  for (let s = 0; s < 2; s++) {
-    // s=0 是上边、s=1 是下边；剪切量反向，于是相位变化时两条边互相穿过
-    const off = (s === 0 ? -1 : 1) * W * 0.75 + shear * W * (s === 0 ? 1 : -1);
-    ctx.beginPath();
-    const steps = 10;
-    for (let j = 0; j <= steps; j++) {
-      const t = j / steps;
-      const x = A - t * L;
-      // 越远越薄（缝在合拢），但不完全闭合，末端留一点厚度
-      const y = off * (1 - t * 0.72) + nz(t * 1.6 + ph * 2 + s * 3, T.seed + s) * W * 0.22;
-      if (j === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    glowStroke(T.glow, W * 0.36, a * 0.15, W * 0.12, a * 0.55);
-    glowStroke(T.core, W * 0.09, a * 0.26, W * 0.045, a * 0.85);
-  }
-  // 缝里的碎屑：只在两条边之间飘，数量少，避免读成"第三条边"
-  const m = Math.max(2, Math.round(n));
-  for (let i = 0; i < m; i++) {
-    const s = T.seed + i * 1.77;
-    const t = (((i * 0.413 + ph * 0.19 + T.seed) % 1) + 1) % 1;
-    const x = A - t * L;
-    const y = nz(t * 2.2 + ph * 3, s) * W * 0.5 + shear * W * (1 - t) * 0.5;
-    const r = Math.max(0.4, W * 0.1 * (1 - t * 0.55));
-    ctx.fillStyle = T.core;
-    ctx.globalAlpha = a * 0.65 * (1 - t * 0.6);
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, 7);
-    ctx.fill();
-  }
-}
-
-/**
- * 光网（cv10 酸绿）：一张向车尾**透视收缩**的网格 —— 横环 + 纵轨交替亮灭。
- *
- * ★ 为什么必须是"面"：其余九种画法的原型都是**被抛下的物质** —— 一束、一环、
- *   一对断裂面，全都读成"一条细长物"。百倍光速不该还有细长物的形状：
- *   空间坐标网被拖着一起走，它必须是一张**有面积的**东西才读得出来。
- *   横环给"截面"、纵轨把截面连成"网格"，两者缺一就退化成同心圆或放射线。
- *
- * 两族笔画用**相反的相位**亮灭（横环跟 sin(t)、纵轨跟 cos(t)），
- * 于是网格像数据在网线上跑，而不是整张一起闪。
- */
-function drawLattice(T, a, A, L, W, k, q) {
-  const rings = Math.max(3, Math.round(T.count * q));
-  const steps = 12;
-  const spin = ph * 0.55;
-  // 网面在纵深 t 上的半径与扭转：越远越小、越远转得越多 —— 透视感全在这两行
-  const rrAt = (t) => W * (1 - 0.7 * t);
-  const angAt = (t, u) => spin * t * 0.35 + u * 0.22 * (1 + t);
-  // 网线上横坐标 u ∈ [-1,1]、纵深 t 处的那一点
-  const px = (t, u, rr) => A - t * L + Math.sin(angAt(t, u)) * rr * 0.18;
-  const py = (t, u, rr) => Math.sin(angAt(t, u) * 1.7 + T.seed) * rr * u;
-
-  // 纵轨（先画，铺在横环之下）：从尾根贯穿到最远端
-  for (let r = 0; r <= rings; r++) {
-    const u = (2 * r) / rings - 1;
-    ctx.beginPath();
-    for (let j = 0; j <= steps; j++) {
-      const t = j / steps;
-      const rr = rrAt(t);
-      const x = px(t, u, rr);
-      const y = py(t, u, rr);
-      if (j === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    const bright = 0.5 + 0.5 * Math.sin(ph * 1.7 + r * 1.11 + T.seed);
-    glowStroke(T.glow, W * 0.12, a * (0.06 + 0.08 * bright), W * 0.035, a * (0.18 + 0.26 * bright));
-  }
-  // 横环（后画，压在纵轨之上）：每一道是一整条截面线
-  for (let i = 1; i <= rings; i++) {
-    const t = i / (rings + 1);
-    const rr = rrAt(t);
-    ctx.beginPath();
-    for (let j = 0; j <= steps; j++) {
-      const u = -1 + (2 * j) / steps;
-      const x = px(t, u, rr);
-      const y = py(t, u, rr);
-      if (j === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    const bright = 0.5 + 0.5 * Math.sin(ph * 2.1 + i * 2.17 + T.seed);
-    glowStroke(T.core, W * 0.07, a * (0.12 + 0.16 * (1 - bright)), W * 0.03, a * 0.42);
-  }
-}
-
-/**
- * 编织（cv11霓粉）：四股互相缠绕的束，两两交叉、一股压一股。
- *
- * ★ 为什么必须是"绳"：其余十一种画法里，裂界那张网已经是唯一有**面积**的，
- *   所以这台不能再靠"面"取胜 —— 它得回到最原始的读法：一堆实打实的绳子。
- *   四股各走一条 sin，相位差恰好 90°，于是任意两股必然交叉；
- *   再按 sin 的半周期交替 z 序（谁在上面轮换），就有真正的**编结**，
- *   而不是四根平行摆动。
- */
-function drawBraid(T, a, A, L, W, k, q) {
-  const n = Math.max(3, Math.round(T.count * q));
-  const steps = 24;
-  for (let b = 0; b < n; b++) {
-    const phase = (b / n) * Math.PI * 2;
-    ctx.beginPath();
-    for (let j = 0; j <= steps; j++) {
-      const t = j / steps;
-      // 振幅沿尾部**收束**：绳头散开、绳尾并成一股，与其余画法的"越远越淡"同向
-      const amp = W * (0.35 + 0.65 * t);
-      const x = A - t * L;
-      const y = Math.sin(t * 7.2 + phase + ph * 2.2) * amp;
-      if (j === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    // 交叉处谁压谁：按股号轮换明暗，于是编结的层次随时间滚动
-    const over = 0.5 + 0.5 * Math.sin(ph * 1.3 + b * 1.9);
-    glowStroke(T.glow, W * 0.3, a * (0.09 + 0.1 * over), W * 0.1, a * (0.3 + 0.35 * over));
-    glowStroke(T.core, W * 0.07, a * (0.16 + 0.14 * over), W * 0.03, a * 0.6);
-  }
-  // 缠在编结外的散光：让四股看起来是"能量"而不是"绳子"
-  for (let i = 0; i < Math.max(2, n); i++) {
-    const s = T.seed + i * 1.61;
-    const t = (((i * 0.317 + ph * 0.16 + T.seed) % 1) + 1) % 1;
-    const x = A - t * L;
-    const y = Math.sin(t * 7.2 + ph * 2.2 + s) * W * (0.35 + 0.65 * t);
-    ctx.fillStyle = T.core;
-    ctx.globalAlpha = a * 0.5 * (1 - t * 0.5);
-    ctx.beginPath();
-    ctx.arc(x, y, Math.max(0.35, W * 0.07 * (1 - t * 0.4)), 0, 7);
-    ctx.fill();
-  }
-}
-
-/**
- * 事件视界（cv12 深紫）：一圈圈**向内塌缩**的环，最后收成一个吞掉一切的暗点。
- *
- * ★ 十二种画法里唯一的**减法**。其余十一种都在往尾根加能量（越远越亮或越远越大），
- *   只有这一台一路把能量**拿走**：环半径随尾部收细、亮度随尾部归零，
- *   于是拖尾的末端是一个"洞"而不是一把光 —— 万倍光速该有的样子，
- *   不是更亮，是连光都被甩在身后追不上了。
- * 环本身画成**逆时针内旋**，与光网的"外扩"正好相反，一眼能分清哪台是谁。
- */
-function drawEvent(T, a, A, L, W, k, q) {
-  const n = Math.max(3, Math.round(T.count * q));
-  const steps = 14;
-  // 亮度沿尾部衰减：这就是"减法"的全部 —— 到最远处彻底消失
-  const fade = (t) => (1 - t) * (1 - t);
-  for (let i = 0; i < n; i++) {
-    const t = (i + 0.5) / n;
-    const rr = W * (1 - 0.55 * t);
-    const alpha = a * fade(t);
-    ctx.beginPath();
-    for (let j = 0; j <= steps; j++) {
-      const u = -1 + (2 * j) / steps;
-      // 内旋：相位随 t 反向增加，环看着被"卷"进中心
-      const ang = ph * 1.9 * (1 - t) + u * 1.35;
-      const x = A - t * L + Math.cos(ang) * rr * 0.22;
-      const y = Math.sin(ang) * rr;
-      if (j === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    glowStroke(T.glow, W * 0.3, alpha * 0.2, W * 0.09, alpha * 0.55);
-    // 环心一点内压的亮斑：把"洞"的中心标出来，否则读成一条普通的环
-    ctx.fillStyle = T.core;
-    ctx.globalAlpha = alpha * 0.5;
-    ctx.beginPath();
-    ctx.arc(A - t * L, 0, Math.max(0.35, rr * 0.16), 0, 7);
-    ctx.fill();
-  }
-  // 最末端的暗点：整个拖尾最终收进这里（用一个反向描边压出"黑"）
-  const hx = A - L;
-  ctx.globalAlpha = a * 0.55;
-  ctx.fillStyle = "#000000";
-  ctx.beginPath();
-  ctx.arc(hx, 0, W * 0.55, 0, 7);
-  ctx.fill();
-  ctx.globalAlpha = a * 0.8;
-  ctx.strokeStyle = T.glow;
-  ctx.lineWidth = Math.max(0.5, W * 0.12);
-  ctx.stroke();
-}
-
-/**
- * 陨星 / 彗尾层（七台共用骨架，颜色与头冠形状取自各自的 TRAIL 规格）。
- *
- * ★ 为什么是"交叉淡入"而不是"到阈值换画法"：见 constants.js 的 TRAIL_METEOR_LO。
- *   能量层在彗尾成形时被压到 62% 亮度但**不消失** —— 签名形态（螺旋 / 涡旋 / 电弧）
- *   是这七台车彼此唯一的辨识特征，形态层被完全盖住就成了七台一样的白彗星。
- */
-function drawMeteor(T, m, W, L) {
+/** 激波辉光：满速时彗核前缘的压缩弧（大气摩擦） */
+function drawShock(T, m, hx, R) {
   if (m <= 0) return;
-  const R = W * (0.9 + 1.25 * m);
-  const TL = L * (1.15 + 0.7 * m);
-
-  // 1) 彗尾：5 层同轴多边形，外层最宽最淡 → 逐层收窄提亮。
-  //    刻意不用渐变对象（那要逐帧分配，见文件头纪律 2），改用嵌套多边形叠软边。
-  //    层数 5 是试出来的：4 层边缘还能看出台阶，6 层填充率翻倍而肉眼已不可见。
-  //    ★ 只有最内一层用白热的 core 且只画近处 45%：整条都用白热色会糊成一根
-  //    灰棒子（实测过），而陨石尾迹本该"近白远色"。
-  const widths = [1, 0.74, 0.52, 0.32, 0.15];
-  for (let i = 0; i < 5; i++) {
-    const w = W * 0.85 * widths[i];
-    const inner = i === 4;
-    const tail = TL * (inner ? 0.45 : 1);
-    ctx.fillStyle = inner ? T.core : T.glow;
-    ctx.globalAlpha = m * (inner ? 0.16 : 0.05 + i * 0.04);
-    ctx.beginPath();
-    ctx.moveTo(0, -w);
-    ctx.lineTo(-tail, -w * 0.03);
-    ctx.lineTo(-tail, w * 0.03);
-    ctx.lineTo(0, w);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  // 2) 头冠：9 圈同心圆，alpha 按 (1−t)² 衰减。
-  //    ★ 必须多圈：单层/三圈的 flat fill 会露出**硬边圆环**，看起来像套了个
-  //    气泡罩在车上而不是"车在发光"。9 圈的半径间隔约 R/9，肉眼看不出台阶。
-  for (let i = 9; i >= 1; i--) {
-    const t = i / 9;
-    ctx.fillStyle = i <= 3 ? T.core : T.glow;
-    ctx.globalAlpha = m * 0.075 * (1 - t) * (1 - t);
-    ctx.beginPath();
-    ctx.arc(0, 0, R * t, 0, 7);
-    ctx.fill();
-  }
-
-  // 3) 四芒耀斑：横向长 + 纵向短，陨石撞进大气的那种十字星芒。
-  //    半高只给 R 的 8.5% —— 早期版本给到 15%/42% 透明度，两侧各支出一根
-  //    灰白横杠，看着像车被夹在两块药片之间。
-  ctx.fillStyle = T.core;
-  ctx.globalAlpha = m * 0.3;
+  ctx.fillStyle = T.glow;
+  ctx.globalAlpha = m * 0.14;
   ctx.beginPath();
-  ctx.ellipse(0, 0, R * 1.35, R * 0.085, 0, 0, 7);
+  ctx.ellipse(hx + R * 0.5, 0, R * 0.8, R * 0.38, 0, 0, 7);
   ctx.fill();
+  ctx.fillStyle = T.core;
+  ctx.globalAlpha = m * 0.1;
   ctx.beginPath();
-  ctx.ellipse(0, 0, R * 0.085, R * 0.8, 0, 0, 7);
+  ctx.ellipse(hx + R * 0.55, 0, R * 0.5, R * 0.2, 0, 0, 7);
   ctx.fill();
 }
 
 /**
- * 在世界层里绘制当前车辆的拖尾。由 scene.js 在 drawBike 之前调用
- * （拖尾必须在车**后面**，否则能量会盖住骑手）。
- * @param {number} [dt] 本渲染帧真实时长（秒）—— 只用于推进相位，见 scene.js 的说明
+ * 彗星形态（唯一画法）：彗发 + 彗核 + 尘埃尾 + 离子尾 + 碎屑 + 激波。
+ * 速度越快 → 彗核越大（R）、尾越长（TL）、碎屑越多；满速（m）追加激波。
+ * @param R 彗核光晕半径（世界 px，调用方已按屏幕 px 换算，见 drawTrail）
  */
-export function drawTrail(dt = 1 / 60) {
+function drawCometTrail(T, a, A, L, W, R, k, m, q) {
+  const tr = STYLE_TRAITS[T.style] || STYLE_TRAITS.arc;
+  const TL = L * (0.35 + 0.95 * k);
+  const hx = A - R * 0.3;
+  drawDustTail(T, a, hx, TL, R, k, q, tr.forks, tr.spin);
+  drawIonTail(T, a, hx, TL, R, k);
+  drawMeteoroid(T, a, hx, R, k);
+  drawSparks(T, a, hx, TL, R, k, q);
+  drawShock(T, m, hx, R);
+}
+
+/**
+ * 拖尾绘制已整体移除（高速形态重构）：不再画任何光晕 / 彗尾 / 能量带。
+ * 宇宙级车的高速外观改为「车本身替换成一颗陨石」——见 bike.js 的 drawBike。
+ * 这里保留空壳仅是为了 scene.js 不改 import / 调用点，将来要恢复拖尾也好找入口。
+ */
+export function drawTrail() {
+  return;
+}
+
+/**
+ * 陨星形态系数 m ∈ [0,1]（同旧拖尾口径：速度强度 → 对数归一 k → 陨星交叉淡入）。
+ * 只有当前车挂了 trail（宇宙级车）才可能非 0 —— 普通车永远返回 0，
+ * 保证 drawBike 不会误把普通车替换成陨石。
+ */
+export function meteorFactor() {
   const veh = VEHICLES[store.currentVehicle];
-  const T = veh && veh.trail;
-  if (!T) return; // 非宇宙级车不挂 trail（数据驱动，加车不必改这里）
-  if (store.run && store.run.crashed) return; // 摔车时不给拖尾：能量全灭
+  if (!veh || !veh.trail) return 0;
   const [vx, vy] = velOf();
   const spd = Math.hypot(vx, vy);
-  if (!(spd > 1e-6)) return;
-  const k = intensity(spd);
-  if (k <= 0) return;
+  return meteorOf(intensity(spd));
+}
 
-  ph += dt;
+/** 陨石完全成型阈值：meteorFactor() ≥ 此值后淡入满，车被陨石完整罩住 */
+export const METEOR_SWITCH = 0.5;
+/** 陨石淡入起点：≥此值开始从纯车过渡到陨石（smoothstep 到 METEOR_SWITCH 满）。
+ *  ★ 放低到 0.05：更早浮现、窗口更宽，避免"一到阈值瞬间全盖上"的突兀。 */
+export const METEOR_FADE_LO = 0.05;
+/** 陨石 / 破风水滴的统一缩放系数（先按要求缩 2/3，再缩一半 → 1/3）。 */
+export const METEOR_SCALE = 1 / 3;
 
-  const cam = store.cam;
-  const z = cam.zoom > 1e-6 ? cam.zoom : 1;
-  const sw = (px) => px / z; // 屏幕 px → 世界 px（见文件头纪律 3）
-  const q = qFac();
-  const m = meteorOf(k);
+/**
+ * 在已 translate + rotate 到车辆位置的坐标系里，把整辆车画成一颗陨石。
+ * @param {number} m 陨星系数（0~1）——决定陨石大小与灼烧亮度
+ */
+export function drawMeteorBike(veh, m, alpha) {
+  const T = veh && veh.trail;
+  if (!T || !(m > 0)) return;
+  ph += 1 / 60; // 自转相位（drawTrail 空操作后由这里推进）
+  const z = store.cam.zoom > 1e-6 ? store.cam.zoom : 1;
+  // 尺寸按屏幕 px 定义再 ÷zoom：速度再快、相机缩得再远，陨石在屏幕上保持车大小。
+  // **从一个点涨到最终大小**：起点 R=2（刚显形就一个小灰点，落在车中心），
+  // 满速 R=62（直径 124 = 两倍车宽），再整体 ×METEOR_SCALE（用户要求缩 2/3）。
+  const R = ((2 + 60 * m) / z) * METEOR_SCALE;
+  // alpha 由 bike.js 传入（实心，不淡入）；缺省沿 m 生长（巡航层等调用）
+  drawMeteoroid(T, alpha ?? 0.8 + 0.2 * m, 0, R, m);
+  // 金色的破空水滴纹包在陨石外面：圆头朝前、尖尾拖后，随速度变长
+  drawShockBubble(T, m, 0, R);
+}
 
-  // 三个派生量：能量层亮度、彗尾交叉系数、尾长/尾宽
-  const kE = k * (1 - 0.38 * m);
-  const A = sw(16); // 尾根：车身后方一点，避免能量糊住车轮
-  const L = sw(T.len * (0.32 + 0.68 * k));
-  const W = sw(T.width * (0.55 + 0.45 * k));
-
-  const cxm = (bike.rear.x + bike.front.x) / 2;
-  const cym = (bike.rear.y + bike.front.y) / 2;
-
+/**
+ * 巡航层陨石（屏幕坐标）：cruise.js 的 drawCruiseBike 用 —— 在 (x,y) 画半径 r 屏幕 px
+ * 的陨石。巡航层 zoom 缩到 0.05 以下，世界坐标画车会缩成亚像素，所以这里固定屏幕尺寸。
+ */
+export function drawMeteorCruise(T, m, x, y, r) {
+  if (!T || !(m > 0)) return;
+  ph += 1 / 60; // 自转相位
   ctx.save();
-  ctx.translate(cxm - cam.x, cym - cam.y);
-  ctx.rotate(Math.atan2(vy, vx)); // 局部 +x = 速度方向；拖尾全部画在 -x 侧
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  // 刻意用 source-over 而不是 "lighter"：加色混合在浅色场景（雪地 / 冰面 / 云层）
-  // 上会把能量直接加没 —— 而宇宙级车任何场景都能开。发光感靠"宽而淡 + 窄而亮"
-  // 的双层描边实现（glowStroke），两种背景上都读得出来。
-  switch (T.style) {
-    case "helix": drawHelix(T, kE, A, L, W, k, q); break;
-    case "corona": drawCorona(T, kE, A, L, W, k, q); break;
-    case "ember": drawEmber(T, kE, A, L, W, k, q); break;
-    case "ripple": drawRipple(T, kE, A, L, W, k, q); break;
-    case "vortex": drawVortex(T, kE, A, L, W, k, q); break;
-    case "lance": drawLance(T, kE, A, L, W, k, q); break;
-    case "cone": drawCone(T, kE, A, L, W, k, q); break;
-    case "rift": drawRift(T, kE, A, L, W, k, q); break;
-    case "lattice": drawLattice(T, kE, A, L, W, k, q); break;
-    case "braid": drawBraid(T, kE, A, L, W, k, q); break;
-    case "event": drawEvent(T, kE, A, L, W, k, q); break;
-    default: drawArc(T, kE, A, L, W, k, q); break; // arc 兼作兜底
-  }
-  drawMeteor(T, m, W, L);
-  ctx.globalAlpha = 1;
+  ctx.translate(x, y);
+  drawMeteoroid(T, 0.8 + 0.2 * m, 0, r, m);
+  drawShockBubble(T, m, 0, r);
   ctx.restore();
 }

@@ -220,8 +220,10 @@ function beginRun() {
   resetRunState();
   store.cam.x = 0;
   fillTank();
-  // 比赛：赛制与档位都由面板选好（3 赛制 × 普通/排位 两档 = 6 个入口）
-  if (store.mode === "race") raceInit(store.raceFormat);
+  // 比赛：赛制与档位都由面板选好（3 赛制 × 普通/排位 两档 = 6 个入口）。
+  // ★ SYS-6：必须用**玩家在面板选的** raceFormatPick —— 旧代码 raceInit(raceFormat)
+  //   会读到上一局的残留赛制，把玩家的选择悄悄覆盖回 1V1。
+  if (store.mode === "race") raceInit(store.raceFormatPick);
   // 宇宙联赛：阵容取**该场赛事自己的赛制**（短距=1V1 / 群雄=6人 / 长程=3v3）。
   // 第二个参数 true = 借阵容但不改玩家在比赛面板选的赛制。
   else if (store.mode === MODE_SPACE) raceInit(spaceDefOf().fmt, true);
@@ -356,7 +358,13 @@ export function startGame(m, lv, opt) {
         return;
       }
     }
+    // ★ SYS-8：开局复位商店标志 —— 上次关商店时若停在"结束态"，closeShop 不再
+  //   抢着 showMenu，于是 shopOpen 可能残留，重开必须清掉（见 shop.js closeShop）。
+    store.shopOpen = false;
     store.mode = mode;
+    // ★ SYS-7：开局把生效模式写回 lastMode —— restart()（不带 mode）才能
+    //   "重开当前模式"，不再恒切回闯关。
+    store.lastMode = mode;
     // 高级赛请求：显式传入 opt.advanced 时以它为准（rating 未达标则降级为普通）；
     // 未传入时保留上一局的档位（重开 startGame() 不丢档）。
     const wantAdv = opt && opt.advanced !== undefined ? !!opt.advanced : store.rankedAdvanced === true;

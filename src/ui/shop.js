@@ -11,6 +11,7 @@ import { playCoinSound, initAudio } from "../core/audio.js";
 import { applyUpgrades } from "../physics/bike.js";
 import { showToast } from "../core/toast.js";
 import { showMenu } from "./menu.js";
+import { buyUltra } from "./panels.js";
 
 const shopEl = document.getElementById("shop");
 
@@ -65,7 +66,9 @@ export function openShop() {
 export function closeShop() {
   store.shopOpen = false;
   shopEl.classList.add("hidden");
-  if (store.state === "menu" || store.state === "ended") showMenu();
+  // ★ SYS-8：只在主菜单态回菜单；"结束态开着商店"关闭时**保留结算卡**，
+  //   不再 showMenu 把结算结果轰走（那会让刚跑完的局白结算）。
+  if (store.state === "menu") showMenu();
 }
 
 export function toggleShop() {
@@ -99,7 +102,12 @@ export function renderShop() {
         if (got) {
           ultraEl.textContent = v.ultra.icon + " 特殊模式「" + v.ultra.name + "」已开启 · " + v.ultra.desc + fxLine(v);
         } else if (full4) {
-          ultraEl.textContent = "⭐ 已全部升满！到车库花 " + goldNum(v.ultra.cost) + " 🪙 解锁「" + v.ultra.name + "」" + fxLine(v);
+          // ★ 满级后直接在升级页解锁，不用再切去车库来回找
+          ultraEl.className = "upUltra canBuy";
+          ultraEl.innerHTML =
+            "⭐ 已全部升满！" +
+            `<button class="btn sm" data-buyUltra type="button">${v.ultra.icon} 解锁「${v.ultra.name}」 · ${goldNum(v.ultra.cost)} 🪙</button>` +
+            fxLine(v);
         } else {
           ultraEl.textContent = "🔒 全部升级升到 Lv" + ML + " 后可解锁特殊模式「" + v.ultra.name + "」：" + v.ultra.desc + fxLine(v);
         }
@@ -291,6 +299,14 @@ export function initShop() {
     btnShop.addEventListener("click", () => {
       initAudio();
       if (store.state === "menu") openShop();
+    });
+  }
+  // 特殊模式解锁按钮（#shopUltra 的 innerHTML 每次 renderShop 重建，故用容器级委托）
+  const shopBox = document.getElementById("shop");
+  if (shopBox) {
+    shopBox.addEventListener("click", (e) => {
+      const t = e.target && e.target.closest ? e.target.closest("[data-buyUltra]") : null;
+      if (t) buyUltra(store.currentVehicle, renderShop);
     });
   }
   const closeBtn = document.getElementById("closeShop");
