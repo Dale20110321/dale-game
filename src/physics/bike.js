@@ -174,8 +174,9 @@ export function isUltraStable() {
  *
  * ★ 目前只有形态的 fly 开关（omega）一个来源。车辆自带的 `veh.hover` 这条通路
  *   保留着，但**没有任何车再用它** —— 早期给 6 台宇宙车全挂了 hover，让它们
- *   不开形态也常驻悬停，结果"没开最终形态也会摔车"这条需求整个落空
- *   （实测 6 台 Lv0 不开形态跑 25 秒零摔车）。飞行是形态给的特权，不是车的。
+ *   不开形态也常驻悬停，等于整段成长线被跳过。飞行仍然是形态给的特权，不是车的。
+ *   未解锁形态的宇宙车由 `preUnlockCosmic` 做**姿态稳定**（不飞行、只防翻车），
+ *   两者不要混淆：稳定不等于悬停。
  */
 export function isFlighter() {
   if (ultraFlags().fly === true) return true;
@@ -222,15 +223,17 @@ function pinToGround() {
 /**
  * 驱动扭矩上限相对"真正的翻车临界"的倍数。
  *
- * ★ 这是限翻机制唯一的分派依据（两种机制都读它），所以两处永远不会打架：
- *   excess ≤ 4  → **正常车**（银箭 / 猎户 / 磐石…实测只有 1~2）。
+ * ★ 这是限翻机制的分派依据，所以两套机制不会打架：
+ *   excess ≤ 4  → 现有全部车辆（实测 1.0~2.6，宇宙级满级 2.6）。
  *     物理本来就稳定，只用调速器（减扭矩）就够了。
  *     姿态辅助一律不上 —— 无条件加反而会把轻车推得振荡
  *     （实测夜枭 Lv0 一度被推成 25 秒摔 134 次）。
- *   excess > 4   → **宇宙级车**（弦外满级 621 倍）。
- *     扭矩本来就该是巨大的，减扭矩会让它既翘不起来也跑不动
- *     （两种机制同时上会互相死锁，实测弦外满级达成率 1%、原地不动）。
+ *   excess > 4   → 只有未来把 wheelieK 标到 > 8 的车才会走到这里。
+ *     扭矩本来就该是巨大的，减扭矩会让它既翘不起来也跑不动，
  *     所以这一档**只**用姿态辅助：扭矩一分不减，姿态直接锁平。
+ *
+ * ★ 宇宙级车**不走这条分派**：它们的翻车来自"高速弹飞 + 空中转体"，
+ *   不是后轮扭矩翘头，由 `preUnlockCosmic`（见 airControl）单独处理。
  */
 function wheelieExcessOf(P) {
   const flip = P.rb.mTot * P.gravity * WHEELBASE * 0.5;
@@ -1251,16 +1254,54 @@ function solvePositions(b, susp) {
 // ============================================================
 //  空中姿态：玩家角冲量（角动量守恒，松键保持）
 // ============================================================
+
+/**
+ * 形态尚未解锁的宇宙级车。
+ *
+ * ★ 为什么需要单独识别这 12 台：
+ *   它们的驱动扭矩与抓地比普通车大一个数量级（vehicles.js 的 wheelieK /
+ *   wheelieUp 注释：设定上抓地来自磁悬浮），随便一个坡顶就会把车弹到空中。
+ *   而空中按住油门（→/D）同时又是"转体"输入 —— 用户实测"一点前进就翻车
+ *   摔跟头"，本质是弹起来后一路后仰 180°，落地判摔。
+ *   形态（omega）解锁后由 flightStep 接管、根本不会触地，所以问题只出现在
+ *   "已买到宇宙车、但还没攒够钱解锁形态"这段最容易被劝退的时期。
+ *
+ * ★ 这里只做**姿态稳定**，不改任何动力参数：
+ *   · 空中不响应油门/刹车的转体冲量，并自动把车身拉回脚下地形的切线方向；
+ *   · 帧末把倾角硬钳在 ±72°（摔车判据约 ±99°），台阶/断崖也翻不过去。
+ *   裸车极速、升级收益、里程与金币结算全部逐位不变。
+ */
+function preUnlockCosmic(veh) {
+  return !!(veh && veh.tier === "宇宙" && !activeMode(veh));
+}
+
 function airControl(b, sub) {
   if (b.grounded > 0) { b.angVel = 0; return; }
   const inp = (key.right ? 1 : 0) - (key.left ? 1 : 0);
   const veh = VEHICLES[store.currentVehicle];
   const inv = veh.phys ? veh.phys.inertia : 1;
-  if (inp) {
+  const stable = preUnlockCosmic(veh);
+  if (inp && !stable) {
     // 角冲量：受转动惯量影响（惯量大者转得慢）
     const wMax = (AIR_ROT_MAX * veh.airRot) / inv;
     const a = (AIR_ROT_ACC * veh.airRot) / inv;
     b.angVel = clamp(b.angVel + inp * a * sub, -wMax, wMax);
+  }
+  if (stable) {
+    // 自动配平：目标是"脚下地形的切线"，不是世界水平 ——
+    // 落坡、过坎都能顺着地表落地，不会出现平飞时车头翘起。
+    // ±0.9 rad（约 51°）是地形坡度的安全上限：台阶断崖处的局部分母会
+    // 算出接近 90° 的假坡度，钳一下避免把车往垂直方向拉。
+    const mid = (b.rear.x + b.front.x) / 2;
+    const gl = groundY(mid - 18), gr = groundY(mid + 18);
+    const surf = isFinite(gl) && isFinite(gr)
+      ? clamp(Math.atan2(gr - gl, 36), -0.9, 0.9)
+      : 0;
+    const pitch = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
+    const err = wrapAngle(surf - pitch);
+    const target = clamp(err * 10, -12, 12);
+    // 快速指数收敛：把撞击/弹跳带来的角速度一起压掉，否则"弹起来就翻"
+    b.angVel += (target - b.angVel) * Math.min(1, 30 * sub);
   }
   // 松键后角速度保持（不做人为衰减）
   if (!b.angVel) return;
@@ -1409,6 +1450,20 @@ export function stepPhysics() {
   }
 
   for (const wk of WHEELS) b.wheelAcc[wk] = (b.wheelRot[wk] - prevSpin[wk]) / DT;
+
+  // —— 形态未解锁的宇宙级车：帧末姿态硬限幅 ——
+  // 空中配平（airControl）能挡住"按住油门就后空翻"，但台阶/断崖会把车身
+  // 在一帧内直接拧到接近垂直 —— 接触求解器推不回来，落地就是摔车。
+  // 摔车判据是 |倾角| > tiltMin（约 99°）且头贴近地面，所以这里把倾角钉在
+  // ±72°，物理上不可能越过判据。只做刚体旋转（位置与速度一起转），
+  // 不改变质心平动速度，也不消耗/增加动能。
+  if (!run.crashed && preUnlockCosmic(VEHICLES[store.currentVehicle])) {
+    const angC = Math.atan2(b.front.y - b.rear.y, b.front.x - b.rear.x);
+    const LIM = 1.25; // ≈ 72°
+    if (Math.abs(angC) > LIM) {
+      rotateAroundMid(b, wrapAngle(Math.sign(angC) * LIM - angC));
+    }
+  }
 
   // —— 贴地模式（越野车终极模式）：整车钉在地表，永不翻车 ——
   if (isUltraStable() && !run.crashed) pinToGround();

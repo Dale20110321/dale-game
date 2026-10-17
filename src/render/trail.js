@@ -416,14 +416,26 @@ export function drawTrail() {
   return;
 }
 
+/** 当前车是否已解锁特殊形态（builtin 形态视为天然解锁，与 physics/bike.js 同口径） */
+export function ultraUnlocked(veh) {
+  if (!veh || !veh.ultra || !veh.ultra.mode) return false;
+  return veh.ultra.builtin === true || store.ultra[veh.id] === true;
+}
+
 /**
  * 陨星形态系数 m ∈ [0,1]（同旧拖尾口径：速度强度 → 对数归一 k → 陨星交叉淡入）。
  * 只有当前车挂了 trail（宇宙级车）才可能非 0 —— 普通车永远返回 0，
  * 保证 drawBike 不会误把普通车替换成陨石。
+ *
+ * ★ **未解锁特殊形态时恒返回 0**：陨石本体 + 水滴破空罩是解锁后的专属外观，
+ *   裸车哪怕跑到当前极速也不显示（用户明确要求）。
+ *   注意这与速度无关，也与 physics 的防翻车无关 —— 裸车现在能正常跑，
+ *   但外观仍然是普通自行车，直到买下形态才蜕变为陨石。
  */
 export function meteorFactor() {
   const veh = VEHICLES[store.currentVehicle];
   if (!veh || !veh.trail) return 0;
+  if (!ultraUnlocked(veh)) return 0;
   const [vx, vy] = velOf();
   const spd = Math.hypot(vx, vy);
   return meteorOf(intensity(spd));

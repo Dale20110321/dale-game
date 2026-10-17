@@ -18,7 +18,7 @@ import { token } from "../config/ui-tokens.js";
 import { THEMES } from "../config/themes.js";
 import { VEHICLES } from "../config/vehicles.js";
 import { WHEEL_R } from "../config/constants.js";
-import { drawMeteorCruise, METEOR_SCALE } from "./trail.js";
+import { drawMeteorCruise, METEOR_SCALE, ultraUnlocked } from "./trail.js";
 
 /**
  * 进入巡航层的阈值（屏幕缩放）。
@@ -50,14 +50,17 @@ export function drawCruiseBike() {
   const top = store.phys.topSpeed || 1;
   const spdN = Math.min(1, Math.abs(bike.speed) / Math.max(1, top));
 
-  // 宇宙级车：直接画陨石（从点起步 → 满速大陨石；不会缩成点，没有光圈/横条）。
+  // 宇宙级车：解锁特殊形态后直接画陨石（从点起步 → 满速大陨石；
+  // 不会缩成点，没有光圈/横条）。未解锁时**不显示**陨石与水滴破空罩 ——
+  // 与 render/trail.js 的 meteorFactor 同一条规则。
   const T = veh && veh.trail;
-  if (T) {
+  if (T && ultraUnlocked(veh)) {
     drawMeteorCruise(T, 0.35 + 0.65 * spdN, x, y, (2 + 60 * spdN) * METEOR_SCALE);
     return;
   }
 
-  // 兜底（普通车本不该进巡航层）：一个纯色小方块，不用圆（避免读成"光圈"）。
+  // 兜底（普通车 / 未解锁陨石外观的宇宙车）：一个纯色小方块，
+  // 不用圆（避免读成"光圈"）。
   ctx.save();
   ctx.fillStyle = "#ffffff";
   ctx.globalAlpha = 1;
